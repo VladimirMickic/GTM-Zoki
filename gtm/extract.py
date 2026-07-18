@@ -24,6 +24,8 @@ Only state what the text supports — leave fields empty/null when unsure.
   folded/unfolded when stated (e.g. "13.7 x 9.8 x 3.5 in folded"). Empty if not published.
 - drone_weights: airframe weights only, verbatim with units (e.g. "2.75 lbs (1.25 kg)").
 - NEVER put performance specs (speed, range, max altitude, flight time) in either field.
+- case_evidence: what the drone ships/packs in, verbatim-ish (e.g. "includes hard case",
+  "soft backpack", a named case partner). Empty if the text never mentions it.
 - us_made_ndaa: true only if US-made / NDAA-compliant / Blue UAS is stated; false if
   clearly foreign-made; null if not mentioned."""
 
@@ -38,6 +40,7 @@ class DroneExtraction(BaseModel):
     drone_models: list[str] = []
     drone_dimensions: list[str] = []
     drone_weights: list[str] = []
+    case_evidence: str = ""
     us_made_ndaa: Optional[bool] = None
 
 

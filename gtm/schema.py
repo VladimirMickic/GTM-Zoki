@@ -41,6 +41,7 @@ class Prospect(BaseModel):
     drone_models: list[str] = []
     drone_dimensions: list[str] = []  # L×W×H (folded/unfolded), per model
     drone_weights: list[str] = []
+    case_evidence: str = ""  # what they ship in today (state-only, feeds fit; not a sheet column)
     us_made_ndaa: Optional[bool] = None
     # stage 4 — fit
     fit_score: Optional[int] = None

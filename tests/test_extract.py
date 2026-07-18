@@ -89,3 +89,13 @@ def test_prompt_asks_for_dims_and_weights_separately_excluding_perf_specs():
     # perf specs polluted the old field (altitude/speed/range) — must be excluded
     for banned in ("speed", "range", "altitude"):
         assert banned in SYSTEM_PROMPT.lower()
+
+
+def test_extraction_captures_case_evidence_field():
+    # feedback 2026-07-18: upgrade-gap signal needs evidence, not an 8/15 placeholder
+    from gtm.extract import DroneExtraction, SYSTEM_PROMPT
+
+    assert DroneExtraction().case_evidence == ""
+    low = SYSTEM_PROMPT.lower()
+    assert "case_evidence" in SYSTEM_PROMPT
+    assert "ship" in low  # what do they ship/pack the drone in

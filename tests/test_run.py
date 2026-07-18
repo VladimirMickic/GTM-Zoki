@@ -110,3 +110,50 @@ def test_filter_known_splits_new_from_already_pushed():
     kept, skipped = filter_known(ps, {"tealdrones.com"})
     assert [p.company for p in kept] == ["Skydio"]
     assert [p.company for p in skipped] == ["Teal Drones"]
+
+
+def test_process_company_hunts_missing_specs_and_fills_only_gaps():
+    from gtm.spechunt import SpecFindings
+
+    ex = DroneExtraction(drone_models=["X10"], drone_weights=["4.66 lbs"])  # dims+case missing
+    findings = SpecFindings(
+        drone_dimensions=["X10: 13.7 x 9.8 x 4.6 in folded"],
+        drone_weights=["SHOULD NOT OVERWRITE"],
+        case_evidence="ships with soft backpack",
+    )
+    hunted = []
+
+    def fake_hunt(company, models, **kw):
+        hunted.append((company, models))
+        return findings
+
+    p = process_company(
+        Prospect(company="Skydio", website="https://skydio.com"),
+        scrape_fn=lambda u, preferred="crawl4ai": "md " * 100,
+        extract_fn=lambda md, **kw: ex,
+        hunt_fn=fake_hunt,
+    )
+    assert hunted == [("Skydio", ["X10"])]
+    assert p.drone_dimensions == ["X10: 13.7 x 9.8 x 4.6 in folded"]
+    assert p.drone_weights == ["4.66 lbs"]          # site data wins; hunt fills gaps only
+    assert p.case_evidence == "ships with soft backpack"
+
+
+def test_process_company_skips_hunt_when_site_had_everything():
+    ex = DroneExtraction(
+        drone_models=["Teal 2"],
+        drone_dimensions=["10 x 8 x 3 in folded"],
+        drone_weights=["1.25 kg"],
+        case_evidence="ships in a branded hard case",
+    )
+
+    def explode(company, models, **kw):
+        raise AssertionError("hunt must not run when nothing is missing")
+
+    p = process_company(
+        Prospect(company="Teal Drones", website="https://tealdrones.com"),
+        scrape_fn=lambda u, preferred="crawl4ai": "md " * 100,
+        extract_fn=lambda md, **kw: ex,
+        hunt_fn=explode,
+    )
+    assert p.case_evidence == "ships in a branded hard case"

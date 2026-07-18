@@ -24,6 +24,7 @@ from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
 from gtm.schema import Prospect
 from gtm.scrape import scrape, scrape_deep
+from gtm.spechunt import hunt_specs
 
 DATA = Path("data")
 ERROR_LOG = DATA / "errors.log"
@@ -86,6 +87,7 @@ def process_company(
     *,
     scrape_fn=scrape,
     extract_fn=extract,
+    hunt_fn=hunt_specs,
     error_log: Path = ERROR_LOG,
     costlog: CostLog | None = None,
 ) -> Prospect:
@@ -103,7 +105,19 @@ def process_company(
     p.drone_models = ex.drone_models
     p.drone_dimensions = ex.drone_dimensions
     p.drone_weights = ex.drone_weights
+    p.case_evidence = ex.case_evidence
     p.us_made_ndaa = ex.us_made_ndaa
+    if not p.drone_dimensions or not p.case_evidence:
+        try:
+            found = hunt_fn(p.company, p.drone_models, costlog=costlog)
+            p.drone_dimensions = p.drone_dimensions or found.drone_dimensions
+            p.drone_weights = p.drone_weights or found.drone_weights
+            p.case_evidence = p.case_evidence or found.case_evidence
+            ex.drone_dimensions, ex.drone_weights, ex.case_evidence = (
+                p.drone_dimensions, p.drone_weights, p.case_evidence,
+            )
+        except Exception as e:
+            _log_error(error_log, p.company, "spechunt", e)  # hunt is best-effort, never fatal
     dq = check_disqualifiers(ex)
     if dq:
         p.status = "drop"
@@ -151,6 +165,7 @@ def cmd_start(brief_path: str) -> None:
                 drone_models=p.drone_models,
                 drone_dimensions=p.drone_dimensions,
                 drone_weights=p.drone_weights,
+                case_evidence=p.case_evidence,
                 us_made_ndaa=p.us_made_ndaa,
             )
         print(f"[{p.status or 'scraped'}] {p.company} — models={p.drone_models}")

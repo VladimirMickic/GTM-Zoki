@@ -62,7 +62,13 @@ Score each scraped prospect 0–100. Auto-reject on any disqualifier regardless 
 | Ships in weak/generic case today (upgrade gap) | 15 | Scrape |
 
 Physical-fit scoring must cite published folded dimensions when available; when inferring
-from weight/class alone, cap at 26/30 and say "inferred" in fit_reason.
+from weight/class alone, cap at 26/30 and say "inferred" in fit_reason. Dimensions found by
+the web hunt (specs pages, reviews, Reddit) count as published — cite the source.
+
+Upgrade-gap scoring must cite case_evidence: real evidence scores the full range (a named
+rugged-case partner ≈ 0-3/15 — we'd be displacing an incumbent, say so; a soft bag/generic
+box ≈ 10-15/15). If case_evidence is still unknown after the web hunt, score exactly 3/15
+and write "unknown" — never award midpoint points for missing evidence.
 
 - **70–100** = push to sheet, priority outreach
 - **40–69** = keep, lower priority

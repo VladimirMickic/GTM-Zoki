@@ -71,3 +71,10 @@ def test_fit_prompt_demands_one_line_per_criterion_plain_english():
     assert "one line per" in prompt.lower()
     assert "plain english" in prompt.lower()
     assert "jargon" in prompt.lower()
+
+
+def test_fit_prompt_shows_case_evidence_or_flags_unknown():
+    ex = DroneExtraction(drone_models=["X10"], case_evidence="ships with soft backpack")
+    assert "ships with soft backpack" in build_fit_prompt("ICP", "Skydio", ex)
+    # unknown after hunting must be visible so the ICP's 3/15 rule can bite
+    assert "unknown" in build_fit_prompt("ICP", "Ghost", DroneExtraction()).lower()

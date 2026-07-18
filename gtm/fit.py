@@ -54,6 +54,7 @@ hard disqualifiers exactly as written in the ICP.
 - drone_models: {ex.drone_models}
 - drone_dimensions: {ex.drone_dimensions}
 - drone_weights: {ex.drone_weights}
+- case_evidence (what they ship in today): {ex.case_evidence or "unknown — web hunt found nothing"}
 - us_made_ndaa: {ex.us_made_ndaa}
 
 fit_reason format — one line per ICP scoring signal, newline-separated ("\\n" in the JSON
