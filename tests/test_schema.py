@@ -65,3 +65,10 @@ def test_news_and_signals_render_one_per_line():
     row = p.to_sheet_row()
     assert row[SHEET_COLUMNS.index("key_news")] == "A — a (url1)\nB — b (url2)"
     assert row[SHEET_COLUMNS.index("buying_signals")] == "Signal one — why (src)\nSignal two — why (src)"
+
+
+def test_contact_emails_column_follows_contact_linkedin():
+    i = SHEET_COLUMNS.index("contact_linkedin")
+    assert SHEET_COLUMNS[i + 1] == "contact_emails"
+    p = Prospect(company="X", website="https://x.com", contact_emails="a@x.com (verified); -")
+    assert p.to_sheet_row()[i + 1] == "a@x.com (verified); -"

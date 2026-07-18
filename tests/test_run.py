@@ -157,3 +157,19 @@ def test_process_company_skips_hunt_when_site_had_everything():
         hunt_fn=explode,
     )
     assert p.case_evidence == "ships in a branded hard case"
+
+
+def test_emails_for_prospect_runs_waterfall_per_contact_parallel_order():
+    from gtm.emails import EmailResult
+    from gtm.run import emails_for_prospect
+
+    p = Prospect(
+        company="BRINC", website="https://brincdrones.com/",
+        contact_name="Blake Resnick; Manoj Mohan", status="priority",
+    )
+    results = {
+        "Blake Resnick": EmailResult(email="blake@brincdrones.com", tier="pattern", status="verified", score=98),
+        "Manoj Mohan": EmailResult(),  # total miss
+    }
+    emails_for_prospect(p, waterfall_fn=lambda name, domain: results[name])
+    assert p.contact_emails == "blake@brincdrones.com (verified); -"

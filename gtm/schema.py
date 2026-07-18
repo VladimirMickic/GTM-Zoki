@@ -25,6 +25,7 @@ SHEET_COLUMNS = [
     "contact_name",
     "contact_title",
     "contact_linkedin",
+    "contact_emails",
     "source",
     "date_processed",
     "status",
@@ -51,6 +52,7 @@ class Prospect(BaseModel):
     contact_name: str = ""
     contact_title: str = ""
     contact_linkedin: str = ""
+    contact_emails: str = ""  # "email (status)" per contact, parallel to contact_name; "-" = miss
     buying_signals: list[str] = []
     key_news: list[str] = []
     linkedin: str = ""

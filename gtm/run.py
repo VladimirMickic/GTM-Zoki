@@ -235,6 +235,32 @@ def cmd_output(run: str) -> None:
         print("no credentials/service_account.json — skipped Sheet push (CSV is ready)")
 
 
+def emails_for_prospect(p: Prospect, *, waterfall_fn=None) -> Prospect:
+    from gtm.emails import split_contact_names, waterfall
+
+    fn = waterfall_fn or waterfall
+    domain = _domain(p.website)
+    cells = []
+    for name in split_contact_names(p.contact_name):
+        r = fn(name, domain)
+        cells.append(f"{r.email} ({r.status})" if r.email else "-")
+    p.contact_emails = "; ".join(cells)
+    return p
+
+
+def cmd_emails(run: str) -> None:
+    prospects = load_state(run_dir(run))
+    for p in prospects:
+        if p.status not in ("priority", "keep") or not p.contact_name:
+            continue
+        try:
+            emails_for_prospect(p)
+            print(f"[{p.company}] {p.contact_emails}")
+        except Exception as e:
+            _log_error(ERROR_LOG, p.company, "emails", e)
+    save_state(prospects, run_dir(run))
+
+
 def cmd_learn() -> None:
     if not FEEDBACK.exists():
         print("no feedback yet (data/feedback.jsonl)")
@@ -257,6 +283,8 @@ def main() -> None:
             cmd_fit(run, fit_json)
         case ["enrich", run]:
             cmd_enrich(run)
+        case ["emails", run]:
+            cmd_emails(run)
         case ["signals", run, signals_json]:
             cmd_signals(run, signals_json)
         case ["output", run]:
