@@ -1,0 +1,8 @@
+python-dotenv
+pydantic
+pytest
+requests
+crawl4ai
+openai
+gspread
+google-auth

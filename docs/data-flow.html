@@ -1,0 +1,283 @@
+<style>
+  :root{
+    --bg:#EBEEF1; --surface:#FFFFFF; --surface-2:#F4F6F8;
+    --ink:#1A2129; --muted:#59636F; --faint:#8B96A2; --line:#D6DCE2;
+    --accent:#C85F17; --accent-bright:#DB6A1E; --accent-soft:rgba(200,95,23,.12);
+    --ok:#237E54; --ok-soft:rgba(35,126,84,.12);
+    --stop:#B23A31; --stop-soft:rgba(178,58,49,.12);
+    --mono-bg:#EEF1F4;
+  }
+  @media (prefers-color-scheme:dark){
+    :root{
+      --bg:#0D1015; --surface:#151A21; --surface-2:#1B222B;
+      --ink:#E6ECF2; --muted:#93A0AE; --faint:#66727F; --line:#28313C;
+      --accent:#FF8A3D; --accent-bright:#FF9A55; --accent-soft:rgba(255,138,61,.14);
+      --ok:#3FB681; --ok-soft:rgba(63,182,129,.14);
+      --stop:#E0655B; --stop-soft:rgba(224,101,91,.14);
+      --mono-bg:#10161D;
+    }
+  }
+  :root[data-theme="light"]{
+    --bg:#EBEEF1; --surface:#FFFFFF; --surface-2:#F4F6F8;
+    --ink:#1A2129; --muted:#59636F; --faint:#8B96A2; --line:#D6DCE2;
+    --accent:#C85F17; --accent-bright:#DB6A1E; --accent-soft:rgba(200,95,23,.12);
+    --ok:#237E54; --ok-soft:rgba(35,126,84,.12);
+    --stop:#B23A31; --stop-soft:rgba(178,58,49,.12); --mono-bg:#EEF1F4;
+  }
+  :root[data-theme="dark"]{
+    --bg:#0D1015; --surface:#151A21; --surface-2:#1B222B;
+    --ink:#E6ECF2; --muted:#93A0AE; --faint:#66727F; --line:#28313C;
+    --accent:#FF8A3D; --accent-bright:#FF9A55; --accent-soft:rgba(255,138,61,.14);
+    --ok:#3FB681; --ok-soft:rgba(63,182,129,.14);
+    --stop:#E0655B; --stop-soft:rgba(224,101,91,.14); --mono-bg:#10161D;
+  }
+
+  *{box-sizing:border-box;}
+  .page{
+    --sans:-apple-system,"Helvetica Neue","Segoe UI",system-ui,sans-serif;
+    --mono:ui-monospace,"SF Mono","Cascadia Code",Menlo,Consolas,monospace;
+    background:var(--bg); color:var(--ink); font-family:var(--sans);
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+    padding:clamp(1.4rem,4vw,3.5rem) clamp(1rem,4vw,2rem) 4rem;
+    min-height:100vh;
+  }
+  .wrap{max-width:780px;margin:0 auto;}
+
+  /* header */
+  .eyebrow{
+    font-family:var(--mono); font-size:.72rem; letter-spacing:.18em;
+    text-transform:uppercase; color:var(--accent); margin:0 0 .9rem;
+  }
+  h1{
+    font-size:clamp(2rem,6.5vw,3.15rem); line-height:1.02; letter-spacing:-.02em;
+    font-weight:800; margin:0; text-wrap:balance;
+  }
+  .lede{
+    color:var(--muted); max-width:56ch; margin:1rem 0 0; font-size:1.02rem;
+  }
+  .meta{
+    list-style:none; display:flex; flex-wrap:wrap; gap:.5rem; padding:0;
+    margin:1.4rem 0 0; font-family:var(--mono); font-size:.72rem;
+  }
+  .meta li{
+    border:1px solid var(--line); border-radius:999px; padding:.24rem .6rem;
+    color:var(--muted); background:var(--surface);
+  }
+
+  /* legend */
+  .legend{
+    display:flex; flex-wrap:wrap; align-items:center; gap:.55rem;
+    margin:2.2rem 0 .4rem; padding-bottom:1.4rem;
+    border-bottom:1px solid var(--line); font-family:var(--mono); font-size:.72rem;
+  }
+  .legend-note{color:var(--faint); margin-left:auto; letter-spacing:.02em;}
+
+  .chip{
+    display:inline-flex; align-items:center; gap:.34rem;
+    font-family:var(--mono); font-size:.72rem; line-height:1;
+    padding:.32rem .55rem; border-radius:6px;
+    border:1px solid var(--line); background:var(--surface); color:var(--muted);
+    white-space:nowrap;
+  }
+  .chip--model{color:var(--accent); border-color:var(--accent-soft); background:var(--accent-soft);}
+  .tag{
+    display:inline-flex; align-items:center; gap:.34rem;
+    font-family:var(--mono); font-size:.72rem; padding:.3rem .55rem; border-radius:6px;
+  }
+  .tag--ok{color:var(--ok); background:var(--ok-soft);}
+  .tag--stop{color:var(--stop); background:var(--stop-soft);}
+
+  /* flow */
+  .flow{list-style:none; margin:0; padding:0;}
+  .stage{position:relative; display:grid; grid-template-columns:52px 1fr; padding-bottom:1.15rem;}
+  .rail{position:relative;}
+  .rail::before,.rail::after{
+    content:""; position:absolute; left:50%; transform:translateX(-50%);
+    top:0; bottom:0; width:2px;
+  }
+  .rail::before{background:var(--line);}
+  .rail::after{
+    background:repeating-linear-gradient(to bottom,var(--accent-bright) 0 7px,transparent 7px 20px);
+    background-size:2px 20px; opacity:.9; animation:flow 1s linear infinite;
+  }
+  .stage:first-child .rail::before,.stage:first-child .rail::after{top:19px;}
+  .stage.stage--end .rail::before,.stage.stage--end .rail::after{bottom:calc(100% - 19px);}
+  @keyframes flow{to{background-position-y:20px;}}
+  @media (prefers-reduced-motion:reduce){.rail::after{animation:none;}}
+
+  .node{
+    position:relative; z-index:1; display:flex; align-items:center; justify-content:center;
+    width:38px; height:38px; margin-top:0; border-radius:50%;
+    background:var(--ink); color:var(--surface);
+    font-family:var(--mono); font-size:.8rem; font-weight:700; letter-spacing:.02em;
+    box-shadow:0 0 0 4px var(--bg);
+  }
+  .stage--loop .node{background:var(--surface); color:var(--accent); border:2px dashed var(--accent); box-shadow:0 0 0 4px var(--bg);}
+
+  .card{
+    background:var(--surface); border:1px solid var(--line); border-radius:12px;
+    padding:1.05rem 1.15rem; margin-left:.2rem;
+    box-shadow:0 1px 2px rgba(0,0,0,.03);
+  }
+  .stage--loop .card{background:var(--surface-2); border-style:dashed;}
+  .card-top{display:flex; align-items:baseline; gap:.7rem; flex-wrap:wrap; margin-bottom:.4rem;}
+  .card h2{
+    font-size:1.12rem; font-weight:750; letter-spacing:-.01em; margin:0; line-height:1.2;
+  }
+  .card-top .chip{margin-left:auto;}
+  .card p{margin:0; color:var(--muted); font-size:.93rem;}
+  .card p+p{margin-top:.55rem;}
+
+  .rec{
+    font-family:var(--mono); font-size:.76rem; color:var(--faint);
+    margin-top:.7rem !important; background:var(--mono-bg); border-radius:7px;
+    padding:.5rem .6rem; overflow-wrap:anywhere;
+  }
+  .rec b{color:var(--accent); font-weight:600;}
+  .rec .plus{color:var(--muted);}
+
+  .branch{display:flex; flex-wrap:wrap; gap:.5rem; margin-top:.75rem;}
+
+  .out .card{border-color:var(--accent); box-shadow:0 0 0 1px var(--accent-soft),0 6px 20px -12px var(--accent);}
+  .sheet{
+    margin-top:.7rem; border:1px solid var(--line); border-radius:8px; overflow:hidden;
+    font-family:var(--mono); font-size:.72rem;
+  }
+  .sheet-row{display:flex; gap:.5rem; padding:.4rem .6rem; border-bottom:1px solid var(--line); color:var(--muted); white-space:nowrap;}
+  .sheet-row:last-child{border-bottom:0;}
+  .sheet-row.head{background:var(--surface-2); color:var(--faint); letter-spacing:.03em;}
+  .sheet-scroll{overflow-x:auto;}
+  .sheet-row b{color:var(--ink); font-weight:600;}
+  .sheet-row .ok{color:var(--ok);}
+
+  .foot{
+    margin-top:2.4rem; padding-top:1.3rem; border-top:1px solid var(--line);
+    font-family:var(--mono); font-size:.74rem; color:var(--faint); display:flex; gap:.5rem 1.1rem; flex-wrap:wrap;
+  }
+  .foot b{color:var(--muted); font-weight:600;}
+</style>
+
+<main class="page">
+  <div class="wrap">
+    <header class="head">
+      <p class="eyebrow">AeroVault Cases · GTM Helper</p>
+      <h1>How the data moves</h1>
+      <p class="lede">Raw links in, ranked prospects out — one company at a time, on free-tier tools with Claude at the wheel.</p>
+      <ul class="meta">
+        <li>pipeline v1</li><li>demo</li><li>free-tier</li><li>local files</li><li>Claude-orchestrated</li>
+      </ul>
+    </header>
+
+    <div class="legend">
+      <span class="chip chip--model">◆ AI model</span>
+      <span class="chip">▢ tool / API</span>
+      <span class="tag tag--ok">✓ pass</span>
+      <span class="tag tag--stop">✕ reject</span>
+      <span class="legend-note">the record grows at each step ↓</span>
+    </div>
+
+    <ol class="flow">
+
+      <li class="stage">
+        <div class="rail"><span class="node">01</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Input</h2>
+            <span class="chip">▢ serper</span>
+          </div>
+          <p>Drop a list of URLs, or type a search — <em>“companies that sell drones.”</em> Claude auto-filters the messy results down to real manufacturers; no marketplaces, no listicles, no approval step.</p>
+          <p class="rec"><b>record</b> <span class="plus">=</span> { company, website, source }</p>
+        </div>
+      </li>
+
+      <li class="stage">
+        <div class="rail"><span class="node">02</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Scrape</h2>
+            <span class="chip">▢ crawl4ai</span>
+          </div>
+          <p>Pull the site as clean markdown. If the primary chokes, it falls back automatically: Firecrawl → Scrapling → Apify → ScrapeGraphAI.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> raw_markdown</p>
+        </div>
+      </li>
+
+      <li class="stage">
+        <div class="rail"><span class="node">03</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Extract</h2>
+            <span class="chip chip--model">◆ gpt-4o-mini</span>
+          </div>
+          <p>The cheap workhorse reads the markdown and pulls structured fields — one place, so swapping scrapers never changes the schema.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> drone_models, drone_sizes, description, us_made/NDAA</p>
+        </div>
+      </li>
+
+      <li class="stage">
+        <div class="rail"><span class="node">04</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Fit &amp; gate</h2>
+            <span class="chip chip--model">◆ claude</span>
+          </div>
+          <p>Claude scores the prospect 0–100 against <code>company/ICP.md</code> — does the airframe fit a case line, is it field-deployed, US-made, worth a budget? Hard disqualifiers drop instantly.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> fit_score, fit_reason</p>
+          <div class="branch">
+            <span class="tag tag--ok">✓ score ≥ 40 → continue</span>
+            <span class="tag tag--stop">✕ disqualified → denylist</span>
+          </div>
+        </div>
+      </li>
+
+      <li class="stage">
+        <div class="rail"><span class="node">05</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Contacts &amp; enrich</h2>
+            <span class="chip chip--model">◆ claude</span>
+            <span class="chip">▢ serper · company-research</span>
+          </div>
+          <p><b>Passers only</b> — no credits wasted on rejects. Find the right person (name, title, LinkedIn — no email yet), then pull profile + recent news, plus a LinkedIn and Reddit signal.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> contact_name, contact_title, contact_linkedin, key_news, linkedin, reddit_signal, buying_signals, outreach_angle</p>
+        </div>
+      </li>
+
+      <li class="stage out">
+        <div class="rail"><span class="node">06</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Output</h2>
+            <span class="chip">▢ gspread</span>
+          </div>
+          <p>The finished record lands as one row in your Google Sheet, top prospects first — ready for you to work, and to grade.</p>
+          <div class="sheet-scroll">
+            <div class="sheet">
+              <div class="sheet-row head"><span>company</span><span>fit</span><span>best_case</span><span>contact</span><span>status</span></div>
+              <div class="sheet-row"><span><b>Teal Drones</b></span><span>87</span><span>AV-Field</span><span>VP, Gov Sales</span><span class="ok">▢ you grade</span></div>
+            </div>
+          </div>
+        </div>
+      </li>
+
+      <li class="stage stage--loop stage--end">
+        <div class="rail"><span class="node">↻</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Learn</h2>
+            <span class="chip chip--model">◆ claude</span>
+          </div>
+          <p>Your grades in the <code>status</code> column and the reject bin feed a small feedback file. Claude reads it each run and proposes edits to the ICP and denylist — so <b>run 02 starts smarter than run 01</b>, and loops back to the top.</p>
+          <p class="rec">feedback.jsonl <span class="plus">→</span> <b>ICP.md</b> + <b>denylist</b> <span class="plus">→</span> back to 01</p>
+        </div>
+      </li>
+
+    </ol>
+
+    <div class="foot">
+      <span><b>Demo scope</b> stages 01–06 → Sheet</span>
+      <span><b>Later</b> copy · QA · HubSpot/Bison · verified emails</span>
+      <span><b>Cost</b> gpt-4o-mini + Claude · no new keys</span>
+    </div>
+  </div>
+</main>
