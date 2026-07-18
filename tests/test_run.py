@@ -75,3 +75,38 @@ def test_merge_signals_by_company():
     merge_signals(ps, {"A": {"buying_signals": ["won contract"], "outreach_angle": "case for new drone"}})
     assert ps[0].buying_signals == ["won contract"]
     assert ps[0].outreach_angle == "case for new drone"
+
+
+def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
+    # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row
+    from gtm.run import known_domains, save_state
+
+    save_state(
+        [Prospect(company="Teal Drones", website="https://tealdrones.com/", status="priority")],
+        tmp_path / "teal-demo",
+    )
+    save_state(
+        [
+            Prospect(company="BRINC", website="https://brincdrones.com/", status="priority"),
+            Prospect(company="Advexure", website="https://advexure.com/x", status="drop"),
+            Prospect(company="Red Cat", website="https://redcat.red/", status="error"),
+        ],
+        tmp_path / "discover-3",
+    )
+    known = known_domains(runs_root=tmp_path, exclude_run="discover-3")
+    # drops and errors were never pushed to the sheet — only pushed statuses count
+    assert known == {"tealdrones.com"}
+    # excluding the current run lets a brief be safely re-run
+    assert known_domains(runs_root=tmp_path, exclude_run="teal-demo") == {"brincdrones.com"}
+
+
+def test_filter_known_splits_new_from_already_pushed():
+    from gtm.run import filter_known
+
+    ps = [
+        Prospect(company="Teal Drones", website="https://www.tealdrones.com/"),
+        Prospect(company="Skydio", website="https://skydio.com/"),
+    ]
+    kept, skipped = filter_known(ps, {"tealdrones.com"})
+    assert [p.company for p in kept] == ["Skydio"]
+    assert [p.company for p in skipped] == ["Teal Drones"]

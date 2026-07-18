@@ -32,6 +32,30 @@ FEEDBACK = DATA / "feedback.jsonl"
 ICP = Path("company/ICP.md")
 
 
+def _domain(url: str) -> str:
+    return urlparse(url).netloc.removeprefix("www.")
+
+
+def known_domains(runs_root: str | Path = DATA / "runs", exclude_run: str = "") -> set[str]:
+    """Domains already pushed to the sheet by earlier runs (status priority/keep)."""
+    known = set()
+    for state in Path(runs_root).glob("*/prospects.json"):
+        if state.parent.name == exclude_run:
+            continue
+        for p in load_state(state.parent):
+            if p.status in ("priority", "keep"):
+                known.add(_domain(p.website))
+    return known
+
+
+def filter_known(
+    prospects: list[Prospect], known: set[str]
+) -> tuple[list[Prospect], list[Prospect]]:
+    kept = [p for p in prospects if _domain(p.website) not in known]
+    skipped = [p for p in prospects if _domain(p.website) in known]
+    return kept, skipped
+
+
 def company_from_url(url: str) -> str:
     host = urlparse(url).netloc.removeprefix("www.")
     return host.split(".")[0].capitalize()
@@ -114,6 +138,9 @@ def cmd_start(brief_path: str) -> None:
         for c in discover(brief.query, brief.max_companies, costlog=costlog):
             prospects.append(Prospect(company=c.company, website=c.website, source=f"serper:{brief.query}"))
     prospects = prospects[: brief.max_companies]
+    prospects, skipped = filter_known(prospects, known_domains(exclude_run=brief.run))
+    for p in skipped:
+        print(f"[dup] {p.company} — already pushed by an earlier run, skipping")
 
     ex_by_company: dict[str, DroneExtraction] = {}
     for p in prospects:
