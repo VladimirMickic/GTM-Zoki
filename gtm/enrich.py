@@ -21,7 +21,7 @@ def find_company_linkedin(company: str, *, search=serper_search) -> str:
 
 
 def find_reddit_signal(company: str, *, search=serper_search) -> str:
-    for r in search(f'site:reddit.com "{company}"', num=10):
+    for r in search(f'site:reddit.com "{company}" drone', num=10):
         if r.get("link"):
             return f"{r.get('title', '')} — {r['link']}"
     return ""
@@ -35,7 +35,7 @@ def _news_line(r: dict) -> str:
 
 
 def find_news(company: str, *, search=serper_search) -> list[str]:
-    q = f'"{company}" (contract OR launch OR funding OR award OR NDAA OR "Blue UAS")'
+    q = f'"{company}" drone (contract OR launch OR funding OR award OR NDAA OR "Blue UAS")'
     results = search(q, num=10)
     return [_news_line(r) for r in results[:MAX_NEWS]]
 

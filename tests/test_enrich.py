@@ -88,3 +88,16 @@ def test_signal_prompt_demands_lines_with_source_and_date():
     assert "source" in prompt.lower()
     assert "date" in prompt.lower()
     assert "plain english" in prompt.lower()
+
+
+def test_news_and_reddit_queries_carry_drone_disambiguator():
+    # discover-3 2026-07-18: "Paladin" news returned lenders, awards, r/Fantasy
+    captured = []
+
+    def spy(q, num=10):
+        captured.append(q)
+        return []
+
+    find_news("Paladin", search=spy)
+    find_reddit_signal("Paladin", search=spy)
+    assert all("drone" in q.lower() for q in captured), captured

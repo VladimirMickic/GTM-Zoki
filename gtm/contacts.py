@@ -42,7 +42,8 @@ def serper_search(query: str, num: int = 10) -> list[dict]:
 
 
 def build_contact_query(company: str) -> str:
-    return f'site:linkedin.com/in "{company}"'
+    # bare "drone" disambiguates generic names ("Paladin" alone matches surnames)
+    return f'site:linkedin.com/in "{company}" drone'
 
 
 def parse_linkedin_result(title: str, link: str, company: str = "") -> Contact | None:

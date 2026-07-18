@@ -64,3 +64,73 @@ def test_discover_respects_cap():
 
 def test_discover_empty_serp():
     assert discover("nothing", search=lambda q, num=10: [], client=FakeClient(CandidateList(candidates=[]))) == []
+
+
+def test_filter_prompt_flags_reseller_and_dealer_cues():
+    # discover-1 leak 2026-07-18: Advexure/Drone Nerds/LE Drones (dealers) passed the filter
+    from gtm.discover import FILTER_PROMPT
+
+    low = FILTER_PROMPT.lower()
+    for cue in ("reseller", "dealer", "brands", "shop"):
+        assert cue in low, f"prompt missing reseller cue: {cue}"
+
+
+def test_discover_drops_denylisted_domains():
+    marked_true = CandidateList(
+        candidates=[
+            {"company": "Advexure", "website": "https://advexure.com/pages/x", "is_manufacturer": True},
+            {"company": "Skydio", "website": "https://www.skydio.com/", "is_manufacturer": True},
+        ]
+    )
+    serp = [{"title": "t", "link": "https://x.com", "snippet": "s"}]
+    got = discover(
+        "q", search=lambda q, num=10: serp, client=FakeClient(marked_true),
+        denylist={"advexure.com"},
+    )
+    assert [c.company for c in got] == ["Skydio"]  # denylist beats the LLM's opinion
+
+
+def test_load_denylist_parses_domains_ignoring_prose(tmp_path):
+    from gtm.discover import load_denylist
+
+    f = tmp_path / "denylist.md"
+    f.write_text(
+        "# Denylist\n"
+        "Domains discover() must never emit.\n"
+        "\n"
+        "- advexure.com — reseller (discover-1, 2026-07-18)\n"
+        "- enterprise.dronenerds.com — reseller\n"
+        "- www.ledrones.org — reseller\n"
+    )
+    assert load_denylist(f) == {"advexure.com", "enterprise.dronenerds.com", "ledrones.org"}
+
+
+def test_load_denylist_missing_file_is_empty(tmp_path):
+    from gtm.discover import load_denylist
+
+    assert load_denylist(tmp_path / "nope.md") == set()
+
+
+def test_filter_prompt_requires_company_own_domain_not_articles():
+    # discover-2 leak 2026-07-18: news article about Red Cat passed with the news site's URL
+    from gtm.discover import FILTER_PROMPT
+
+    low = FILTER_PROMPT.lower()
+    assert "own domain" in low
+    assert "about" in low
+
+
+def test_discover_drops_candidates_whose_name_is_absent_from_domain():
+    # discover-3 leak 2026-07-18: "Skydio" passed with a blog listicle URL
+    marked = CandidateList(
+        candidates=[
+            {"company": "Skydio", "website": "https://abjacademy.global/drone-blog/top-us/", "is_manufacturer": True},
+            {"company": "BRINC", "website": "https://brincdrones.com/", "is_manufacturer": True},
+            {"company": "Teal Drones", "website": "https://tealdrones.com/", "is_manufacturer": True},
+            {"company": "Red Cat Holdings", "website": "https://redcat.red/", "is_manufacturer": True},
+        ]
+    )
+    serp = [{"title": "t", "link": "https://x.com", "snippet": "s"}]
+    got = discover("q", search=lambda q, num=10: serp, client=FakeClient(marked), denylist=set())
+    # Skydio's URL is someone else's site; the other three match their own domains
+    assert [c.company for c in got] == ["BRINC", "Teal Drones", "Red Cat Holdings"]

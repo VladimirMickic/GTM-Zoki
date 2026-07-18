@@ -80,3 +80,10 @@ def test_top_contact_fields_handles_fewer_than_three_and_empty():
     one = [Contact(name="Solo Person", title="Founder", linkedin="https://li.com/in/solo")]
     assert top_contact_fields(one) == ("Solo Person", "Founder", "https://li.com/in/solo")
     assert top_contact_fields([]) == ("", "", "")
+
+
+def test_contact_query_disambiguates_generic_company_names():
+    # discover-3 2026-07-18: "Paladin" matched people SURNAMED Paladin
+    q = build_contact_query("Paladin")
+    assert 'site:linkedin.com/in "Paladin"' in q
+    assert "drone" in q.lower()
