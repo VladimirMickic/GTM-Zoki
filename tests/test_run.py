@@ -482,3 +482,117 @@ def test_main_exits_5_and_prints_resume_when_enrich_checkpoints(monkeypatch, cap
     out = capsys.readouterr().out
     assert "signals.json" in out
     assert "python -m gtm.run signals teal-demo signals.json" in out
+
+
+# ---------------------------------------------------------- Task 6.2: GitHub tracking
+
+
+class FakeGithubState:
+    """Records calls in shape matching gtm/github_state.py's real signatures.
+    Injected in place of the gtm.run module's `github_state` import."""
+
+    def __init__(self, issue=42):
+        self.issue = issue
+        self.calls = []
+
+    def open_run_issue(self, run, run_dir, *, stage="input", status="running", error_log=None):
+        self.calls.append(("open_run_issue", run, stage, status))
+        return self.issue
+
+    def set_stage_labels(self, issue, run, stage, status, *, error_log=None):
+        self.calls.append(("set_stage_labels", issue, run, stage, status))
+        return [f"run:{run}", f"stage:{stage}", f"status:{status}"]
+
+    def post_checkpoint_comment(self, issue, file, action, resume, *, error_log=None):
+        self.calls.append(("post_checkpoint_comment", issue, file, action, resume))
+        return True
+
+
+def test_stage_transition_labels_running_then_complete_on_success(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    fake = FakeGithubState()
+    monkeypatch.setattr(run_mod, "github_state", fake)
+
+    prospects = [Prospect(company="A", website="https://a.com")]
+    save_state(prospects, tmp_path)
+
+    signals_json_path = tmp_path / "signals.json"
+    signals_json_path.write_text(json.dumps({"A": {"buying_signals": [], "outreach_angle": "x"}}))
+
+    cmd_signals("teal-demo", str(signals_json_path))
+
+    label_calls = [c for c in fake.calls if c[0] == "set_stage_labels"]
+    statuses = [c[4] for c in label_calls]
+    assert statuses == ["running", "complete"]
+    assert all(c[2] == "teal-demo" and c[3] == "signals" for c in label_calls)
+
+
+def test_checkpoint_pending_sets_checkpoint_label_and_posts_comment_then_reraises(
+    monkeypatch, tmp_path
+):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    fake = FakeGithubState()
+    monkeypatch.setattr(run_mod, "github_state", fake)
+
+    prospects = [
+        Prospect(company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority")
+    ]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_enrich("teal-demo-cp")
+
+    cp = exc_info.value
+    label_calls = [c for c in fake.calls if c[0] == "set_stage_labels"]
+    assert label_calls[-1] == ("set_stage_labels", fake.issue, "teal-demo-cp", "enrich", "checkpoint")
+
+    comment_calls = [c for c in fake.calls if c[0] == "post_checkpoint_comment"]
+    assert len(comment_calls) == 1
+    assert comment_calls[0] == ("post_checkpoint_comment", fake.issue, cp.file, cp.action, cp.resume)
+
+
+def test_stage_exception_sets_failed_label_then_reraises(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    fake = FakeGithubState()
+    monkeypatch.setattr(run_mod, "github_state", fake)
+
+    prospects = [Prospect(company="A", website="https://a.com")]
+    save_state(prospects, tmp_path)
+
+    bad_signals_json = tmp_path / "signals.json"
+    bad_signals_json.write_text("not valid json {{{")
+
+    with pytest.raises(json.JSONDecodeError):
+        cmd_signals("teal-demo-fail", str(bad_signals_json))
+
+    label_calls = [c for c in fake.calls if c[0] == "set_stage_labels"]
+    statuses = [c[4] for c in label_calls]
+    assert statuses == ["running", "failed"]
+
+
+def test_track_stage_rejects_invalid_stage_name(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    fake = FakeGithubState()
+    monkeypatch.setattr(run_mod, "github_state", fake)
+
+    with pytest.raises(ValueError):
+        with run_mod._track_stage("teal-demo", "not-a-real-stage"):
+            pass
+
+    assert fake.calls == []  # rejected before any GitHub call was attempted
+
+
+def test_track_stage_rejects_invalid_status_name():
+    import gtm.run as run_mod
+
+    with pytest.raises(ValueError):
+        run_mod._validate_stage_status("fit", "not-a-real-status")
