@@ -1,12 +1,17 @@
 """S7b — orchestrator: state, per-company log&skip, fit/signal merges."""
+import pytest
+
 from gtm.brief import load_frozen
+from gtm.control import CheckpointPending
 from gtm.extract import DroneExtraction
 from gtm.fit import FitResult
 from gtm.run import (
+    cmd_enrich,
     cmd_output,
     cmd_start,
     company_from_url,
     load_state,
+    main,
     merge_fit,
     merge_signals,
     process_company,
@@ -205,7 +210,8 @@ def test_cmd_start_freezes_brief_immune_to_later_edits(tmp_path, monkeypatch):
         "---\nrun: teal-demo\nurls:\n  - https://tealdrones.com\n---\n"
     )
 
-    cmd_start(str(brief_path))
+    with pytest.raises(CheckpointPending):
+        cmd_start(str(brief_path))
 
     # mid-run edit to brief.md must NOT change what the run considers true
     brief_path.write_text(
@@ -214,6 +220,56 @@ def test_cmd_start_freezes_brief_immune_to_later_edits(tmp_path, monkeypatch):
 
     frozen = load_frozen(run_dir("teal-demo"))
     assert frozen.urls == ["https://tealdrones.com"]
+
+
+def test_cmd_start_raises_checkpoint_pending_when_fit_needed(tmp_path, monkeypatch):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "DATA", tmp_path)
+    monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
+    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+
+    def fake_process_company(p, **kw):
+        p.description = "sUAS maker"
+        p.drone_models = ["Teal 2"]
+        return p
+
+    monkeypatch.setattr(run_mod, "process_company", fake_process_company)
+
+    brief_path = tmp_path / "brief.md"
+    brief_path.write_text(
+        "---\nrun: teal-demo-2\nurls:\n  - https://tealdrones.com\n---\n"
+    )
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_start(str(brief_path))
+
+    cp = exc_info.value
+    assert cp.file == "fit.json"
+    assert cp.action == "score prospects"
+    assert "teal-demo-2" in cp.resume
+    assert "fit.json" in cp.resume
+
+
+def test_cmd_start_no_checkpoint_when_nothing_needs_fit(tmp_path, monkeypatch):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "DATA", tmp_path)
+    monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
+    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+
+    def fake_process_company_errors(p, **kw):
+        p.status = "error"
+        return p
+
+    monkeypatch.setattr(run_mod, "process_company", fake_process_company_errors)
+
+    brief_path = tmp_path / "brief.md"
+    brief_path.write_text(
+        "---\nrun: teal-demo-3\nurls:\n  - https://tealdrones.com\n---\n"
+    )
+
+    cmd_start(str(brief_path))  # must NOT raise — nothing needs fit scoring
 
 
 def _setup_output_run(monkeypatch, tmp_path):
@@ -253,3 +309,84 @@ def test_cmd_output_live_still_pushes_to_sheet(monkeypatch, tmp_path):
 
     assert calls["push"] == 1
     assert (tmp_path / "prospects.csv").exists()
+
+
+def _stub_enrich_deps(monkeypatch):
+    import gtm.contacts as contacts_mod
+    import gtm.enrich as enrich_mod
+
+    monkeypatch.setattr(enrich_mod, "enrich", lambda p, **kw: p)
+    monkeypatch.setattr(contacts_mod, "find_contacts", lambda company, **kw: [])
+
+
+def test_cmd_enrich_raises_checkpoint_pending_when_signals_needed(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority")]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_enrich("teal-demo-4")
+
+    cp = exc_info.value
+    assert cp.file == "signals.json"
+    assert cp.action == "answer signal prompts"
+    assert "teal-demo-4" in cp.resume
+    assert "signals.json" in cp.resume
+
+
+def test_cmd_enrich_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", fit_score=20, status="drop")]
+    save_state(prospects, tmp_path)
+
+    cmd_enrich("teal-demo-5")  # must NOT raise — nothing needs a signal prompt
+
+
+def test_main_exits_5_and_prints_resume_when_start_checkpoints(monkeypatch, capsys):
+    import gtm.run as run_mod
+    from gtm.control import CheckpointPending
+
+    def fake_cmd_start(brief_path):
+        raise CheckpointPending(
+            file="fit.json", action="score prospects",
+            resume="python -m gtm.run fit teal-demo fit.json",
+        )
+
+    monkeypatch.setattr(run_mod, "cmd_start", fake_cmd_start)
+    monkeypatch.setattr("sys.argv", ["gtm.run", "start", "data/runs/teal-demo/brief.md"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 5
+    out = capsys.readouterr().out
+    assert "fit.json" in out
+    assert "python -m gtm.run fit teal-demo fit.json" in out
+
+
+def test_main_exits_5_and_prints_resume_when_enrich_checkpoints(monkeypatch, capsys):
+    import gtm.run as run_mod
+    from gtm.control import CheckpointPending
+
+    def fake_cmd_enrich(run):
+        raise CheckpointPending(
+            file="signals.json", action="answer signal prompts",
+            resume="python -m gtm.run signals teal-demo signals.json",
+        )
+
+    monkeypatch.setattr(run_mod, "cmd_enrich", fake_cmd_enrich)
+    monkeypatch.setattr("sys.argv", ["gtm.run", "enrich", "teal-demo"])
+
+    with pytest.raises(SystemExit) as exc_info:
+        main()
+
+    assert exc_info.value.code == 5
+    out = capsys.readouterr().out
+    assert "signals.json" in out
+    assert "python -m gtm.run signals teal-demo signals.json" in out

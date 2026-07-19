@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from gtm.brief import freeze_brief, load_brief
-from gtm.control import writes_enabled
+from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
@@ -180,6 +180,13 @@ def cmd_start(brief_path: str) -> None:
         print(f"\n----- {company} -----")
         print(build_fit_prompt(icp, company, ex))
 
+    if ex_by_company:
+        raise CheckpointPending(
+            file="fit.json",
+            action="score prospects",
+            resume=f"python -m gtm.run fit {brief.run} fit.json",
+        )
+
 
 def cmd_fit(run: str, fit_json: str) -> None:
     prospects = load_state(run_dir(run))
@@ -207,10 +214,19 @@ def cmd_enrich(run: str) -> None:
             _log_error(ERROR_LOG, p.company, "enrich/contacts", e)
     save_state(prospects, run_dir(run))
     print("\n=== SIGNAL PROMPTS — Claude: answer each, save {company: {...}} to signals.json ===")
+    needs_signals = False
     for p in prospects:
         if p.status in ("priority", "keep"):
+            needs_signals = True
             print(f"\n----- {p.company} -----")
             print(build_signal_prompt(p))
+
+    if needs_signals:
+        raise CheckpointPending(
+            file="signals.json",
+            action="answer signal prompts",
+            resume=f"python -m gtm.run signals {run} signals.json",
+        )
 
 
 def cmd_signals(run: str, signals_json: str) -> None:
@@ -281,34 +297,38 @@ def main() -> None:
 
     load_dotenv()
     args = sys.argv[1:]
-    match args:
-        case ["start", brief_path]:
-            cmd_start(brief_path)
-        case ["fit", run, fit_json]:
-            cmd_fit(run, fit_json)
-        case ["enrich", run]:
-            cmd_enrich(run)
-        case ["emails", run]:
-            cmd_emails(run)
-        case ["signals", run, signals_json]:
-            cmd_signals(run, signals_json)
-        case ["output", run]:
-            cmd_output(run)
-        case ["output", run, "--dry-run"]:
-            cmd_output(run, dry_run=True)
-        case ["learn"]:
-            cmd_learn()
-        case ["smoke", url]:
-            from gtm.smoke import run_smoke
+    try:
+        match args:
+            case ["start", brief_path]:
+                cmd_start(brief_path)
+            case ["fit", run, fit_json]:
+                cmd_fit(run, fit_json)
+            case ["enrich", run]:
+                cmd_enrich(run)
+            case ["emails", run]:
+                cmd_emails(run)
+            case ["signals", run, signals_json]:
+                cmd_signals(run, signals_json)
+            case ["output", run]:
+                cmd_output(run)
+            case ["output", run, "--dry-run"]:
+                cmd_output(run, dry_run=True)
+            case ["learn"]:
+                cmd_learn()
+            case ["smoke", url]:
+                from gtm.smoke import run_smoke
 
-            run_smoke(url)
-        case ["smoke", url, "--live"]:
-            from gtm.smoke import run_smoke
+                run_smoke(url)
+            case ["smoke", url, "--live"]:
+                from gtm.smoke import run_smoke
 
-            run_smoke(url, live=True)
-        case _:
-            print(__doc__)
-            sys.exit(1)
+                run_smoke(url, live=True)
+            case _:
+                print(__doc__)
+                sys.exit(1)
+    except CheckpointPending as cp:
+        print(f"\nCheckpoint: {cp.action} — edit {cp.file} then resume:\n  {cp.resume}")
+        sys.exit(int(ExitCode.CHECKPOINT))
 
 
 if __name__ == "__main__":
