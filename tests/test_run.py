@@ -3,6 +3,7 @@ from gtm.brief import load_frozen
 from gtm.extract import DroneExtraction
 from gtm.fit import FitResult
 from gtm.run import (
+    cmd_output,
     cmd_start,
     company_from_url,
     load_state,
@@ -213,3 +214,42 @@ def test_cmd_start_freezes_brief_immune_to_later_edits(tmp_path, monkeypatch):
 
     frozen = load_frozen(run_dir("teal-demo"))
     assert frozen.urls == ["https://tealdrones.com"]
+
+
+def _setup_output_run(monkeypatch, tmp_path):
+    """Shared fixture: a run dir with one priority prospect, and a fake
+    'credentials exist' service-account file so cmd_output takes the push branch."""
+    import gtm.output as output_mod
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority")]
+    save_state(prospects, tmp_path)
+
+    fake_creds = tmp_path / "service_account.json"
+    fake_creds.write_text("{}")
+    monkeypatch.setattr(output_mod, "SERVICE_ACCOUNT_FILE", str(fake_creds))
+
+    calls = {"push": 0}
+    monkeypatch.setattr(
+        output_mod, "push_to_sheet", lambda *a, **k: calls.__setitem__("push", calls["push"] + 1)
+    )
+    return calls
+
+
+def test_cmd_output_dry_run_skips_sheet_push_but_writes_csv(monkeypatch, tmp_path):
+    calls = _setup_output_run(monkeypatch, tmp_path)
+
+    cmd_output("ignored", dry_run=True)
+
+    assert calls["push"] == 0
+    assert (tmp_path / "prospects.csv").exists()
+
+
+def test_cmd_output_live_still_pushes_to_sheet(monkeypatch, tmp_path):
+    calls = _setup_output_run(monkeypatch, tmp_path)
+
+    cmd_output("ignored")
+
+    assert calls["push"] == 1
+    assert (tmp_path / "prospects.csv").exists()

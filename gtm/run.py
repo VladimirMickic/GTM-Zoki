@@ -20,6 +20,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from gtm.brief import freeze_brief, load_brief
+from gtm.control import writes_enabled
 from gtm.costlog import CostLog
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
@@ -219,7 +220,7 @@ def cmd_signals(run: str, signals_json: str) -> None:
     print("signals merged for", sum(1 for p in prospects if p.outreach_angle), "prospects")
 
 
-def cmd_output(run: str) -> None:
+def cmd_output(run: str, dry_run: bool = False) -> None:
     from gtm.output import SERVICE_ACCOUNT_FILE, push_to_sheet, write_csv
 
     prospects = load_state(run_dir(run))
@@ -230,9 +231,11 @@ def cmd_output(run: str) -> None:
     csv_path = run_dir(run) / "prospects.csv"
     n = write_csv(prospects, csv_path)
     print(f"wrote {n} prospects → {csv_path}")
-    if Path(SERVICE_ACCOUNT_FILE).exists():
+    if Path(SERVICE_ACCOUNT_FILE).exists() and writes_enabled(not dry_run):
         pushed = push_to_sheet(prospects)
         print(f"pushed {pushed} rows to Google Sheet")
+    elif dry_run:
+        print("--dry-run — skipped Sheet push (CSV is ready)")
     else:
         print("no credentials/service_account.json — skipped Sheet push (CSV is ready)")
 
@@ -291,6 +294,8 @@ def main() -> None:
             cmd_signals(run, signals_json)
         case ["output", run]:
             cmd_output(run)
+        case ["output", run, "--dry-run"]:
+            cmd_output(run, dry_run=True)
         case ["learn"]:
             cmd_learn()
         case ["smoke", url]:

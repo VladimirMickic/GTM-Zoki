@@ -6,6 +6,7 @@ from pydantic import BaseModel
 
 from gtm.brief import Brief, freeze_brief
 from gtm.contacts import find_contacts, top_contact_fields
+from gtm.control import writes_enabled
 from gtm.enrich import enrich
 from gtm.extract import DroneExtraction
 from gtm.fit import FitResult, apply_fit, build_fit_prompt
@@ -106,7 +107,7 @@ def run_smoke(url: str, *, live: bool = False, run: str = "smoke") -> Prospect:
     save_state([p], run_dir(run))
     write_csv([p], run_dir(run) / "prospects.csv")
 
-    if live:
+    if writes_enabled(live):
         print(f"[smoke] push to sheet — {p.company}")
         push_to_sheet([p])
 

@@ -10,6 +10,15 @@ class ExitCode(IntEnum):
     STANDARDS = 6
 
 
+def writes_enabled(live: bool) -> bool:
+    """Guard for any external-sink write (Sheet push, future GitHub/HubSpot, ...).
+
+    Every sink call site checks this instead of re-inlining the condition, so
+    Slice 6/7's new sinks share one gate.
+    """
+    return live
+
+
 class CheckpointPending(Exception):
     """Raised when a stage reaches a checkpoint and needs user approval."""
 
