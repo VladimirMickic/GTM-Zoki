@@ -1,6 +1,7 @@
 from gtm.extract import DroneExtraction
 from gtm.fit import FitResult
-from gtm.smoke import auto_fit
+from gtm.schema import Prospect
+from gtm.smoke import auto_fit, auto_signals
 
 class _FakeParse:
     def __init__(self, payload): self._p = payload
@@ -21,3 +22,12 @@ def test_auto_fit_parses_gpt_result():
     client = type("Cl", (), {"chat": type("Ch", (), {"completions": type("Co", (), {"parse": _FakeParse(fake)})()})()})()
     r = auto_fit("ICP", "Teal", DroneExtraction(company_description="d"), client=client)
     assert r.fit_score == 72 and r.best_case_line == "AV-Field"
+
+def test_auto_signals_parses():
+    from gtm.smoke import SignalOut
+    fake = SignalOut(buying_signals=["Launch of new variant — market expansion signal (news, 2026)"], outreach_angle="New drone launch is a perfect time to pitch protective cases.")
+    client = type("Cl", (), {"chat": type("Ch", (), {"completions": type("Co", (), {"parse": _FakeParse(fake)})()})()})()
+    p = Prospect(company="Teal Drones", website="https://tealdrones.com")
+    r = auto_signals(p, client=client)
+    assert r["buying_signals"] == ["Launch of new variant — market expansion signal (news, 2026)"]
+    assert r["outreach_angle"] == "New drone launch is a perfect time to pitch protective cases."
