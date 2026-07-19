@@ -19,7 +19,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-from gtm.brief import load_brief
+from gtm.brief import freeze_brief, load_brief
 from gtm.costlog import CostLog
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
@@ -145,6 +145,7 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
 
 def cmd_start(brief_path: str) -> None:
     brief = load_brief(brief_path)
+    freeze_brief(brief, run_dir(brief.run))
     costlog = CostLog(COSTS)
     prospects = [Prospect(company=company_from_url(u), website=u, source="brief") for u in brief.urls]
     if brief.query:

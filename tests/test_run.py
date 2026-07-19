@@ -1,7 +1,17 @@
 """S7b — orchestrator: state, per-company log&skip, fit/signal merges."""
+from gtm.brief import load_frozen
 from gtm.extract import DroneExtraction
 from gtm.fit import FitResult
-from gtm.run import company_from_url, load_state, merge_fit, merge_signals, process_company, save_state
+from gtm.run import (
+    cmd_start,
+    company_from_url,
+    load_state,
+    merge_fit,
+    merge_signals,
+    process_company,
+    run_dir,
+    save_state,
+)
 from gtm.schema import Prospect
 
 
@@ -173,3 +183,33 @@ def test_emails_for_prospect_runs_waterfall_per_contact_parallel_order():
     }
     emails_for_prospect(p, waterfall_fn=lambda name, domain: results[name])
     assert p.contact_emails == "blake@brincdrones.com (verified); -"
+
+
+def test_cmd_start_freezes_brief_immune_to_later_edits(tmp_path, monkeypatch):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "DATA", tmp_path)
+    monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
+    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+
+    def fake_process_company(p, **kw):
+        p.description = "sUAS maker"
+        p.drone_models = ["Teal 2"]
+        return p
+
+    monkeypatch.setattr(run_mod, "process_company", fake_process_company)
+
+    brief_path = tmp_path / "brief.md"
+    brief_path.write_text(
+        "---\nrun: teal-demo\nurls:\n  - https://tealdrones.com\n---\n"
+    )
+
+    cmd_start(str(brief_path))
+
+    # mid-run edit to brief.md must NOT change what the run considers true
+    brief_path.write_text(
+        "---\nrun: teal-demo\nurls:\n  - https://evil.example.com\n---\n"
+    )
+
+    frozen = load_frozen(run_dir("teal-demo"))
+    assert frozen.urls == ["https://tealdrones.com"]

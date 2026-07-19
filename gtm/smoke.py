@@ -4,6 +4,7 @@ Standalone judgment for fit scoring. Mirrors the extract() pattern.
 """
 from pydantic import BaseModel
 
+from gtm.brief import Brief, freeze_brief
 from gtm.contacts import find_contacts, top_contact_fields
 from gtm.enrich import enrich
 from gtm.extract import DroneExtraction
@@ -64,6 +65,7 @@ def auto_signals(p: Prospect, *, client=None) -> dict:
 
 def run_smoke(url: str, *, live: bool = False, run: str = "smoke") -> Prospect:
     """One company, end-to-end, unattended. Sink (Sheet push) gated on --live."""
+    freeze_brief(Brief(run=run, urls=[url]), run_dir(run))
     p = Prospect(company=company_from_url(url), website=url, source="smoke")
 
     print(f"[smoke] scrape+extract — {p.company}")

@@ -65,3 +65,22 @@ def test_run_smoke_skips_sink_when_not_live(monkeypatch, tmp_path):
     monkeypatch.setattr("gtm.smoke.run_dir", lambda run: tmp_path)
     p = run_smoke("https://tealdrones.com", live=False)
     assert p.status == "priority" and calls["push"] == 0  # sink NOT called
+
+
+def test_run_smoke_freezes_a_brief_lock(monkeypatch, tmp_path):
+    from gtm.brief import load_frozen
+
+    monkeypatch.setattr("gtm.smoke.push_to_sheet", lambda *a, **k: None)
+    monkeypatch.setattr("gtm.smoke.process_company", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.enrich", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.find_contacts", lambda c: [])
+    monkeypatch.setattr("gtm.smoke.emails_for_prospect", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.auto_fit", lambda *a, **k: __import__("gtm.fit", fromlist=["FitResult"]).FitResult(fit_score=80, fit_reason="r", best_case_line="AV-Field"))
+    monkeypatch.setattr("gtm.smoke.auto_signals", lambda p, **k: {"buying_signals": [], "outreach_angle": "a"})
+    monkeypatch.setattr("gtm.smoke.run_dir", lambda run: tmp_path)
+
+    run_smoke("https://tealdrones.com", live=False, run="smoke-test")
+
+    frozen = load_frozen(tmp_path)
+    assert frozen.urls == ["https://tealdrones.com"]
+    assert frozen.run == "smoke-test"
