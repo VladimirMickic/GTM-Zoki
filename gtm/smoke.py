@@ -65,7 +65,11 @@ def auto_signals(p: Prospect, *, client=None) -> dict:
 
 def run_smoke(url: str, *, live: bool = False, run: str = "smoke") -> Prospect:
     """One company, end-to-end, unattended. Sink (Sheet push) gated on --live."""
-    freeze_brief(Brief(run=run, urls=[url]), run_dir(run))
+    rdir = run_dir(run)
+    lock_path = rdir / "brief.lock.json"
+    if lock_path.exists():
+        lock_path.unlink()
+    freeze_brief(Brief(run=run, urls=[url]), rdir)
     p = Prospect(company=company_from_url(url), website=url, source="smoke")
 
     print(f"[smoke] scrape+extract — {p.company}")

@@ -32,6 +32,7 @@ def test_auto_signals_parses():
     assert r["buying_signals"] == ["Launch of new variant — market expansion signal (news, 2026)"]
     assert r["outreach_angle"] == "New drone launch is a perfect time to pitch protective cases."
 
+from gtm.run import company_from_url
 from gtm.smoke import run_smoke
 
 def test_cli_smoke_dispatches_to_run_smoke(monkeypatch):
@@ -70,7 +71,6 @@ def test_run_smoke_skips_sink_when_not_live(monkeypatch, tmp_path):
 def test_run_smoke_freezes_a_brief_lock(monkeypatch, tmp_path):
     from gtm.brief import load_frozen
 
-    monkeypatch.setattr("gtm.smoke.push_to_sheet", lambda *a, **k: None)
     monkeypatch.setattr("gtm.smoke.process_company", lambda p, **k: p)
     monkeypatch.setattr("gtm.smoke.enrich", lambda p, **k: p)
     monkeypatch.setattr("gtm.smoke.find_contacts", lambda c: [])
@@ -84,3 +84,28 @@ def test_run_smoke_freezes_a_brief_lock(monkeypatch, tmp_path):
     frozen = load_frozen(tmp_path)
     assert frozen.urls == ["https://tealdrones.com"]
     assert frozen.run == "smoke-test"
+
+
+def test_run_smoke_reruns_same_run_name_with_different_url(monkeypatch, tmp_path):
+    """Regression: smoke's run dir is a shared scratch slot reused across ad-hoc
+    invocations (like prospects.json already is), not a persistent run to
+    tamper-protect. A second smoke call against the same run name but a
+    different URL must overwrite the lock, not raise ValueError."""
+    monkeypatch.setattr("gtm.smoke.push_to_sheet", lambda *a, **k: None)
+    monkeypatch.setattr("gtm.smoke.process_company", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.enrich", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.find_contacts", lambda c: [])
+    monkeypatch.setattr("gtm.smoke.emails_for_prospect", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.auto_fit", lambda *a, **k: __import__("gtm.fit", fromlist=["FitResult"]).FitResult(fit_score=80, fit_reason="r", best_case_line="AV-Field"))
+    monkeypatch.setattr("gtm.smoke.auto_signals", lambda p, **k: {"buying_signals": [], "outreach_angle": "a"})
+    monkeypatch.setattr("gtm.smoke.run_dir", lambda run: tmp_path)
+
+    run_smoke("https://tealdrones.com", live=False, run="smoke")
+    # Must not raise even though the URL (and therefore the frozen brief
+    # content) differs from the first call's lock.
+    p2 = run_smoke("https://otherdrones.com", live=False, run="smoke")
+
+    from gtm.brief import load_frozen
+    frozen = load_frozen(tmp_path)
+    assert frozen.urls == ["https://otherdrones.com"]
+    assert p2.company == company_from_url("https://otherdrones.com")
