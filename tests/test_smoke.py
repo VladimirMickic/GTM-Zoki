@@ -31,3 +31,19 @@ def test_auto_signals_parses():
     r = auto_signals(p, client=client)
     assert r["buying_signals"] == ["Launch of new variant — market expansion signal (news, 2026)"]
     assert r["outreach_angle"] == "New drone launch is a perfect time to pitch protective cases."
+
+from gtm.smoke import run_smoke
+
+def test_run_smoke_skips_sink_when_not_live(monkeypatch, tmp_path):
+    calls = {"push": 0}
+    monkeypatch.setattr("gtm.smoke.push_to_sheet", lambda *a, **k: calls.__setitem__("push", calls["push"] + 1))
+    # stub every live stage with a fast fake
+    monkeypatch.setattr("gtm.smoke.process_company", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.enrich", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.find_contacts", lambda c: [])
+    monkeypatch.setattr("gtm.smoke.emails_for_prospect", lambda p, **k: p)
+    monkeypatch.setattr("gtm.smoke.auto_fit", lambda *a, **k: __import__("gtm.fit", fromlist=["FitResult"]).FitResult(fit_score=80, fit_reason="r", best_case_line="AV-Field"))
+    monkeypatch.setattr("gtm.smoke.auto_signals", lambda p, **k: {"buying_signals": [], "outreach_angle": "a"})
+    monkeypatch.setattr("gtm.smoke.run_dir", lambda run: tmp_path)
+    p = run_smoke("https://tealdrones.com", live=False)
+    assert p.status == "priority" and calls["push"] == 0  # sink NOT called

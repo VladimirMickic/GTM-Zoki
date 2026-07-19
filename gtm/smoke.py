@@ -4,8 +4,12 @@ Standalone judgment for fit scoring. Mirrors the extract() pattern.
 """
 from pydantic import BaseModel
 
+from gtm.contacts import find_contacts, top_contact_fields
+from gtm.enrich import enrich
 from gtm.extract import DroneExtraction
-from gtm.fit import FitResult, build_fit_prompt
+from gtm.fit import FitResult, apply_fit, build_fit_prompt
+from gtm.output import push_to_sheet, write_csv
+from gtm.run import ICP, company_from_url, emails_for_prospect, process_company, run_dir, save_state
 from gtm.schema import Prospect
 
 MODEL = "gpt-4o-mini"
@@ -56,3 +60,48 @@ def auto_signals(p: Prospect, *, client=None) -> dict:
     if msg.parsed is None:
         raise RuntimeError(f"no parsed result (refusal={msg.refusal!r}, finish={completion.choices[0].finish_reason})")
     return msg.parsed.model_dump()
+
+
+def run_smoke(url: str, *, live: bool = False, run: str = "smoke") -> Prospect:
+    """One company, end-to-end, unattended. Sink (Sheet push) gated on --live."""
+    p = Prospect(company=company_from_url(url), website=url, source="smoke")
+
+    print(f"[smoke] scrape+extract — {p.company}")
+    p = process_company(p)
+
+    if p.status not in ("drop", "error"):
+        print(f"[smoke] fit — {p.company}")
+        ex = DroneExtraction(
+            company_description=p.description,
+            drone_models=p.drone_models,
+            drone_dimensions=p.drone_dimensions,
+            drone_weights=p.drone_weights,
+            case_evidence=p.case_evidence,
+            us_made_ndaa=p.us_made_ndaa,
+        )
+        apply_fit(p, auto_fit(ICP.read_text(), p.company, ex))
+
+    if p.status in ("priority", "keep"):
+        print(f"[smoke] enrich — {p.company}")
+        enrich(p)
+        contacts = find_contacts(p.company)
+        if contacts:
+            p.contact_name, p.contact_title, p.contact_linkedin = top_contact_fields(contacts)
+
+        print(f"[smoke] emails — {p.company}")
+        emails_for_prospect(p)
+
+        print(f"[smoke] signals — {p.company}")
+        s = auto_signals(p)
+        p.buying_signals = s["buying_signals"]
+        p.outreach_angle = s["outreach_angle"]
+
+    print(f"[smoke] save — {p.company}")
+    save_state([p], run_dir(run))
+    write_csv([p], run_dir(run) / "prospects.csv")
+
+    if live:
+        print(f"[smoke] push to sheet — {p.company}")
+        push_to_sheet([p])
+
+    return p
