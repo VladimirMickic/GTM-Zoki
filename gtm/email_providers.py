@@ -147,3 +147,52 @@ class AbstractProvider:
     def find(self, first: str, last: str, domain: str) -> dict | None:
         # Abstract Email Validation has no email-finder capability — verify-only vendor.
         return None
+
+
+PROSPEO_ENRICH_URL = "https://api.prospeo.io/enrich-person"
+
+# HTTP 400/429 both carry a JSON {"error": true, "error_code": ...} body per the doc's
+# Errors section (NO_MATCH, INVALID_DATAPOINTS, INSUFFICIENT_CREDITS, INVALID_API_KEY,
+# INVALID_REQUEST, INTERNAL_ERROR, and 429 = rate limit) — all are misses, never raise.
+_PROSPEO_MISS_STATUS_CODES = {400, 429}
+
+
+class ProspeoProvider:
+    """Prospeo /enrich-person (docs/tools/prospeo.md). Find-only — no verify endpoint used."""
+
+    name = "prospeo"
+
+    def verify(self, email: str) -> dict | None:
+        # Prospeo is a finder, not a verifier — no /email-verifier-style endpoint is
+        # used here. Always defer to the next provider in the waterfall.
+        return None
+
+    def find(self, first: str, last: str, domain: str) -> dict | None:
+        api_key = os.environ.get("PROSPEO_API_KEY")
+        if not api_key:  # no key configured — can't answer, let the next provider try
+            return None
+        resp = requests.post(
+            PROSPEO_ENRICH_URL,
+            json={
+                "only_verified_email": True,
+                "data": {
+                    "first_name": first,
+                    "last_name": last,
+                    "company_website": domain,
+                },
+            },
+            headers={"X-KEY": api_key, "Content-Type": "application/json"},
+            timeout=20,
+        )
+        if resp.status_code in _PROSPEO_MISS_STATUS_CODES:
+            return None
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("error"):
+            return None
+        email = ((data.get("person") or {}).get("email") or {})
+        address = email.get("email")
+        if not address:  # null/absent = miss, fall through the waterfall
+            return None
+        score = 100 if email.get("status") == "VERIFIED" else 0
+        return {"email": address, "score": score}

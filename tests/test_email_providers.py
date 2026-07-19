@@ -1,4 +1,9 @@
-from gtm.email_providers import AbstractProvider, HunterProvider, MyEmailVerifierProvider
+from gtm.email_providers import (
+    AbstractProvider,
+    HunterProvider,
+    MyEmailVerifierProvider,
+    ProspeoProvider,
+)
 
 def test_hunter_verify_normalizes(monkeypatch):
     class R:
@@ -68,3 +73,46 @@ def test_abstract_verify_none_on_quota(monkeypatch):
     monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
     monkeypatch.setenv("ABSTRACT_API_KEY", "x")
     assert AbstractProvider().verify("a@b.com") is None
+
+def test_prospeo_find_normalizes(monkeypatch):
+    class R:
+        status_code = 200
+        def raise_for_status(self): pass
+        def json(self):
+            return {
+                "error": False,
+                "free_enrichment": False,
+                "person": {
+                    "email": {
+                        "status": "VERIFIED",
+                        "revealed": True,
+                        "email": "j@x.com",
+                        "verification_method": "smtp",
+                    }
+                },
+            }
+    monkeypatch.setattr("gtm.email_providers.requests.post", lambda *a, **k: R())
+    monkeypatch.setenv("PROSPEO_API_KEY", "x")
+    assert ProspeoProvider().find("Jane", "Doe", "x.com") == {"email": "j@x.com", "score": 100}
+
+def test_prospeo_find_none_on_miss(monkeypatch):
+    class R:
+        status_code = 400
+        def raise_for_status(self): raise AssertionError("should not raise")
+        def json(self): return {"error": True, "error_code": "NO_MATCH"}
+    monkeypatch.setattr("gtm.email_providers.requests.post", lambda *a, **k: R())
+    monkeypatch.setenv("PROSPEO_API_KEY", "x")
+    assert ProspeoProvider().find("Jane", "Doe", "x.com") is None
+
+def test_prospeo_find_none_on_quota(monkeypatch):
+    class R:
+        status_code = 429
+        def raise_for_status(self): raise AssertionError("should not raise")
+        def json(self): return {"error": True, "error_code": "INSUFFICIENT_CREDITS"}
+    monkeypatch.setattr("gtm.email_providers.requests.post", lambda *a, **k: R())
+    monkeypatch.setenv("PROSPEO_API_KEY", "x")
+    assert ProspeoProvider().find("Jane", "Doe", "x.com") is None
+
+def test_prospeo_verify_always_none(monkeypatch):
+    monkeypatch.setenv("PROSPEO_API_KEY", "x")
+    assert ProspeoProvider().verify("a@b.com") is None
