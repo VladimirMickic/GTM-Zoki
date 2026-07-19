@@ -1,4 +1,6 @@
 """S7b — orchestrator: state, per-company log&skip, fit/signal merges."""
+import json
+
 import pytest
 
 from gtm.brief import load_frozen
@@ -7,7 +9,9 @@ from gtm.extract import DroneExtraction
 from gtm.fit import FitResult
 from gtm.run import (
     cmd_enrich,
+    cmd_fit,
     cmd_output,
+    cmd_signals,
     cmd_start,
     company_from_url,
     load_state,
@@ -346,6 +350,94 @@ def test_cmd_enrich_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_path
     save_state(prospects, tmp_path)
 
     cmd_enrich("teal-demo-5")  # must NOT raise — nothing needs a signal prompt
+
+
+def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
+    """The second half of the checkpoint contract: feeding fit.json to cmd_fit
+    (literally what the printed resume command invokes) must complete without
+    raising, and the merged FitResult must land in state via the existing
+    apply_fit path (status derived from fit_score threshold)."""
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "DATA", tmp_path)
+    monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
+    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+
+    def fake_process_company(p, **kw):
+        p.description = "sUAS maker"
+        p.drone_models = ["Teal 2"]
+        return p
+
+    monkeypatch.setattr(run_mod, "process_company", fake_process_company)
+
+    brief_path = tmp_path / "brief.md"
+    brief_path.write_text(
+        "---\nrun: teal-demo-6\nurls:\n  - https://tealdrones.com\n---\n"
+    )
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_start(str(brief_path))
+
+    cp = exc_info.value
+    assert "teal-demo-6" in cp.resume
+    assert cp.file == "fit.json"
+
+    fit_json_path = tmp_path / "fit.json"
+    fit_json_path.write_text(json.dumps({
+        "Tealdrones": {
+            "fit_score": 85,
+            "fit_reason": "strong match",
+            "best_case_line": "AV-Field",
+            "disqualified": False,
+        }
+    }))
+
+    cmd_fit("teal-demo-6", str(fit_json_path))  # exactly what the resume command runs
+
+    prospects = load_state(run_dir("teal-demo-6"))
+    assert len(prospects) == 1
+    p = prospects[0]
+    assert p.fit_score == 85
+    assert p.best_case_line == "AV-Field"
+    assert p.status == "priority"  # apply_fit: score >= 70 -> priority
+
+
+def test_cmd_enrich_then_cmd_signals_resumes_cleanly(monkeypatch, tmp_path):
+    """The second half of the checkpoint contract for the signals checkpoint:
+    feeding signals.json to cmd_signals must complete without raising, and the
+    merged buying_signals/outreach_angle must land in state."""
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority")]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_enrich("teal-demo-7")
+
+    cp = exc_info.value
+    assert "teal-demo-7" in cp.resume
+    assert cp.file == "signals.json"
+
+    signals_json_path = tmp_path / "signals.json"
+    signals_json_path.write_text(json.dumps({
+        "Teal Drones": {
+            "buying_signals": ["won new DoD contract"],
+            "outreach_angle": "custom foam for the new fleet",
+        }
+    }))
+
+    cmd_signals("teal-demo-7", str(signals_json_path))  # exactly what the resume command runs
+
+    # run_dir is monkeypatched on the gtm.run module attribute (a lambda ignoring
+    # the run name), so cmd_signals wrote to tmp_path directly; load from there
+    # rather than through this file's own (unpatched) imported `run_dir` name.
+    prospects_after = load_state(tmp_path)
+    assert len(prospects_after) == 1
+    p = prospects_after[0]
+    assert p.buying_signals == ["won new DoD contract"]
+    assert p.outreach_angle == "custom foam for the new fleet"
 
 
 def test_main_exits_5_and_prints_resume_when_start_checkpoints(monkeypatch, capsys):
