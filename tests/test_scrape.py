@@ -52,10 +52,10 @@ def test_preferred_can_be_any_scraper_in_chain():
     calls = []
     registry = {
         "crawl4ai": lambda u: calls.append("crawl4ai") or good(u),
-        "scrapling": lambda u: calls.append("scrapling") or good(u),
+        "firecrawl": lambda u: calls.append("firecrawl") or good(u),
     }
-    scrape("https://tealdrones.com", preferred="scrapling", registry=registry)
-    assert calls == ["scrapling"]
+    scrape("https://tealdrones.com", preferred="firecrawl", registry=registry)
+    assert calls == ["firecrawl"]
 
 
 def test_pick_product_links_prefers_keyword_paths():
@@ -117,8 +117,42 @@ def test_scrape_deep_falls_back_to_plain_scrape_on_fetch_failure():
 def test_default_registry_has_full_fallback_chain():
     from gtm.scrape import FALLBACK_ORDER, SCRAPERS
 
-    assert FALLBACK_ORDER == ["crawl4ai", "firecrawl", "scrapling", "apify", "scrapegraphai"]
+    assert FALLBACK_ORDER == ["crawl4ai", "firecrawl", "scrapegraphai", "apify"]
     assert set(FALLBACK_ORDER) <= set(SCRAPERS)
+
+
+def test_social_host_routes_to_apify_first():
+    calls = []
+    registry = {
+        "apify": lambda u: calls.append("apify") or good(u),
+        "crawl4ai": lambda u: calls.append("crawl4ai") or good(u),
+    }
+    md = scrape("https://www.linkedin.com/company/teal", registry=registry)
+    assert md.startswith("# Teal Drones")
+    assert calls == ["apify"]
+    assert "crawl4ai" not in calls
+
+
+def test_non_social_host_does_not_route_to_apify():
+    calls = []
+    registry = {
+        "crawl4ai": lambda u: calls.append("crawl4ai") or good(u),
+        "apify": lambda u: calls.append("apify") or good(u),
+    }
+    md = scrape("https://tealdrones.com", registry=registry)
+    assert md.startswith("# Teal Drones")
+    assert calls == ["crawl4ai"]
+
+
+def test_social_host_subdomain_routes_to_apify():
+    calls = []
+    registry = {
+        "apify": lambda u: calls.append("apify") or good(u),
+        "crawl4ai": lambda u: calls.append("crawl4ai") or good(u),
+    }
+    md = scrape("https://m.facebook.com/tealdrones", registry=registry)
+    assert md.startswith("# Teal Drones")
+    assert calls == ["apify"]
 
 
 class _FakeResponse:

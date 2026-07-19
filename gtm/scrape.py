@@ -20,7 +20,14 @@ log = logging.getLogger(__name__)
 
 MIN_MARKDOWN_CHARS = 200  # anything shorter is a block page / error page, not content
 
-FALLBACK_ORDER = ["crawl4ai", "firecrawl", "scrapling", "apify", "scrapegraphai"]
+FALLBACK_ORDER = ["crawl4ai", "firecrawl", "scrapegraphai", "apify"]
+
+SOCIAL_HOSTS = {"linkedin.com", "twitter.com", "x.com", "instagram.com", "facebook.com"}
+
+
+def _is_social_host(url: str) -> bool:
+    host = urlparse(url).netloc.removeprefix("www.")
+    return any(host == h or host.endswith("." + h) for h in SOCIAL_HOSTS)
 
 
 class ScrapeError(Exception):
@@ -290,15 +297,21 @@ def _not_configured(name: str):
 SCRAPERS = {
     "crawl4ai": scrape_crawl4ai,
     "firecrawl": scrape_firecrawl,
-    "scrapling": _not_configured("scrapling"),
     "apify": scrape_apify,
     "scrapegraphai": scrape_scrapegraphai,
 }
 
 
 def scrape(url: str, preferred: str = "crawl4ai", registry: dict | None = None) -> str:
-    """Try `preferred` first, then the rest of FALLBACK_ORDER. Log & skip failures."""
+    """Try `preferred` first, then the rest of FALLBACK_ORDER. Log & skip failures.
+
+    Social hosts (LinkedIn, Twitter/X, Instagram, Facebook) always route to Apify
+    first — the only scraper of the four that can render/authenticate those sites.
+    This override applies regardless of `preferred` or a custom `registry`.
+    """
     registry = registry if registry is not None else SCRAPERS
+    if _is_social_host(url):
+        preferred = "apify"
     chain = [preferred] + [n for n in FALLBACK_ORDER if n != preferred]
     errors = []
     for name in chain:
