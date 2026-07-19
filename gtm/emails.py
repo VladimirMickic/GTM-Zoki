@@ -11,7 +11,12 @@ import re
 from pydantic import BaseModel
 
 from gtm.contacts import serper_search
-from gtm.email_providers import HunterProvider
+from gtm.email_providers import (
+    AbstractProvider,
+    HunterProvider,
+    MyEmailVerifierProvider,
+    ProspeoProvider,
+)
 
 MAX_PATTERNS = 3
 
@@ -71,6 +76,35 @@ def hunter_find(first: str, last: str, domain: str) -> dict:
     return _hunter.find(first, last, domain) or {}
 
 
+def default_providers() -> list:
+    """Ordered provider chain (Task 2.4). Each adapter answers verify/find for itself
+    or returns None ("can't answer / not my capability / quota hit") so the chain
+    naturally skips it: a verify walk yields MEV -> Abstract -> Hunter (Prospeo is
+    find-only and always defers); a find walk yields Prospeo -> Hunter (MEV/Abstract
+    are verify-only and always defer). One ordered list handles both directions."""
+    return [MyEmailVerifierProvider(), AbstractProvider(), ProspeoProvider(), HunterProvider()]
+
+
+def _verify_chain(providers: list, email: str) -> dict:
+    for p in providers:
+        result = p.verify(email)
+        if result is not None:
+            return result
+    return {}
+
+
+def _find_chain(providers: list, first: str, last: str, domain: str) -> dict:
+    # Provider adapters expect lowercase name parts (matches candidate_patterns'
+    # _clean()); only the default provider-chain path normalizes case — a caller-
+    # supplied finder= override still receives the raw first/last from waterfall().
+    first, last = first.lower(), last.lower()
+    for p in providers:
+        result = p.find(first, last, domain)
+        if result is not None:
+            return result
+    return {}
+
+
 def _ai_hunt(name: str, domain: str, search) -> str:
     """Tier 3: scan public serp snippets for an address at the prospect's domain."""
     results = search(f'"{name}" "{domain}" email OR contact', num=10)
@@ -86,10 +120,16 @@ def waterfall(
     name: str,
     domain: str,
     *,
-    verifier=hunter_verify,
-    finder=hunter_find,
+    providers=None,
+    verifier=None,
+    finder=None,
     search=serper_search,
 ) -> EmailResult:
+    providers = providers if providers is not None else default_providers()
+    verifier = verifier if verifier is not None else lambda email: _verify_chain(providers, email)
+    finder = (
+        finder if finder is not None else lambda f, l, d: _find_chain(providers, f, l, d)
+    )
     parts = name.split()
     first, last = parts[0], parts[-1] if len(parts) > 1 else ""
 

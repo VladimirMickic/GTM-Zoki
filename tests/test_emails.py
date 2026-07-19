@@ -95,3 +95,24 @@ def test_split_contact_names_parallel_join_roundtrip():
         "Blake Resnick", "Manoj Mohan", "Steven Butler",
     ]
     assert split_contact_names("") == []
+
+
+class FakeProvider:
+    def __init__(self, name, verify_map=None, find_map=None):
+        self.name = name; self._v = verify_map or {}; self._f = find_map or {}
+    def verify(self, email): return self._v.get(email)
+    def find(self, first, last, domain): return self._f.get((first, last, domain))
+
+def test_waterfall_second_verifier_when_first_quota():
+    p1 = FakeProvider("mev")  # returns None => quota/skip
+    p2 = FakeProvider("hunter", verify_map={"jane.doe@x.com": {"status": "valid", "score": 90}})
+    r = waterfall("Jane Doe", "x.com", providers=[p1, p2])
+    assert r.email == "jane.doe@x.com" and r.tier == "pattern" and r.status == "verified"
+
+def test_waterfall_find_chain_when_patterns_miss():
+    p1 = FakeProvider("mev")
+    p2 = FakeProvider("hunter",
+                      find_map={("jane", "doe", "x.com"): {"email": "j.d@x.com", "score": 80}},
+                      verify_map={"j.d@x.com": {"status": "valid", "score": 80}})
+    r = waterfall("Jane Doe", "x.com", providers=[p1, p2])
+    assert r.email == "j.d@x.com" and r.tier == "hunter"
