@@ -1,7 +1,10 @@
 """S1 — scraper orchestration: preferred-first, auto-fallback, markdown quality gate."""
+import json
+import subprocess
+
 import pytest
 
-from gtm.scrape import ScrapeError, scrape, scrape_firecrawl, scrape_scrapegraphai
+from gtm.scrape import ScrapeError, scrape, scrape_apify, scrape_firecrawl, scrape_scrapegraphai
 
 
 def good(url):
@@ -227,3 +230,68 @@ def test_scrape_scrapegraphai_raises_on_failed_response(monkeypatch):
 
     with pytest.raises(ScrapeError):
         scrape_scrapegraphai("https://tealdrones.com")
+
+
+def test_scrape_apify_returns_markdown_on_success(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    markdown = "# Something\n\n" + "enough text to pass the length gate. " * 10
+    calls = []
+
+    def fake_run(args, capture_output=None, text=None, **kwargs):
+        calls.append(args)
+        return subprocess.CompletedProcess(args, 0, stdout=json.dumps([{"markdown": markdown}]), stderr="")
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    result = scrape_apify("https://tealdrones.com")
+    assert result == markdown
+    assert len(calls) == 1
+    argv = calls[0]
+    assert "apify" in argv
+    assert "call" in argv
+    assert "apify/website-content-crawler" in argv
+    assert "--output-dataset" in argv
+
+
+def test_scrape_apify_raises_when_cli_not_installed(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: None)
+
+    called = []
+    monkeypatch.setattr(scrape_mod.subprocess, "run", lambda *a, **kw: called.append(1))
+
+    with pytest.raises(ScrapeError):
+        scrape_apify("https://tealdrones.com")
+    assert called == []
+
+
+def test_scrape_apify_raises_on_nonzero_exit(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    def fake_run(args, capture_output=None, text=None, **kwargs):
+        return subprocess.CompletedProcess(args, 1, stdout="", stderr="not logged in")
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    with pytest.raises(ScrapeError):
+        scrape_apify("https://tealdrones.com")
+
+
+def test_scrape_apify_raises_on_empty_dataset(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    def fake_run(args, capture_output=None, text=None, **kwargs):
+        return subprocess.CompletedProcess(args, 0, stdout="[]", stderr="")
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    with pytest.raises(ScrapeError, match="empty dataset"):
+        scrape_apify("https://tealdrones.com")

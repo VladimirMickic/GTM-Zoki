@@ -5,9 +5,13 @@ elsewhere (S2) — this module never returns structured data.
 """
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
+import shutil
+import subprocess
+import tempfile
 from urllib.parse import urlparse
 
 import requests
@@ -215,6 +219,65 @@ def scrape_scrapegraphai(url: str) -> str:
     return markdown
 
 
+def scrape_apify(url: str) -> str:
+    """Fallback #3: Apify managed actor `apify/website-content-crawler`, driven via the
+    `apify` CLI as a subprocess — NOT HTTP, NOT the MCP server (see docs/tools/apify.md).
+    Last resort for generic sites; later the mandatory route for social hosts (Task 3.4)."""
+    if not shutil.which("apify"):
+        raise ScrapeError("apify: CLI not installed (optional fallback)")
+
+    tmp_path = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as tmp:
+            tmp_path = tmp.name
+            json.dump(
+                {
+                    "startUrls": [{"url": url}],
+                    "crawlerType": "adaptive",
+                    "maxCrawlPages": 1,
+                    "saveMarkdown": True,
+                },
+                tmp,
+            )
+
+        try:
+            # UNCONFIRMED (docs/tools/apify.md): the input flag may be `-i <file>`,
+            # `-i <inline-json>`, or `-f <file>` depending on installed CLI version.
+            # Using `-i <tmpfile-path>` per the brief; Task 3.5's live smoke is the
+            # first real `apify` invocation and will confirm or correct this form.
+            result = subprocess.run(
+                ["apify", "call", "apify/website-content-crawler", "-i", tmp_path, "--output-dataset"],
+                capture_output=True,
+                text=True,
+            )
+        except (subprocess.SubprocessError, OSError) as e:
+            raise ScrapeError(f"apify: subprocess failed: {e}") from e
+
+        if result.returncode != 0:
+            stderr_line = (result.stderr or "").strip().splitlines()[:1]
+            stderr_line = stderr_line[0] if stderr_line else ""
+            raise ScrapeError(f"apify: CLI exited {result.returncode}: {stderr_line}")
+
+        try:
+            items = json.loads(result.stdout)
+        except (ValueError, json.JSONDecodeError) as e:
+            raise ScrapeError(f"apify: invalid JSON output: {e}") from e
+
+        parts = []
+        for item in items or []:
+            text = item.get("markdown") or item.get("text")
+            if text:
+                parts.append(text)
+
+        if not parts:
+            raise ScrapeError("apify: empty dataset")
+
+        return "\n\n".join(parts)
+    finally:
+        if tmp_path and os.path.exists(tmp_path):
+            os.remove(tmp_path)
+
+
 def _not_configured(name: str):
     def _scraper(url: str) -> str:
         raise ScrapeError(f"{name}: no API key configured (optional fallback)")
@@ -226,7 +289,7 @@ SCRAPERS = {
     "crawl4ai": scrape_crawl4ai,
     "firecrawl": scrape_firecrawl,
     "scrapling": _not_configured("scrapling"),
-    "apify": _not_configured("apify"),
+    "apify": scrape_apify,
     "scrapegraphai": scrape_scrapegraphai,
 }
 
