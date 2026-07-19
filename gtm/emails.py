@@ -6,17 +6,16 @@ the Hunter calls). Live calls need HUNTER_API_KEY.
 """
 from __future__ import annotations
 
-import os
 import re
 
-import requests
 from pydantic import BaseModel
 
 from gtm.contacts import serper_search
+from gtm.email_providers import HunterProvider
 
-HUNTER_FINDER_URL = "https://api.hunter.io/v2/email-finder"
-HUNTER_VERIFIER_URL = "https://api.hunter.io/v2/email-verifier"
 MAX_PATTERNS = 3
+
+_hunter = HunterProvider()
 
 # hunter verifier status → our sheet label (docs/tools/hunter.md acceptance rule)
 _VERDICTS = {
@@ -61,24 +60,15 @@ def split_contact_names(joined: str) -> list[str]:
     return [n.strip() for n in joined.split(";") if n.strip()]
 
 
-def _hunter_get(url: str, params: dict) -> dict:
-    resp = requests.get(
-        url, params=params, headers={"X-API-KEY": os.environ["HUNTER_API_KEY"]}, timeout=20
-    )
-    if resp.status_code in (404, 451):  # no data / legal block: a miss, not an error
-        return {}
-    resp.raise_for_status()
-    return resp.json().get("data", {})
-
-
 def hunter_verify(email: str) -> dict:
-    return _hunter_get(HUNTER_VERIFIER_URL, {"email": email})
+    """Thin delegate to HunterProvider (gtm/email_providers.py) — kept so waterfall()'s
+    default verifier and any existing callers see the pre-Slice-2 shape (dict, never None)."""
+    return _hunter.verify(email) or {}
 
 
 def hunter_find(first: str, last: str, domain: str) -> dict:
-    return _hunter_get(
-        HUNTER_FINDER_URL, {"domain": domain, "first_name": first, "last_name": last}
-    )
+    """Thin delegate to HunterProvider — see hunter_verify docstring."""
+    return _hunter.find(first, last, domain) or {}
 
 
 def _ai_hunt(name: str, domain: str, search) -> str:
