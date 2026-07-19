@@ -61,3 +61,89 @@ class HunterProvider:
         if not data or not data.get("email"):
             return None
         return {"email": data["email"], "score": data.get("score")}
+
+
+MYEMAILVERIFIER_URL = "https://api.myemailverifier.com/api/validate_single.php"
+
+# Vendor status (capitalized) -> hunter-style verdict vocabulary (docs/tools/myemailverifier.md).
+_MEV_STATUS_MAP = {
+    "Valid": "valid",
+    "Invalid": "invalid",
+    "Catch-All": "accept_all",
+    "Unknown": "unknown",
+    "Greylisted": "unknown",  # server deferred, re-check later
+    "Disposable": "invalid",
+    "Role-Based": "invalid",
+    "Spam Trap": "invalid",
+}
+
+
+class MyEmailVerifierProvider:
+    """MyEmailVerifier single-email verification (docs/tools/myemailverifier.md). Verify-only."""
+
+    name = "myemailverifier"
+
+    def verify(self, email: str) -> dict | None:
+        api_key = os.environ.get("MYEMAILVERIFIER_API_KEY")
+        if not api_key:  # no key configured — can't answer, let the next provider try
+            return None
+        resp = requests.get(
+            MYEMAILVERIFIER_URL, params={"apikey": api_key, "email": email}, timeout=20
+        )
+        # Docs surface no explicit 429 body — treat any non-200 as "stop this tier",
+        # never raise. Covers quota exhaustion and generic HTTP errors alike.
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        # Non-zero error_code is also a miss per the doc's Errors section.
+        if str(data.get("error_code", 0)) not in ("0", "0.0"):
+            return None
+        status = data.get("Status")
+        verdict = _MEV_STATUS_MAP.get(status)
+        if verdict is None:
+            return None
+        if verdict == "valid" and str(data.get("catch_all", "")).lower() == "true":
+            verdict = "accept_all"
+        score = 100 if status == "Valid" else 0
+        return {"status": verdict, "score": score}
+
+    def find(self, first: str, last: str, domain: str) -> dict | None:
+        # MyEmailVerifier has no email-finder capability — verify-only vendor.
+        return None
+
+
+ABSTRACT_URL = "https://emailvalidation.abstractapi.com/v1/"
+
+
+class AbstractProvider:
+    """Abstract Email Validation API (docs/tools/abstract.md). Verify-only."""
+
+    name = "abstract"
+
+    def verify(self, email: str) -> dict | None:
+        api_key = os.environ.get("ABSTRACT_API_KEY")
+        if not api_key:  # no key configured — can't answer, let the next provider try
+            return None
+        resp = requests.get(
+            ABSTRACT_URL, params={"api_key": api_key, "email": email}, timeout=20
+        )
+        # 429 = req/s rate limit, 422 = monthly quota exhausted (per the doc's Errors
+        # section) — treat both, and any other HTTP error, as a miss. Never raise.
+        if resp.status_code != 200:
+            return None
+        data = resp.json()
+        deliverability = data.get("deliverability")
+        catch_all = (data.get("is_catchall_email") or {}).get("value")
+        if deliverability == "DELIVERABLE":
+            verdict = "accept_all" if catch_all else "valid"
+        elif deliverability == "UNDELIVERABLE":
+            verdict = "invalid"
+        else:
+            verdict = "unknown"
+        quality_score = data.get("quality_score")
+        score = round(float(quality_score) * 100) if quality_score is not None else 0
+        return {"status": verdict, "score": score}
+
+    def find(self, first: str, last: str, domain: str) -> dict | None:
+        # Abstract Email Validation has no email-finder capability — verify-only vendor.
+        return None
