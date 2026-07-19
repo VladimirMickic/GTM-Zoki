@@ -6,8 +6,11 @@ elsewhere (S2) — this module never returns structured data.
 from __future__ import annotations
 
 import logging
+import os
 import re
 from urllib.parse import urlparse
+
+import requests
 
 log = logging.getLogger(__name__)
 
@@ -117,6 +120,42 @@ def scrape_deep(url: str, preferred: str = "crawl4ai", *, fetch=scrape_with_link
     return combined
 
 
+def scrape_firecrawl(url: str) -> str:
+    """Fallback #1: Firecrawl managed scrape API. Handles anti-bot/Cloudflare that
+    crawl4ai can't (see docs/tools/firecrawl.md — Red Cat got Cloudflare-blocked)."""
+    api_key = os.environ.get("FIRECRAWL_API_KEY")
+    if not api_key:
+        raise ScrapeError("firecrawl: no API key configured (optional fallback)")
+
+    try:
+        response = requests.post(
+            "https://api.firecrawl.dev/v2/scrape",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={"url": url, "formats": ["markdown"]},
+        )
+    except requests.RequestException as e:
+        raise ScrapeError(f"firecrawl: request failed: {e}") from e
+
+    if not response.ok:
+        raise ScrapeError(f"firecrawl: HTTP {response.status_code}")
+
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise ScrapeError(f"firecrawl: invalid JSON response: {e}") from e
+
+    if not payload.get("success"):
+        raise ScrapeError(f"firecrawl: success=false ({payload})")
+
+    try:
+        return payload["data"]["markdown"]
+    except (KeyError, TypeError) as e:
+        raise ScrapeError(f"firecrawl: missing data.markdown in response: {e}") from e
+
+
 def _not_configured(name: str):
     def _scraper(url: str) -> str:
         raise ScrapeError(f"{name}: no API key configured (optional fallback)")
@@ -126,7 +165,7 @@ def _not_configured(name: str):
 
 SCRAPERS = {
     "crawl4ai": scrape_crawl4ai,
-    "firecrawl": _not_configured("firecrawl"),
+    "firecrawl": scrape_firecrawl,
     "scrapling": _not_configured("scrapling"),
     "apify": _not_configured("apify"),
     "scrapegraphai": _not_configured("scrapegraphai"),

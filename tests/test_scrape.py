@@ -1,7 +1,7 @@
 """S1 — scraper orchestration: preferred-first, auto-fallback, markdown quality gate."""
 import pytest
 
-from gtm.scrape import ScrapeError, scrape
+from gtm.scrape import ScrapeError, scrape, scrape_firecrawl
 
 
 def good(url):
@@ -116,3 +116,58 @@ def test_default_registry_has_full_fallback_chain():
 
     assert FALLBACK_ORDER == ["crawl4ai", "firecrawl", "scrapling", "apify", "scrapegraphai"]
     assert set(FALLBACK_ORDER) <= set(SCRAPERS)
+
+
+class _FakeResponse:
+    def __init__(self, json_data, status_code=200, ok=True):
+        self._json_data = json_data
+        self.status_code = status_code
+        self.ok = ok
+
+    def json(self):
+        return self._json_data
+
+    def raise_for_status(self):
+        if not self.ok:
+            raise Exception(f"HTTP {self.status_code}")
+
+
+def test_scrape_firecrawl_returns_markdown_on_success(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-key")
+
+    markdown = "# Teal Drones\n\n" + "Rugged UAS for defense. " * 20
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        assert url == "https://api.firecrawl.dev/v2/scrape"
+        assert headers["Authorization"] == "Bearer fc-test-key"
+        assert json["url"] == "https://tealdrones.com"
+        assert json["formats"] == ["markdown"]
+        return _FakeResponse({"success": True, "data": {"markdown": markdown}})
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    result = scrape_firecrawl("https://tealdrones.com")
+    assert result == markdown
+
+
+def test_scrape_firecrawl_raises_when_no_api_key(monkeypatch):
+    monkeypatch.delenv("FIRECRAWL_API_KEY", raising=False)
+
+    with pytest.raises(ScrapeError):
+        scrape_firecrawl("https://tealdrones.com")
+
+
+def test_scrape_firecrawl_raises_on_failed_response(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("FIRECRAWL_API_KEY", "fc-test-key")
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        return _FakeResponse({"success": False}, status_code=401, ok=False)
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    with pytest.raises(ScrapeError):
+        scrape_firecrawl("https://tealdrones.com")
