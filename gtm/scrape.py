@@ -265,6 +265,8 @@ def scrape_apify(url: str) -> str:
 
         parts = []
         for item in items or []:
+            if not isinstance(item, dict):
+                continue
             text = item.get("markdown") or item.get("text")
             if text:
                 parts.append(text)

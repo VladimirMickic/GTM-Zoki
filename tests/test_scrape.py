@@ -295,3 +295,22 @@ def test_scrape_apify_raises_on_empty_dataset(monkeypatch):
 
     with pytest.raises(ScrapeError, match="empty dataset"):
         scrape_apify("https://tealdrones.com")
+
+
+def test_scrape_apify_raises_scrape_error_on_non_dict_dataset_items(monkeypatch):
+    """Non-dict items (bad actor config, future CLI version, stray log line mixed into
+    the dataset) must not escape as AttributeError — only ScrapeError may leave
+    scrape_apify (log & skip contract in scrape())."""
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    def fake_run(args, capture_output=None, text=None, **kwargs):
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps(["not a dict", {"markdown": ""}, None]), stderr=""
+        )
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    with pytest.raises(ScrapeError):
+        scrape_apify("https://tealdrones.com")
