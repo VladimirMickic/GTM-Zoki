@@ -30,21 +30,31 @@ Response JSON (flat, all confirmed at docs.abstractapi.com):
 - `is_mx_found` returns `null`/`UNKNOWN` on the free plan (MX check is a paid feature).
 
 ## Verdict mapping
-Internal vocabulary from `gtm/emails.py::verdict()`: `verified | risky | unverified | reject`.
+The adapter's job is to normalize into the **hunter-style** vocabulary
+(`valid | invalid | accept_all | unknown` — same shape as Hunter's `email-verifier`
+`status`); that's what `gtm/emails.py`'s existing `_VERDICTS` table then maps to the
+sheet label. Task 2.2/2.3 code against the middle column below; the right column is
+shown for reference only:
 
-| `deliverability` | `is_catchall_email.value` | our verdict |
-|---|---|---|
-| `DELIVERABLE` | `false` | `verified` |
-| `DELIVERABLE` | `true` | `risky` (catch-all domain accepted it, weak signal) |
-| `UNDELIVERABLE` | any | `reject` |
-| `UNKNOWN` | any | `unverified` |
+| `deliverability` | `is_catchall_email.value` | hunter-style (adapter output) | sheet verdict (via `_VERDICTS`) |
+|---|---|---|---|
+| `DELIVERABLE` | `false` | `valid` | `verified` |
+| `DELIVERABLE` | `true` | `accept_all` (catch-all domain accepted it, weak signal) | `risky` |
+| `UNDELIVERABLE` | any | `invalid` | `reject` |
+| `UNKNOWN` | any | `unknown` | `unverified` |
+
+## Score
+`quality_score` is a float `0.01`–`0.99`, not an int — the adapter must scale it to
+satisfy the `verify() -> {"status": ..., "score": int}` contract: `round(quality_score * 100)`.
 
 ## Limits
 - Free plan: **100 requests/month**, **3 requests/second**, no credit card required.
+- Every request (valid or not) consumes 1 credit.
+
+## Errors
 - 429 = rate limit hit (req/s ceiling) — back off and retry later in the run, don't
   hammer it.
 - 422 = monthly quota exhausted — stop this tier for the rest of the run, fall through.
-- Every request (valid or not) consumes 1 credit.
 
 ## Gotchas
 - Query-param auth — same logging caution as MyEmailVerifier: don't log the raw URL.
