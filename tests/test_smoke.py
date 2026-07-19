@@ -34,6 +34,24 @@ def test_auto_signals_parses():
 
 from gtm.smoke import run_smoke
 
+def test_cli_smoke_dispatches_to_run_smoke(monkeypatch):
+    import gtm.run as run_mod
+
+    calls = []
+    monkeypatch.setattr("gtm.smoke.run_smoke", lambda url, **kw: calls.append((url, kw.get("live", False))))
+    monkeypatch.setattr("sys.argv", ["gtm.run", "smoke", "https://tealdrones.com"])
+    run_mod.main()
+    assert calls == [("https://tealdrones.com", False)]
+
+def test_cli_smoke_live_flag_dispatches_to_run_smoke(monkeypatch):
+    import gtm.run as run_mod
+
+    calls = []
+    monkeypatch.setattr("gtm.smoke.run_smoke", lambda url, **kw: calls.append((url, kw.get("live", False))))
+    monkeypatch.setattr("sys.argv", ["gtm.run", "smoke", "https://tealdrones.com", "--live"])
+    run_mod.main()
+    assert calls == [("https://tealdrones.com", True)]
+
 def test_run_smoke_skips_sink_when_not_live(monkeypatch, tmp_path):
     calls = {"push": 0}
     monkeypatch.setattr("gtm.smoke.push_to_sheet", lambda *a, **k: calls.__setitem__("push", calls["push"] + 1))

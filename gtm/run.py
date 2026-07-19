@@ -6,6 +6,7 @@
   python -m gtm.run signals <run> <signals.json>     # apply Claude's buying_signals/outreach_angle
   python -m gtm.run output <run>                     # CSV (+ Sheet push if creds present)
   python -m gtm.run learn                            # show feedback for ICP/denylist proposals
+  python -m gtm.run smoke <url> [--live]             # one company, end-to-end; --live also pushes to Sheet
 
 State = data/runs/<run>/prospects.json. Failures are logged to data/errors.log and the
 company is skipped (status="error"), never the whole run.
@@ -291,6 +292,14 @@ def main() -> None:
             cmd_output(run)
         case ["learn"]:
             cmd_learn()
+        case ["smoke", url]:
+            from gtm.smoke import run_smoke
+
+            run_smoke(url)
+        case ["smoke", url, "--live"]:
+            from gtm.smoke import run_smoke
+
+            run_smoke(url, live=True)
         case _:
             print(__doc__)
             sys.exit(1)
