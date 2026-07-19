@@ -1,7 +1,7 @@
 """S1 — scraper orchestration: preferred-first, auto-fallback, markdown quality gate."""
 import pytest
 
-from gtm.scrape import ScrapeError, scrape, scrape_firecrawl
+from gtm.scrape import ScrapeError, scrape, scrape_firecrawl, scrape_scrapegraphai
 
 
 def good(url):
@@ -171,3 +171,59 @@ def test_scrape_firecrawl_raises_on_failed_response(monkeypatch):
 
     with pytest.raises(ScrapeError):
         scrape_firecrawl("https://tealdrones.com")
+
+
+def test_scrape_scrapegraphai_returns_markdown_on_success(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("SGAI_API_KEY", "sgai-test-key")
+
+    markdown = "# Teal Drones\n\n" + "Rugged UAS for defense. " * 20
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        assert url == "https://v2-api.scrapegraphai.com/api/scrape"
+        assert headers["SGAI-APIKEY"] == "sgai-test-key"
+        assert headers["Content-Type"] == "application/json"
+        assert json["url"] == "https://tealdrones.com"
+        assert json["formats"] == [{"type": "markdown"}]
+        return _FakeResponse({"request_id": "abc", "status": "completed", "result": markdown})
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    result = scrape_scrapegraphai("https://tealdrones.com")
+    assert result == markdown
+
+
+def test_scrape_scrapegraphai_raises_when_no_api_key(monkeypatch):
+    monkeypatch.delenv("SGAI_API_KEY", raising=False)
+
+    with pytest.raises(ScrapeError):
+        scrape_scrapegraphai("https://tealdrones.com")
+
+
+def test_scrape_scrapegraphai_raises_when_no_markdown_key_found(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("SGAI_API_KEY", "sgai-test-key")
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        return _FakeResponse({"request_id": "abc", "status": "completed"})
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    with pytest.raises(ScrapeError):
+        scrape_scrapegraphai("https://tealdrones.com")
+
+
+def test_scrape_scrapegraphai_raises_on_failed_response(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("SGAI_API_KEY", "sgai-test-key")
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        return _FakeResponse({"error": "unauthorized"}, status_code=401, ok=False)
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    with pytest.raises(ScrapeError):
+        scrape_scrapegraphai("https://tealdrones.com")

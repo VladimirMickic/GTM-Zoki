@@ -156,6 +156,65 @@ def scrape_firecrawl(url: str) -> str:
         raise ScrapeError(f"firecrawl: missing data.markdown in response: {e}") from e
 
 
+def _extract_scrapegraphai_markdown(payload: dict) -> str | None:
+    """Try each candidate key path in order, return the first non-empty str found.
+
+    UNCONFIRMED: ScrapeGraphAI's V2 `/api/scrape` response shape wasn't visible in the
+    primary docs fetch (docs.scrapegraphai.com 404'd on the endpoint pages this session) —
+    see docs/tools/scrapegraphai.md. This candidate list is our best guess pending Task 3.5's
+    live smoke test, which should confirm/prune it against a real response.
+    """
+    candidates = [
+        lambda p: p["result"] if isinstance(p.get("result"), str) else None,
+        lambda p: p["markdown"],
+        lambda p: p["data"]["markdown"],
+        lambda p: p["result"]["markdown"],
+        lambda p: p["content"],
+    ]
+    for candidate in candidates:
+        try:
+            value = candidate(payload)
+        except (KeyError, TypeError):
+            continue
+        if isinstance(value, str) and value.strip():
+            return value
+    return None
+
+
+def scrape_scrapegraphai(url: str) -> str:
+    """Fallback #2: ScrapeGraphAI managed scrape API — last generic resort in the chain
+    (see docs/tools/scrapegraphai.md). V2 `/api/scrape` with formats=[{"type": "markdown"}];
+    do NOT use the deprecated V1 `markdownify` endpoint."""
+    api_key = os.environ.get("SGAI_API_KEY")
+    if not api_key:
+        raise ScrapeError("scrapegraphai: no API key configured")
+
+    try:
+        response = requests.post(
+            "https://v2-api.scrapegraphai.com/api/scrape",
+            headers={
+                "SGAI-APIKEY": api_key,
+                "Content-Type": "application/json",
+            },
+            json={"url": url, "formats": [{"type": "markdown"}]},
+        )
+    except requests.RequestException as e:
+        raise ScrapeError(f"scrapegraphai: request failed: {e}") from e
+
+    if not response.ok:
+        raise ScrapeError(f"scrapegraphai: HTTP {response.status_code}")
+
+    try:
+        payload = response.json()
+    except ValueError as e:
+        raise ScrapeError(f"scrapegraphai: invalid JSON response: {e}") from e
+
+    markdown = _extract_scrapegraphai_markdown(payload)
+    if markdown is None:
+        raise ScrapeError(f"scrapegraphai: no markdown in response ({payload})")
+    return markdown
+
+
 def _not_configured(name: str):
     def _scraper(url: str) -> str:
         raise ScrapeError(f"{name}: no API key configured (optional fallback)")
@@ -168,7 +227,7 @@ SCRAPERS = {
     "firecrawl": scrape_firecrawl,
     "scrapling": _not_configured("scrapling"),
     "apify": _not_configured("apify"),
-    "scrapegraphai": _not_configured("scrapegraphai"),
+    "scrapegraphai": scrape_scrapegraphai,
 }
 
 
