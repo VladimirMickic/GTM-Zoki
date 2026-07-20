@@ -44,6 +44,11 @@ gpt-4o-mini explicitly listed).
 
 gpt-4o-mini: $0.15 / 1M input tokens, $0.60 / 1M output tokens.
 
+`gpt-4.1-mini`: $0.40 / 1M input tokens, $1.60 / 1M output tokens. Retired from the ChatGPT
+consumer UI (2026-02-13) but confirmed still fully supported via the API as of 2026-07-20,
+including structured outputs (`response_format` with a Pydantic model via
+`client.chat.completions.parse`). Used by `gtm/draft.py`'s `qa_check` (QA fact-check stage).
+
 ## 4. Gotchas
 
 - **`parsed` can be None** — on refusal (`message.refusal` set) or truncation

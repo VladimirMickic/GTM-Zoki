@@ -1,4 +1,6 @@
-from gtm.draft import build_draft_prompt
+import pytest
+
+from gtm.draft import QAError, QAResult, build_draft_prompt, qa_check
 from gtm.schema import Prospect
 
 VOICE_GUIDE_SAMPLE = "## Tone\nWarm, consultative.\n## Banned phrases\ncircle back"
@@ -22,3 +24,45 @@ def test_build_draft_prompt_embeds_voice_guide_and_prospect_fields():
     assert "drafts.json" in prompt
     assert "150" in prompt  # body cap stated
     assert "40" in prompt  # subject cap stated
+
+
+class _FakeCompletion:
+    def __init__(self, parsed, refusal=None, finish_reason="stop"):
+        msg = type("M", (), {"parsed": parsed, "refusal": refusal})()
+        choice = type("C", (), {"message": msg, "finish_reason": finish_reason})()
+        self.choices = [choice]
+        self.usage = type("U", (), {"prompt_tokens": 10, "completion_tokens": 5})()
+
+
+class _FakeClient:
+    def __init__(self, parsed):
+        self._parsed = parsed
+        self.chat = type("Chat", (), {"completions": type("Comp", (), {"parse": self._parse})()})()
+
+    def _parse(self, **kw):
+        return _FakeCompletion(self._parsed)
+
+
+def _prospect():
+    return Prospect(
+        company="Teal Drones", website="https://tealdrones.com",
+        buying_signals=["SRR win — US Army contract"], key_news=[], fit_reason="NDAA 15/15",
+        draft_initial_subject="Case built for the Teal 2?",
+        draft_initial_body="{FIRST_NAME} — saw Teal's SRR win. Worth 10 min?",
+    )
+
+
+def test_qa_check_returns_empty_flag_when_clean():
+    client = _FakeClient(QAResult(flag=""))
+    assert qa_check(_prospect(), client=client) == ""
+
+
+def test_qa_check_returns_flag_text_when_unsupported_claim_found():
+    client = _FakeClient(QAResult(flag="references a $1M contract not in evidence"))
+    assert qa_check(_prospect(), client=client) == "references a $1M contract not in evidence"
+
+
+def test_qa_check_raises_qa_error_on_refusal():
+    client = _FakeClient(None)
+    with pytest.raises(QAError):
+        qa_check(_prospect(), client=client)
