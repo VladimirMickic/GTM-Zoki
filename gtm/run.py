@@ -24,10 +24,12 @@ import gtm.github_state as github_state
 from gtm.brief import freeze_brief, load_brief
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
+from gtm.draft import build_draft_prompt
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
 from gtm.schema import Prospect
 from gtm.scrape import scrape, scrape_deep
+from gtm.segment import assign_segment
 from gtm.spechunt import hunt_specs
 
 DATA = Path("data")
@@ -35,13 +37,14 @@ ERROR_LOG = DATA / "errors.log"
 COSTS = DATA / "costs.jsonl"
 FEEDBACK = DATA / "feedback.jsonl"
 ICP = Path("company/ICP.md")
+VOICE_GUIDE = Path("company/voice-guide.md")
 
 # Task 6.2: GitHub Issues stage tracking (gtm/github_state.py, Task 6.1). One
 # label vocabulary, fixed and small — matches the six cmd_* pipeline verbs and
 # the lifecycle states a stage can be in. Validated once per stage transition
 # (pre-flight, no network call) so a future typo here fails loud in tests
 # instead of silently sending a garbage label to GitHub.
-STAGE_NAMES = {"start", "fit", "enrich", "signals", "output", "emails"}
+STAGE_NAMES = {"start", "fit", "enrich", "signals", "segment", "draft", "output", "emails"}
 STATUS_NAMES = {"running", "complete", "checkpoint", "failed"}
 
 
@@ -311,6 +314,31 @@ def cmd_signals(run: str, signals_json: str) -> None:
         print("signals merged for", sum(1 for p in prospects if p.outreach_angle), "prospects")
 
 
+def cmd_segment(run: str) -> None:
+    with _track_stage(run, "segment"):
+        prospects = load_state(run_dir(run))
+        for p in prospects:
+            if p.status in ("priority", "keep"):
+                p.segment = assign_segment(p)
+        save_state(prospects, run_dir(run))
+
+        voice_guide = VOICE_GUIDE.read_text()
+        print("\n=== DRAFT PROMPTS — Claude: draft each, save {company: {...}} to drafts.json ===")
+        needs_draft = False
+        for p in prospects:
+            if p.status in ("priority", "keep"):
+                needs_draft = True
+                print(f"\n----- {p.company} -----")
+                print(build_draft_prompt(voice_guide, p))
+
+        if needs_draft:
+            raise CheckpointPending(
+                file="drafts.json",
+                action="draft emails",
+                resume=f"python -m gtm.run draft {run} drafts.json",
+            )
+
+
 def cmd_output(run: str, dry_run: bool = False) -> None:
     import os
 
@@ -398,6 +426,8 @@ def main() -> None:
                 cmd_emails(run)
             case ["signals", run, signals_json]:
                 cmd_signals(run, signals_json)
+            case ["segment", run]:
+                cmd_segment(run)
             case ["output", run]:
                 cmd_output(run)
             case ["output", run, "--dry-run"]:

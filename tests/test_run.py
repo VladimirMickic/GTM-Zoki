@@ -11,6 +11,7 @@ from gtm.run import (
     cmd_enrich,
     cmd_fit,
     cmd_output,
+    cmd_segment,
     cmd_signals,
     cmd_start,
     company_from_url,
@@ -438,6 +439,36 @@ def test_cmd_enrich_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_path
     save_state(prospects, tmp_path)
 
     cmd_enrich("teal-demo-5")  # must NOT raise — nothing needs a signal prompt
+
+
+def test_cmd_segment_assigns_and_raises_checkpoint_for_draft_prompts(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", us_made_ndaa=True, status="priority")]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_segment("teal-demo-8")
+
+    cp = exc_info.value
+    assert cp.file == "drafts.json"
+    assert cp.action == "draft emails"
+    assert "teal-demo-8" in cp.resume
+    assert "drafts.json" in cp.resume
+
+    saved = load_state(tmp_path)
+    assert saved[0].segment == "defense-ndaa-win"  # assigned before the checkpoint fired
+
+
+def test_cmd_segment_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(company="Dropped Co", website="https://x.com", status="drop")]
+    save_state(prospects, tmp_path)
+
+    cmd_segment("teal-demo-9")  # must NOT raise — nothing needs a draft prompt
 
 
 def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
