@@ -315,6 +315,63 @@ def test_cmd_output_live_still_pushes_to_sheet(monkeypatch, tmp_path):
     assert (tmp_path / "prospects.csv").exists()
 
 
+def _setup_hubspot_run(monkeypatch, tmp_path):
+    """Shared fixture: a run dir with priority/keep/drop/error prospects, Sheet
+    push inert (no creds file), and push_to_hubspot mocked to record its args."""
+    import gtm.hubspot as hubspot_mod
+    import gtm.output as output_mod
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [
+        Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority"),
+        Prospect(company="Skydio", website="https://skydio.com", status="keep"),
+        Prospect(company="ToyCo", website="https://toy.co", status="drop"),
+        Prospect(company="Ghost", website="https://ghost.com", status="error"),
+    ]
+    save_state(prospects, tmp_path)
+
+    # No Sheet creds — the Sheet branch stays inert so these tests isolate HubSpot.
+    monkeypatch.setattr(output_mod, "SERVICE_ACCOUNT_FILE", str(tmp_path / "no_such_creds.json"))
+
+    calls = {"prospects": None}
+
+    def fake_push_to_hubspot(ps, **kw):
+        calls["prospects"] = ps
+        return len(ps)
+
+    monkeypatch.setattr(hubspot_mod, "push_to_hubspot", fake_push_to_hubspot)
+    return calls
+
+
+def test_cmd_output_pushes_priority_and_keep_to_hubspot_when_key_set(monkeypatch, tmp_path, capsys):
+    calls = _setup_hubspot_run(monkeypatch, tmp_path)
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "fake-key")
+
+    cmd_output("ignored")
+
+    assert [p.company for p in calls["prospects"]] == ["Teal Drones", "Skydio"]
+    assert "pushed 2" in capsys.readouterr().out
+
+
+def test_cmd_output_skips_hubspot_push_without_key(monkeypatch, tmp_path):
+    calls = _setup_hubspot_run(monkeypatch, tmp_path)
+    monkeypatch.delenv("HUBSPOT_SERVICE_KEY", raising=False)
+
+    cmd_output("ignored")
+
+    assert calls["prospects"] is None
+
+
+def test_cmd_output_dry_run_skips_hubspot_push_even_with_key(monkeypatch, tmp_path):
+    calls = _setup_hubspot_run(monkeypatch, tmp_path)
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "fake-key")
+
+    cmd_output("ignored", dry_run=True)
+
+    assert calls["prospects"] is None
+
+
 def _stub_enrich_deps(monkeypatch):
     import gtm.contacts as contacts_mod
     import gtm.enrich as enrich_mod

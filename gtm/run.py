@@ -296,6 +296,9 @@ def cmd_signals(run: str, signals_json: str) -> None:
 
 
 def cmd_output(run: str, dry_run: bool = False) -> None:
+    import os
+
+    from gtm.hubspot import push_to_hubspot
     from gtm.output import SERVICE_ACCOUNT_FILE, push_to_sheet, write_csv
 
     with _track_stage(run, "output"):
@@ -314,6 +317,15 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
             print("--dry-run — skipped Sheet push (CSV is ready)")
         else:
             print("no credentials/service_account.json — skipped Sheet push (CSV is ready)")
+
+        if os.environ.get("HUBSPOT_SERVICE_KEY") and writes_enabled(not dry_run):
+            to_hubspot = [p for p in prospects if p.status in ("priority", "keep")]
+            pushed = push_to_hubspot(to_hubspot)
+            print(f"pushed {pushed} companies to HubSpot")
+        elif dry_run:
+            print("--dry-run — skipped HubSpot push (CSV is ready)")
+        else:
+            print("no HUBSPOT_SERVICE_KEY — skipped HubSpot push (CSV is ready)")
 
 
 def emails_for_prospect(p: Prospect, *, waterfall_fn=None) -> Prospect:
