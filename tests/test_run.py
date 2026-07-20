@@ -612,6 +612,39 @@ def test_cmd_enrich_then_cmd_signals_resumes_cleanly(monkeypatch, tmp_path):
     assert p.outreach_angle == "custom foam for the new fleet"
 
 
+def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "")
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", us_made_ndaa=True, status="priority")]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_segment("teal-demo-12")
+
+    cp = exc_info.value
+    assert "teal-demo-12" in cp.resume
+    assert cp.file == "drafts.json"
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Teal Drones": {
+            "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
+            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+        }
+    }))
+
+    cmd_draft("teal-demo-12", str(drafts_path))  # exactly what the resume command runs
+
+    saved = load_state(tmp_path)
+    assert len(saved) == 1
+    p = saved[0]
+    assert p.segment == "defense-ndaa-win"  # survived the round-trip from cmd_segment
+    assert p.draft_initial_subject == "Case built for the Teal 2?"
+    assert p.qa_flag == ""
+
+
 def test_main_exits_5_and_prints_resume_when_start_checkpoints(monkeypatch, capsys):
     import gtm.run as run_mod
     from gtm.control import CheckpointPending
