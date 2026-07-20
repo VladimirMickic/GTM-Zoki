@@ -115,7 +115,7 @@ def test_push_to_hubspot_normal_push_creates_company_and_contact(monkeypatch, tm
     assoc_body = calls[3][2]
     assoc_input = assoc_body["inputs"][0]
     assert assoc_input["from"] == {"id": "contact-1"}
-    assoc_input["to"] == {"id": "company-1"}
+    assert assoc_input["to"] == {"id": "company-1"}
     assert assoc_input["types"] == [
         {"associationCategory": "HUBSPOT_DEFINED", "associationTypeId": 1}
     ]
