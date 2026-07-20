@@ -16,6 +16,7 @@ from gtm.run import (
     company_from_url,
     load_state,
     main,
+    merge_drafts,
     merge_fit,
     merge_signals,
     process_company,
@@ -130,6 +131,36 @@ def test_filter_known_splits_new_from_already_pushed():
     kept, skipped = filter_known(ps, {"tealdrones.com"})
     assert [p.company for p in kept] == ["Skydio"]
     assert [p.company for p in skipped] == ["Teal Drones"]
+
+
+def test_merge_drafts_writes_v1_to_surfaced_fields_v2_to_alt_fields():
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
+    raw = {
+        "Teal Drones": {
+            "draft_initial": {
+                "v1": {"subject": "Case built for the Teal 2?", "body": "hook v1"},
+                "v2": {"subject": "US-made case, Teal-sized", "body": "hook v2"},
+            },
+            "draft_followup": {
+                "v1": {"subject": "Following up", "body": "follow v1"},
+                "v2": {"subject": "One more try", "body": "follow v2"},
+            },
+        }
+    }
+    merge_drafts(prospects, raw)
+    p = prospects[0]
+    assert p.draft_initial_subject == "Case built for the Teal 2?"
+    assert p.draft_initial_body == "hook v1"
+    assert p.draft_initial_subject_alt == "US-made case, Teal-sized"
+    assert p.draft_initial_body_alt == "hook v2"
+    assert p.draft_followup_subject == "Following up"
+    assert p.draft_followup_body_alt == "follow v2"
+
+
+def test_merge_drafts_skips_companies_not_in_raw():
+    prospects = [Prospect(company="Untouched Co", website="https://x.com", status="priority")]
+    merge_drafts(prospects, {})
+    assert prospects[0].draft_initial_subject == ""
 
 
 def test_process_company_hunts_missing_specs_and_fills_only_gaps():

@@ -195,6 +195,22 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
             p.outreach_angle = s.get("outreach_angle", "")
 
 
+def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
+    for p in prospects:
+        d = raw.get(p.company)
+        if not d:
+            continue
+        initial, followup = d.get("draft_initial", {}), d.get("draft_followup", {})
+        p.draft_initial_subject = initial.get("v1", {}).get("subject", "")
+        p.draft_initial_body = initial.get("v1", {}).get("body", "")
+        p.draft_initial_subject_alt = initial.get("v2", {}).get("subject", "")
+        p.draft_initial_body_alt = initial.get("v2", {}).get("body", "")
+        p.draft_followup_subject = followup.get("v1", {}).get("subject", "")
+        p.draft_followup_body = followup.get("v1", {}).get("body", "")
+        p.draft_followup_subject_alt = followup.get("v2", {}).get("subject", "")
+        p.draft_followup_body_alt = followup.get("v2", {}).get("body", "")
+
+
 # ---------------------------------------------------------------- CLI stages
 
 def cmd_start(brief_path: str) -> None:
