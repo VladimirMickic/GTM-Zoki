@@ -8,6 +8,7 @@ from gtm.control import CheckpointPending
 from gtm.extract import DroneExtraction
 from gtm.fit import FitResult
 from gtm.run import (
+    cmd_draft,
     cmd_enrich,
     cmd_fit,
     cmd_output,
@@ -469,6 +470,58 @@ def test_cmd_segment_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_pat
     save_state(prospects, tmp_path)
 
     cmd_segment("teal-demo-9")  # must NOT raise — nothing needs a draft prompt
+
+
+def test_cmd_draft_merges_and_runs_qa_flagging_unsupported_claims(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority", segment="defense-ndaa-win")]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Teal Drones": {
+            "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
+            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+        }
+    }))
+
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "unsupported $1M claim")
+
+    cmd_draft("teal-demo-10", str(drafts_path))
+
+    saved = load_state(tmp_path)
+    assert saved[0].draft_initial_subject == "Case built for the Teal 2?"
+    assert saved[0].qa_flag == "unsupported $1M claim"
+
+
+def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    monkeypatch.setattr(run_mod, "ERROR_LOG", tmp_path / "errors.log")
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Teal Drones": {
+            "draft_initial": {"v1": {"subject": "s", "body": "b"}, "v2": {"subject": "s2", "body": "b2"}},
+            "draft_followup": {"v1": {"subject": "s3", "body": "b3"}, "v2": {"subject": "s4", "body": "b4"}},
+        }
+    }))
+
+    def _raise(p, **kw):
+        raise RuntimeError("API down")
+
+    monkeypatch.setattr(run_mod, "qa_check", _raise)
+
+    cmd_draft("teal-demo-11", str(drafts_path))  # must NOT raise
+
+    saved = load_state(tmp_path)
+    assert saved[0].qa_flag == ""  # left blank, not blocked
+    assert (tmp_path / "errors.log").exists()
 
 
 def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):

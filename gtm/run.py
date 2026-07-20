@@ -24,7 +24,7 @@ import gtm.github_state as github_state
 from gtm.brief import freeze_brief, load_brief
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
-from gtm.draft import build_draft_prompt
+from gtm.draft import build_draft_prompt, qa_check
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
 from gtm.schema import Prospect
@@ -339,6 +339,27 @@ def cmd_segment(run: str) -> None:
             )
 
 
+def cmd_draft(run: str, drafts_json: str) -> None:
+    with _track_stage(run, "draft"):
+        prospects = load_state(run_dir(run))
+        merge_drafts(prospects, json.loads(Path(drafts_json).read_text()))
+        save_state(prospects, run_dir(run))
+
+        n, flagged = 0, 0
+        for p in prospects:
+            if not p.draft_initial_subject:
+                continue
+            n += 1
+            try:
+                p.qa_flag = qa_check(p)
+                if p.qa_flag:
+                    flagged += 1
+            except Exception as e:
+                _log_error(ERROR_LOG, p.company, "qa", e)
+        save_state(prospects, run_dir(run))
+        print(f"{n} drafted, {flagged} flagged")
+
+
 def cmd_output(run: str, dry_run: bool = False) -> None:
     import os
 
@@ -428,6 +449,8 @@ def main() -> None:
                 cmd_signals(run, signals_json)
             case ["segment", run]:
                 cmd_segment(run)
+            case ["draft", run, drafts_json]:
+                cmd_draft(run, drafts_json)
             case ["output", run]:
                 cmd_output(run)
             case ["output", run, "--dry-run"]:
