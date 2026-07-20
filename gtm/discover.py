@@ -81,7 +81,7 @@ def discover(
 ) -> list[Candidate]:
     if denylist is None:
         denylist = load_denylist()
-    results = search(query, num=10)
+    results = search(query, num=max(10, max_companies * 4))
     if not results:
         return []
     if client is None:

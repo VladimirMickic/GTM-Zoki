@@ -66,6 +66,17 @@ def test_discover_empty_serp():
     assert discover("nothing", search=lambda q, num=10: [], client=FakeClient(CandidateList(candidates=[]))) == []
 
 
+def test_discover_scales_serper_num_to_max_companies():
+    captured = {}
+
+    def spy_search(q, num=10):
+        captured["num"] = num
+        return SERP
+
+    discover("drone makers", max_companies=5, search=spy_search, client=FakeClient(FILTERED))
+    assert captured["num"] == 20
+
+
 def test_filter_prompt_flags_reseller_and_dealer_cues():
     # discover-1 leak 2026-07-18: Advexure/Drone Nerds/LE Drones (dealers) passed the filter
     from gtm.discover import FILTER_PROMPT
