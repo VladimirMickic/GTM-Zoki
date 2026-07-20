@@ -20,7 +20,7 @@ SHEET_COLUMNS = [
     "buying_signals",
     "key_news",
     "linkedin",
-    "reddit_signal",
+    "community_signals",
     "outreach_angle",
     "draft_initial_subject",
     "draft_initial_body",
@@ -61,7 +61,7 @@ class Prospect(BaseModel):
     buying_signals: list[str] = []
     key_news: list[str] = []
     linkedin: str = ""
-    reddit_signal: str = ""
+    community_signals: list[str] = []
     outreach_angle: str = ""
     # stage "segment" — deterministic bucketing, feeds draft's angle choice; not a sheet column
     segment: str = ""
@@ -94,7 +94,7 @@ class Prospect(BaseModel):
                 row.append("yes" if v else "no")
             elif isinstance(v, list):
                 # long-form cells read one-item-per-line; short specs stay inline
-                sep = "\n" if col in ("key_news", "buying_signals") else "; "
+                sep = "\n" if col in ("key_news", "buying_signals", "community_signals") else "; "
                 row.append(sep.join(str(x) for x in v))
             else:
                 row.append(str(v))

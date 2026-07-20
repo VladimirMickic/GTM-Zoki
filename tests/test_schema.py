@@ -61,10 +61,12 @@ def test_news_and_signals_render_one_per_line():
         company="X", website="https://x.com",
         key_news=["A — a (url1)", "B — b (url2)"],
         buying_signals=["Signal one — why (src)", "Signal two — why (src)"],
+        community_signals=["Reddit thread — hot take (url3)", "X post — reveal (url4)"],
     )
     row = p.to_sheet_row()
     assert row[SHEET_COLUMNS.index("key_news")] == "A — a (url1)\nB — b (url2)"
     assert row[SHEET_COLUMNS.index("buying_signals")] == "Signal one — why (src)\nSignal two — why (src)"
+    assert row[SHEET_COLUMNS.index("community_signals")] == "Reddit thread — hot take (url3)\nX post — reveal (url4)"
 
 
 def test_contact_emails_column_follows_contact_linkedin():
