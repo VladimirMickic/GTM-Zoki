@@ -9,6 +9,7 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 from gtm.costlog import CostLog
+from gtm.persona import classify_persona
 from gtm.schema import Prospect
 
 MODEL = "gpt-4.1-mini"
@@ -26,6 +27,16 @@ class QAResult(BaseModel):
 
 
 def build_draft_prompt(voice_guide: str, p: Prospect) -> str:
+    top_title = p.contact_title.split(";")[0].strip() if p.contact_title else ""
+    persona = classify_persona(top_title)
+    contact_block = ""
+    if persona != "unknown":
+        contact_block = (
+            f"\n## This contact (tailor the pitch to their seniority)\n"
+            f"- top contact title: {top_title}\n"
+            f"- persona tier: {persona}\n"
+            f"Apply the matching rule from the voice guide's \"Persona tailoring\" section.\n"
+        )
     return f"""Draft a 2-email cold sequence (initial + follow-up), 2 versions each, for
 {p.company}. Follow company/voice-guide.md exactly — its tone, banned phrases, signature,
 and format rules below are non-negotiable:
@@ -39,7 +50,7 @@ and format rules below are non-negotiable:
 - buying_signals: {p.buying_signals}
 - key_news: {p.key_news}
 - fit_reason: {p.fit_reason}
-
+{contact_block}
 ## Format (self-enforce — do not exceed)
 - Subject line: under 40 characters.
 - Body: capped at ~150 characters — one or two sentences, no more.

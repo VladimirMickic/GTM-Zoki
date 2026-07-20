@@ -93,3 +93,17 @@ def test_qa_check_flags_unsupported_claim_in_followup_email():
     assert user_message is not None
     assert "{FIRST_NAME} — saw Teal's SRR win. Worth 10 min?" in user_message
     assert "Just checking if you saw our $5M contract offer — sounds like a fit?" in user_message
+
+
+def test_draft_prompt_injects_persona_tier_from_top_contact():
+    p = Prospect(company="Teal", website="https://tealdrones.com", contact_title="VP of Operations; Field Technician")
+    prompt = build_draft_prompt("VOICE", p)
+    assert "## This contact" in prompt
+    assert "c-suite" in prompt          # VP → c-suite, top-ranked contact wins
+    assert "VP of Operations" in prompt
+
+
+def test_draft_prompt_omits_persona_block_when_no_contact():
+    p = Prospect(company="Teal", website="https://tealdrones.com", contact_title="")
+    prompt = build_draft_prompt("VOICE", p)
+    assert "## This contact" not in prompt
