@@ -347,13 +347,14 @@ def cmd_draft(run: str, drafts_json: str) -> None:
         merge_drafts(prospects, json.loads(Path(drafts_json).read_text()))
         save_state(prospects, run_dir(run))
 
+        costlog = CostLog(COSTS)
         n, flagged = 0, 0
         for p in prospects:
             if not p.draft_initial_subject:
                 continue
             n += 1
             try:
-                p.qa_flag = qa_check(p)
+                p.qa_flag = qa_check(p, costlog=costlog)
                 if p.qa_flag:
                     flagged += 1
             except Exception as e:
