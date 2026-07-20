@@ -55,3 +55,16 @@ fill in — every real draft should read this specific, using that prospect's ow
 > survive field drops as well as the drone does?
 
 Each closes with the signature above.
+
+## Email structure (per email)
+1. **Opening line** — a real, specific fact about the prospect (a win, launch, or shipping gap), not a generic greeting.
+2. **Value prop** — a use case + social proof (a comparable, well-known customer) + the pain it removes. Example framing: "We saw companies similar to you have {xyz}."
+3. **Close** — one closed-ended (yes/no) call to action. Never stack asks. Prefer a low-pressure ask, e.g. a negative-CTA: "Do you think it'd be a bad idea to sit and chat for 15 min?" or a single real question: "Do you run into {problem}, and how do you handle it today?"
+
+## Persona tailoring (pitch by seniority)
+The `draft` prompt injects the top contact's **persona tier** (from `gtm/persona.py`). Lean the value prop toward the matching rule:
+
+- **c-suite** — pitch the **business outcome**: ROI, cost, what the case program wins or saves them. Skip process detail. They care about the number, not the workflow.
+- **manager** — pitch **process and team**: smoother logistics, less firefighting, a team that isn't fighting broken gear. Do NOT lead with money saved — it's not their metric.
+- **ic** — pitch the **day-to-day**: easier handling, less hassle in the field, people happier doing the work.
+- **unknown** — no contact tier available; write to the company's segment/angle generically, no seniority lean.
