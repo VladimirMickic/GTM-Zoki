@@ -65,20 +65,23 @@ def qa_check(p: Prospect, *, client=None, costlog: CostLog | None = None) -> str
     evidence = (
         f"buying_signals: {p.buying_signals}\nkey_news: {p.key_news}\nfit_reason: {p.fit_reason}"
     )
-    email = f"Subject: {p.draft_initial_subject}\n{p.draft_initial_body}"
+    initial = f"Subject: {p.draft_initial_subject}\n{p.draft_initial_body}"
+    followup = f"Subject: {p.draft_followup_subject}\n{p.draft_followup_body}"
     completion = client.chat.completions.parse(
         model=MODEL,
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "You fact-check a cold email against the evidence used to write it. Flag "
-                    "ONLY if the email references a specific stat, contract, certification, or "
-                    "event that is NOT supported by the evidence. Do not flag tone, length, or "
-                    'phrasing. Reply with flag="" if every claim is supported.'
+                    "You fact-check a cold email sequence (initial + follow-up) against the "
+                    "evidence used to write them. Flag ONLY if either email references a "
+                    "specific stat, contract, certification, or event that is NOT supported by "
+                    "the evidence. Do not flag tone, length, or phrasing. If you flag something, "
+                    'say which email ("initial" or "follow-up") it came from. Reply with '
+                    'flag="" if every claim in both emails is supported.'
                 ),
             },
-            {"role": "user", "content": f"Evidence:\n{evidence}\n\nEmail:\n{email}"},
+            {"role": "user", "content": f"Evidence:\n{evidence}\n\nInitial Email:\n{initial}\n\nFollow-up Email:\n{followup}"},
         ],
         response_format=QAResult,
     )

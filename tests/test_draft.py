@@ -38,8 +38,10 @@ class _FakeClient:
     def __init__(self, parsed):
         self._parsed = parsed
         self.chat = type("Chat", (), {"completions": type("Comp", (), {"parse": self._parse})()})()
+        self.last_messages = None
 
     def _parse(self, **kw):
+        self.last_messages = kw.get("messages", [])
         return _FakeCompletion(self._parsed)
 
 
@@ -66,3 +68,28 @@ def test_qa_check_raises_qa_error_on_refusal():
     client = _FakeClient(None)
     with pytest.raises(QAError):
         qa_check(_prospect(), client=client)
+
+
+def test_qa_check_flags_unsupported_claim_in_followup_email():
+    # Create a prospect with supported claims in initial email but unsupported in follow-up
+    p = Prospect(
+        company="Teal Drones", website="https://tealdrones.com",
+        buying_signals=["SRR win — US Army contract"], key_news=[], fit_reason="NDAA 15/15",
+        draft_initial_subject="Case built for the Teal 2?",
+        draft_initial_body="{FIRST_NAME} — saw Teal's SRR win. Worth 10 min?",
+        draft_followup_subject="Following up on SRR opportunity",
+        draft_followup_body="Just checking if you saw our $5M contract offer — sounds like a fit?",
+    )
+    # Mock client returns a flag indicating the follow-up contains an unsupported claim
+    flag_text = "follow-up: references a $5M contract not in evidence"
+    client = _FakeClient(QAResult(flag=flag_text))
+    result = qa_check(p, client=client)
+
+    # Verify the flag is returned (proving the follow-up was checked)
+    assert result == flag_text
+
+    # Verify both email bodies are in the user message
+    user_message = next((m["content"] for m in client.last_messages if m["role"] == "user"), None)
+    assert user_message is not None
+    assert "{FIRST_NAME} — saw Teal's SRR win. Worth 10 min?" in user_message
+    assert "Just checking if you saw our $5M contract offer — sounds like a fit?" in user_message
