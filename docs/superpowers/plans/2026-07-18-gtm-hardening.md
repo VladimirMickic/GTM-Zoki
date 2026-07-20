@@ -501,7 +501,7 @@ Push priority/keep prospects to HubSpot CRM (free tier, private-app token). Runs
 Sheet, not instead of it. Best-effort; gated behind `--live` write guard (Slice 5) + token.
 
 **Files:** Create `gtm/hubspot.py`, `docs/tools/hubspot.md`; modify `gtm/run.py` (`cmd_output`
-also upserts to HubSpot when `HUBSPOT_TOKEN` present + writes enabled). Test: `tests/test_hubspot.py`.
+also upserts to HubSpot when `HUBSPOT_SERVICE_KEY` present + writes enabled). Test: `tests/test_hubspot.py`.
 
 ### Task 7.0: docs/tools/hubspot.md
 - [ ] CRM v3 companies+contacts upsert endpoints, private-app token auth, free-tier limits, the
@@ -516,7 +516,7 @@ also upserts to HubSpot when `HUBSPOT_TOKEN` present + writes enabled). Test: `t
 - [ ] Implement; run → PASS; commit.
 
 ### Task 7.2: wire into cmd_output + live smoke
-- [ ] `cmd_output` calls `push_to_hubspot(prospects)` when `HUBSPOT_TOKEN` set and writes enabled.
+- [ ] `cmd_output` calls `push_to_hubspot(prospects)` when `HUBSPOT_SERVICE_KEY` set and writes enabled.
   Test the gate. Live: push one run's prospects, confirm the company + contacts appear in HubSpot.
   Log; commit; push.
 
@@ -538,6 +538,6 @@ also upserts to HubSpot when `HUBSPOT_TOKEN` present + writes enabled). Test: `t
   S5 before S6 (issues mirror checkpoint state). S7 last (user's explicit "HubSpot later").
 - **Keys the user must add per slice:** S2 has MEV+Abstract; add `PROSPEO_API_KEY` for the finder
   fallback; S3 `FIRECRAWL_API_KEY`, `SCRAPEGRAPHAI_API_KEY`, plus `apify login` (token) for the
-  Apify CLI (each optional/stubbed without); S6 `GITHUB_TOKEN`; S7 `HUBSPOT_TOKEN`.
+  Apify CLI (each optional/stubbed without); S6 `GITHUB_TOKEN`; S7 `HUBSPOT_SERVICE_KEY`.
 - **Deferred, not in this plan:** cold-email drafting, segment/QA stages,
   Supabase/Trigger.dev/Bison from the reference screenshots.
