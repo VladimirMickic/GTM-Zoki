@@ -72,3 +72,37 @@ def test_contact_emails_column_follows_contact_linkedin():
     assert SHEET_COLUMNS[i + 1] == "contact_emails"
     p = Prospect(company="X", website="https://x.com", contact_emails="a@x.com (verified); -")
     assert p.to_sheet_row()[i + 1] == "a@x.com (verified); -"
+
+
+def test_segment_field_is_state_only_not_on_sheet():
+    assert "segment" not in SHEET_COLUMNS
+    p = Prospect(company="X", website="https://x.com", segment="defense-ndaa-win")
+    assert p.segment == "defense-ndaa-win"
+
+
+def test_draft_v1_fields_surface_on_sheet_v2_alt_fields_do_not():
+    for col in ("draft_initial_subject", "draft_initial_body", "draft_followup_subject", "draft_followup_body"):
+        assert col in SHEET_COLUMNS
+    for col in ("draft_initial_subject_alt", "draft_initial_body_alt", "draft_followup_subject_alt", "draft_followup_body_alt"):
+        assert col not in SHEET_COLUMNS
+    i = SHEET_COLUMNS.index("outreach_angle")
+    assert SHEET_COLUMNS[i + 1] == "draft_initial_subject"
+    assert SHEET_COLUMNS[i + 5] == "contact_name"
+
+    p = Prospect(
+        company="X", website="https://x.com",
+        draft_initial_subject="Case built for the Teal 2?",
+        draft_initial_body="{FIRST_NAME} — saw Teal's SRR win.",
+        draft_initial_subject_alt="alt subject — not on sheet",
+    )
+    row = p.to_sheet_row()
+    assert row[SHEET_COLUMNS.index("draft_initial_subject")] == "Case built for the Teal 2?"
+    assert p.draft_initial_subject_alt == "alt subject — not on sheet"  # exists on model, just not in row
+
+
+def test_qa_flag_defaults_empty_and_is_on_sheet():
+    assert "qa_flag" in SHEET_COLUMNS
+    p = Prospect(company="X", website="https://x.com")
+    assert p.qa_flag == ""
+    row = p.to_sheet_row()
+    assert row[SHEET_COLUMNS.index("qa_flag")] == ""

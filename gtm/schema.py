@@ -22,10 +22,15 @@ SHEET_COLUMNS = [
     "linkedin",
     "reddit_signal",
     "outreach_angle",
+    "draft_initial_subject",
+    "draft_initial_body",
+    "draft_followup_subject",
+    "draft_followup_body",
     "contact_name",
     "contact_title",
     "contact_linkedin",
     "contact_emails",
+    "qa_flag",
     "source",
     "date_processed",
     "status",
@@ -58,6 +63,20 @@ class Prospect(BaseModel):
     linkedin: str = ""
     reddit_signal: str = ""
     outreach_angle: str = ""
+    # stage "segment" — deterministic bucketing, feeds draft's angle choice; not a sheet column
+    segment: str = ""
+    # stage "draft" — v1 (primary) variant, surfaced on the sheet
+    draft_initial_subject: str = ""
+    draft_initial_body: str = ""
+    draft_followup_subject: str = ""
+    draft_followup_body: str = ""
+    # stage "draft" — v2 (alternate) variant, state-only; open drafts.json for it
+    draft_initial_subject_alt: str = ""
+    draft_initial_body_alt: str = ""
+    draft_followup_subject_alt: str = ""
+    draft_followup_body_alt: str = ""
+    # stage "draft" (qa sub-step) — empty when clean, else a short unsupported-claim note
+    qa_flag: str = ""
     # stage 6 — output / feedback
     date_processed: str = ""
     status: str = ""
