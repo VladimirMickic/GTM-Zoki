@@ -37,7 +37,7 @@ Later (out of demo scope): segment, copy (cold-email), QA, HubSpot/Bison, verifi
 
 ## Sheet columns
 company · website · description · drone_models · drone_dimensions · drone_weights · best_case_line · us_made/NDAA ·
-fit_score · fit_reason · buying_signals · key_news · linkedin · reddit_signal · outreach_angle ·
+fit_score · fit_reason · buying_signals · key_news · linkedin · community_signals · outreach_angle ·
 contact_name · contact_title · contact_linkedin (top-3, '; '-joined) · source · date_processed · status(feedback)
 
 ## Credentials needed from user (asked per slice)

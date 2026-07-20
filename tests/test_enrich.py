@@ -1,5 +1,5 @@
 """S5 — enrichment: Serper-sourced raw signals + Claude synthesis prompt."""
-from gtm.enrich import build_signal_prompt, enrich, find_company_linkedin, find_news, find_reddit_signal
+from gtm.enrich import build_signal_prompt, enrich, find_community_signals, find_company_linkedin, find_news
 from gtm.schema import Prospect
 
 SERPS = {
@@ -8,6 +8,11 @@ SERPS = {
     ],
     "reddit": [
         {"title": "Teal 2 field review : r/UAVmapping", "link": "https://reddit.com/r/UAVmapping/abc", "snippet": "impressed with thermal"},
+        {"title": "Teal on X: launch thread", "link": "https://x.com/teal/status/1", "snippet": "exciting reveal"},
+        {"title": "RCGroups build thread", "link": "https://rcgroups.com/forums/showthread.php?t=1", "snippet": "comparing frames"},
+        {"title": "Fourth item", "link": "https://example.com/r4", "snippet": "misc"},
+        {"title": "Fifth item", "link": "https://example.com/r5", "snippet": "misc"},
+        {"title": "Sixth item", "link": "https://example.com/r6", "snippet": "misc"},
     ],
     "news": [
         {"title": "Teal Drones wins US Army SRR Tranche 2", "link": "https://example.com/srr", "snippet": "contract award"},
@@ -32,10 +37,11 @@ def test_company_linkedin_first_company_page():
     assert find_company_linkedin("Teal Drones", search=fake_search) == "https://www.linkedin.com/company/teal-drones"
 
 
-def test_reddit_signal_is_title_plus_link():
-    sig = find_reddit_signal("Teal Drones", search=fake_search)
-    assert "Teal 2 field review" in sig
-    assert "reddit.com" in sig
+def test_community_signals_multi_source_capped_at_five():
+    sigs = find_community_signals("Teal Drones", search=fake_search)
+    assert len(sigs) == 5
+    assert "Teal 2 field review" in sigs[0]
+    assert "reddit.com" in sigs[0]
 
 
 def test_news_capped_at_five():
@@ -49,7 +55,7 @@ def test_enrich_fills_prospect_fields():
     p = Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")
     enrich(p, search=fake_search)
     assert p.linkedin.endswith("/company/teal-drones")
-    assert p.reddit_signal
+    assert len(p.community_signals) == 5
     assert len(p.key_news) == 5
 
 
@@ -57,12 +63,12 @@ def test_empty_serps_leave_fields_blank():
     p = Prospect(company="Ghost", website="https://ghost.com")
     enrich(p, search=lambda q, num=10: [])
     assert p.linkedin == ""
-    assert p.reddit_signal == ""
+    assert p.community_signals == []
     assert p.key_news == []
 
 
 def test_signal_prompt_has_evidence_and_contract():
-    p = Prospect(company="Teal Drones", website="https://t.com", key_news=["Teal wins SRR (url)"], reddit_signal="review — url")
+    p = Prospect(company="Teal Drones", website="https://t.com", key_news=["Teal wins SRR (url)"], community_signals=["review — url"])
     prompt = build_signal_prompt(p)
     assert "Teal wins SRR" in prompt
     assert "buying_signals" in prompt
@@ -90,7 +96,15 @@ def test_signal_prompt_demands_lines_with_source_and_date():
     assert "plain english" in prompt.lower()
 
 
-def test_news_and_reddit_queries_carry_drone_disambiguator():
+def test_signal_prompt_expands_outreach_angle_instruction():
+    p = Prospect(company="X", website="https://x.com")
+    prompt = build_signal_prompt(p)
+    assert "2-3 sentences" in prompt
+    assert "why it's the strongest fit" in prompt
+    assert "community signal" in prompt.lower()
+
+
+def test_news_and_community_signals_queries_carry_drone_disambiguator():
     # discover-3 2026-07-18: "Paladin" news returned lenders, awards, r/Fantasy
     captured = []
 
@@ -99,5 +113,9 @@ def test_news_and_reddit_queries_carry_drone_disambiguator():
         return []
 
     find_news("Paladin", search=spy)
-    find_reddit_signal("Paladin", search=spy)
+    find_community_signals("Paladin", search=spy)
     assert all("drone" in q.lower() for q in captured), captured
+    assert all(
+        site in captured[1]
+        for site in ("site:reddit.com", "site:x.com", "site:twitter.com", "site:rcgroups.com")
+    ), captured[1]
