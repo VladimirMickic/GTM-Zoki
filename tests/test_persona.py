@@ -7,9 +7,21 @@ def test_c_suite_titles():
     assert classify_persona("Founder & CEO") == "c-suite"
 
 
+def test_finance_titles():
+    assert classify_persona("CFO") == "finance"
+    assert classify_persona("Chief Financial Officer") == "finance"
+    assert classify_persona("Controller") == "finance"
+    assert classify_persona("VP of Finance") == "finance"  # finance beats generic vp
+
+
+def test_director_titles():
+    assert classify_persona("Director of Logistics") == "director"
+    assert classify_persona("Head of Operations") == "director"
+
+
 def test_manager_titles():
-    assert classify_persona("Director of Logistics") == "manager"
     assert classify_persona("Operations Manager") == "manager"
+    assert classify_persona("Program Manager") == "manager"
 
 
 def test_ic_titles():

@@ -64,7 +64,9 @@ Each closes with the signature above.
 ## Persona tailoring (pitch by seniority)
 The `draft` prompt injects the top contact's **persona tier** (from `gtm/persona.py`). Lean the value prop toward the matching rule:
 
+- **finance** (CFO/controller/VP-Finance) — pitch the **hard numbers**: cost-per-case vs a damaged/replaced drone, payback period, TCO, budget defensibility. More numeric than c-suite — they want the financial case airtight, not the strategic story.
 - **c-suite** — pitch the **business outcome**: ROI, cost, what the case program wins or saves them. Skip process detail. They care about the number, not the workflow.
+- **director** (director/head-of) — pitch **ownership and accountability**: fewer fires reaching their desk, a program that runs predictably, they look good to their exec. Bridges outcome and process — more than a manager cares about, less pure-numbers than c-suite.
 - **manager** — pitch **process and team**: smoother logistics, less firefighting, a team that isn't fighting broken gear. Do NOT lead with money saved — it's not their metric.
 - **ic** — pitch the **day-to-day**: easier handling, less hassle in the field, people happier doing the work.
 - **unknown** — no contact tier available; write to the company's segment/angle generically, no seniority lean.
