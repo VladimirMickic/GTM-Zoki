@@ -26,10 +26,6 @@ SHEET_COLUMNS = [
     "draft_initial_body",
     "draft_followup_subject",
     "draft_followup_body",
-    "contact_name",
-    "contact_title",
-    "contact_linkedin",
-    "contact_emails",
     "qa_flag",
     "source",
     "date_processed",
@@ -53,7 +49,9 @@ class Prospect(BaseModel):
     fit_score: Optional[int] = None
     fit_reason: str = ""
     best_case_line: str = ""
-    # stage 5 — contacts + enrich
+    # stage 5 — contacts + enrich (state only; not in SHEET_COLUMNS — read by
+    # gtm/draft.py and gtm/hubspot.py directly, and reconstructed into the
+    # Contacts tab/CSV by gtm/output.py::build_contact_rows)
     contact_name: str = ""
     contact_title: str = ""
     contact_linkedin: str = ""

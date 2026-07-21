@@ -69,11 +69,21 @@ def test_news_and_signals_render_one_per_line():
     assert row[SHEET_COLUMNS.index("community_signals")] == "Reddit thread — hot take (url3)\nX post — reveal (url4)"
 
 
-def test_contact_emails_column_follows_contact_linkedin():
-    i = SHEET_COLUMNS.index("contact_linkedin")
-    assert SHEET_COLUMNS[i + 1] == "contact_emails"
-    p = Prospect(company="X", website="https://x.com", contact_emails="a@x.com (verified); -")
-    assert p.to_sheet_row()[i + 1] == "a@x.com (verified); -"
+def test_contact_fields_are_state_only_not_on_sheet():
+    # sub-project B (2026-07-21): contacts moved to their own Sheet tab/CSV
+    # (gtm/output.py::build_contact_rows) — the packed fields stay on Prospect
+    # for gtm/draft.py and gtm/hubspot.py, but no longer render on the main row.
+    for col in ("contact_name", "contact_title", "contact_linkedin", "contact_emails"):
+        assert col not in SHEET_COLUMNS
+    p = Prospect(
+        company="X", website="https://x.com",
+        contact_name="Jane Doe", contact_title="VP Engineering",
+        contact_linkedin="https://linkedin.com/in/janedoe",
+        contact_emails="jane@x.com (verified)",
+    )
+    row = p.to_sheet_row()
+    assert "Jane Doe" not in row
+    assert p.contact_name == "Jane Doe"  # still readable by draft.py/hubspot.py
 
 
 def test_segment_field_is_state_only_not_on_sheet():
@@ -89,7 +99,7 @@ def test_draft_v1_fields_surface_on_sheet_v2_alt_fields_do_not():
         assert col not in SHEET_COLUMNS
     i = SHEET_COLUMNS.index("outreach_angle")
     assert SHEET_COLUMNS[i + 1] == "draft_initial_subject"
-    assert SHEET_COLUMNS[i + 5] == "contact_name"
+    assert SHEET_COLUMNS[i + 5] == "qa_flag"
 
     p = Prospect(
         company="X", website="https://x.com",
