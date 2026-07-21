@@ -96,9 +96,13 @@ def test_merge_fit_by_company():
 
 def test_merge_signals_by_company():
     ps = [Prospect(company="A", website="https://a.com")]
-    merge_signals(ps, {"A": {"buying_signals": ["won contract"], "outreach_angle": "case for new drone"}})
+    merge_signals(ps, {"A": {
+        "buying_signals": ["won contract"], "outreach_angle": "case for new drone",
+        "competitor_weaknesses": ["too heavy"],
+    }})
     assert ps[0].buying_signals == ["won contract"]
     assert ps[0].outreach_angle == "case for new drone"
+    assert ps[0].competitor_weaknesses == ["too heavy"]
 
 
 def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
@@ -913,3 +917,43 @@ def test_track_stage_rejects_invalid_status_name():
 
     with pytest.raises(ValueError):
         run_mod._validate_stage_status("fit", "not-a-real-status")
+
+
+def test_cmd_enrich_prints_displacement_prompt_when_competitor_detected(monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(
+        company="AeroVironment", website="https://avinc.com", fit_score=87, status="priority",
+        case_evidence="ships in a Pelican 1520 case",
+    )]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending):
+        cmd_enrich("teal-demo-displace")
+
+    out = capsys.readouterr().out
+    assert "displacement: Pelican 1520" in out
+    assert "Pelican 1520" in out
+
+    saved = load_state(tmp_path)
+    assert saved[0].competitor == "Pelican 1520"
+
+
+def test_cmd_enrich_no_displacement_prompt_when_no_competitor(monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(
+        company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority",
+        case_evidence="ships in a soft backpack",
+    )]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending):
+        cmd_enrich("teal-demo-nodisplace")
+
+    out = capsys.readouterr().out
+    assert "displacement" not in out

@@ -214,6 +214,7 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
         if s:
             p.buying_signals = s.get("buying_signals", [])
             p.outreach_angle = s.get("outreach_angle", "")
+            p.competitor_weaknesses = s.get("competitor_weaknesses", [])
 
 
 def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
@@ -294,6 +295,7 @@ def cmd_fit(run: str, fit_json: str) -> None:
 
 def cmd_enrich(run: str) -> None:
     from gtm.contacts import find_contacts, top_contact_fields
+    from gtm.displace import build_displacement_prompt, detect_competitor
     from gtm.enrich import build_signal_prompt, enrich
 
     with _track_stage(run, "enrich"):
@@ -307,6 +309,7 @@ def cmd_enrich(run: str) -> None:
                 contacts = find_contacts(p.company)
                 if contacts:
                     p.contact_name, p.contact_title, p.contact_linkedin = top_contact_fields(contacts)
+                p.competitor = detect_competitor(p.case_evidence)
             except Exception as e:
                 _log_error(ERROR_LOG, p.company, "enrich/contacts", e)
         save_state(prospects, run_dir(run))
@@ -317,6 +320,9 @@ def cmd_enrich(run: str) -> None:
                 needs_signals = True
                 print(f"\n----- {p.company} -----")
                 print(build_signal_prompt(p))
+                if p.competitor:
+                    print(f"\n----- {p.company} [displacement: {p.competitor}] -----")
+                    print(build_displacement_prompt(p.company, p.competitor))
 
         _print_cost_summary(run)
         if needs_signals:
