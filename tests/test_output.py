@@ -169,14 +169,43 @@ def test_build_contact_rows_company_level_fields_repeat_on_every_row():
 
 
 def test_build_contact_rows_drafts_repeat_on_every_contact_row():
-    # one draft set per company, shared by all its contacts (same as outreach_angle)
+    # one draft set per company, shared by all its contacts (same as outreach_angle);
+    # {FIRST_NAME} is merged to each contact's own first name (see merge test below).
     rows = build_contact_rows(MULTI)
     for r in rows:
         assert r["draft_initial_subject"] == "Case built for the Teal 2?"
-        assert r["draft_initial_body"] == "{FIRST_NAME} — saw Teal's SRR win."
         assert r["draft_followup_subject"] == "Following up"
         assert r["draft_followup_body"] == "Just circling back."
         assert r["qa_flag"] == "passed"
+
+
+def test_build_contact_rows_merges_first_name_per_row():
+    # 2026-07-21 (user): {FIRST_NAME} must never ship literal — merge each
+    # contact's own first name into their draft body.
+    rows = build_contact_rows(MULTI)
+    firsts = ["Blake", "Manoj", "Steven"]
+    for r, first in zip(rows, firsts):
+        assert r["draft_initial_body"] == f"{first} — saw Teal's SRR win."
+        assert "{FIRST_NAME}" not in r["draft_initial_body"]
+
+
+def test_build_contact_rows_merges_company_variable():
+    p = MULTI.model_copy(update={"draft_initial_body": "Hi {FIRST_NAME}, {COMPANY} ships tough."})
+    rows = build_contact_rows(p)
+    assert rows[0]["draft_initial_body"] == "Hi Blake, Teal Drones ships tough."
+
+
+def test_build_contact_rows_blank_name_falls_back_to_there():
+    p = MULTI.model_copy(update={"contact_name": "; Manoj Mohan; Steven Butler"})
+    rows = build_contact_rows(p)
+    assert rows[0]["draft_initial_body"] == "there — saw Teal's SRR win."
+
+
+def test_build_contact_rows_trims_long_outreach_angle():
+    p = MULTI.model_copy(update={"outreach_angle": "angle " * 100})  # ~600 chars
+    rows = build_contact_rows(p)
+    assert len(rows[0]["outreach_angle"]) <= 221  # 220 + ellipsis
+    assert rows[0]["outreach_angle"].endswith("…")
 
 
 def test_build_contact_rows_zero_contacts_returns_empty_list():

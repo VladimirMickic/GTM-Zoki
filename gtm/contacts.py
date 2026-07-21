@@ -16,15 +16,28 @@ SERPER_URL = "https://google.serper.dev/search"
 # " - " or " – " separated: Name - Title - Company | LinkedIn
 _SEP = re.compile(r"\s+[-–—]\s+")
 
-# who actually buys transport cases: ops/product/founders first
+# who actually buys transport cases: ops/procurement/founders first (ICP.md "Target titles")
 _RANK_KEYWORDS = [
     ("founder", 100), ("chief", 90), ("vp", 85), ("vice president", 85),
-    ("head of", 80), ("director", 75), ("operations", 70), ("product", 65),
+    ("head of", 80), ("director", 75), ("procurement", 72), ("supply chain", 72),
+    ("purchasing", 72), ("sourcing", 72), ("operations", 70), ("product", 65),
     ("program", 60), ("logistics", 60), ("sales", 50), ("manager", 40),
 ]
 
-# not a target for outreach — excluded from find_contacts entirely, never a fallback.
-_EXCLUDE_KEYWORDS = ("ceo",)
+# buyer-title terms the query biases toward, so the SERP surfaces procurement/ops
+# people instead of a defense prime's public-facing engineers (us-drone-3 bug).
+_BUYER_TERMS = (
+    "procurement", "supply chain", "purchasing", "operations",
+    "program", "logistics", "product", "founder", "director", "head of",
+)
+
+# never a target for outreach — excluded from find_contacts entirely, never a fallback.
+# ceo per ICP.md; the rest kill non-buyers the SERP drags in (engineers, students,
+# academics) — us-drone-3 shipped a "Chief Engineer" and a Penn State student.
+_EXCLUDE_KEYWORDS = (
+    "ceo", "engineer", "student", "intern", "university",
+    "professor", "researcher", "scientist",
+)
 
 
 class Contact(BaseModel):
@@ -60,7 +73,16 @@ def serper_search(query: str, num: int = 10, *, costlog=None) -> list[dict]:
 
 
 def build_contact_query(company: str) -> str:
-    # bare "drone" disambiguates generic names ("Paladin" alone matches surnames)
+    # "drone" disambiguates generic names ("Paladin" alone matches surnames); the
+    # OR-group biases the SERP toward buyer titles, not engineers. Requires one
+    # buyer term present — find_contacts widens to build_broad_query if this is dry.
+    buyers = " OR ".join(f'"{t}"' if " " in t else t for t in _BUYER_TERMS)
+    return f'site:linkedin.com/in "{company}" drone ({buyers})'
+
+
+def build_broad_query(company: str) -> str:
+    # fallback when the buyer-biased query surfaces nobody (secretive primes have
+    # few public procurement profiles) — no buyer terms, excludes still applied.
     return f'site:linkedin.com/in "{company}" drone'
 
 
@@ -95,13 +117,21 @@ def top_contact_fields(contacts: list[Contact], n: int = 3) -> tuple[str, str, s
     )
 
 
-def find_contacts(company: str, *, search=serper_search) -> list[Contact]:
-    results = search(build_contact_query(company), num=10)
-    contacts = []
-    for r in results:
+def _collect(query: str, company: str, search) -> list[Contact]:
+    """Parse one SERP into ranked buyer contacts: drop non-profiles, excluded
+    titles (ceo/engineer/student/...), and rank-0 unrecognized titles."""
+    out = []
+    for r in search(query, num=10):
         c = parse_linkedin_result(r.get("title", ""), r.get("link", ""), company)
-        if c is not None and not _is_excluded(c):
-            contacts.append(c)
+        if c is not None and not _is_excluded(c) and _rank(c) > 0:
+            out.append(c)
+    return out
+
+
+def find_contacts(company: str, *, search=serper_search) -> list[Contact]:
+    contacts = _collect(build_contact_query(company), company, search)
+    if not contacts:  # buyer-biased query dry — widen to the broad query, same filters
+        contacts = _collect(build_broad_query(company), company, search)
     return sorted(contacts, key=_rank, reverse=True)
 
 

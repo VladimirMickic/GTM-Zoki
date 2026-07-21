@@ -61,9 +61,59 @@ def test_query_targets_linkedin_profiles():
 
 def test_find_contacts_ranks_decision_makers_first():
     contacts = find_contacts("Teal Drones", search=lambda q, num=10: FIXTURE_RESULTS)
-    assert contacts[0].name == "George Matus"  # founder outranks intern
+    assert contacts[0].name == "George Matus"  # founder outranks the rest
     assert all(c.linkedin.startswith("http") for c in contacts)
-    assert contacts[-1].title == "Marketing Intern"
+    assert all("Intern" not in c.title for c in contacts)  # intern now excluded
+
+
+def test_query_biases_toward_buyer_titles():
+    q = build_contact_query("Teal Drones").lower()
+    assert " or " in q  # OR-group of buyer terms
+    assert "procurement" in q
+    assert "operations" in q
+
+
+def test_find_contacts_excludes_engineers_and_students():
+    # us-drone-3: AeroVironment surfaced Chief Engineer + a Penn State student.
+    serp = [
+        {"title": "Ed Eng - Chief Engineer - AeroVironment | LinkedIn", "link": "https://linkedin.com/in/ee"},
+        {"title": "Stu Dent - AeroVironment Penn State University - | LinkedIn", "link": "https://linkedin.com/in/sd"},
+        {"title": "Val Vee - VP of Operations - AeroVironment | LinkedIn", "link": "https://linkedin.com/in/vv"},
+    ]
+    contacts = find_contacts("AeroVironment", search=lambda q, num=10: serp)
+    assert [c.name for c in contacts] == ["Val Vee"]  # engineer + student dropped
+
+
+def test_procurement_titles_rank_as_buyers():
+    serp = [
+        {"title": "Pat Purch - Procurement Manager - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/pp"},
+        {"title": "Sam Sales - Sales Rep - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/ss"},
+    ]
+    contacts = find_contacts("Teal Drones", search=lambda q, num=10: serp)
+    assert contacts[0].name == "Pat Purch"  # procurement (72) outranks sales (50)
+
+
+def test_find_contacts_drops_unrecognized_zero_rank_titles():
+    serp = [
+        {"title": "Vera Voss - VP of Operations - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/vera"},
+        {"title": "Ned Null - Barista - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/ned"},
+    ]
+    contacts = find_contacts("Teal Drones", search=lambda q, num=10: serp)
+    assert [c.name for c in contacts] == ["Vera Voss"]  # rank-0 "Barista" dropped
+
+
+def test_find_contacts_falls_back_to_broad_query_when_buyer_query_empty():
+    calls = []
+
+    def fake(q, num=10):
+        calls.append(q)
+        if " OR " in q:  # buyer-biased query surfaces nobody
+            return []
+        return [{"title": "Amy Ace - Founder - Ghost Co | LinkedIn", "link": "https://linkedin.com/in/amy"}]
+
+    contacts = find_contacts("Ghost Co", search=fake)
+    assert len(calls) == 2  # tried buyer query, then widened to broad
+    assert contacts[0].name == "Amy Ace"
 
 
 def test_find_contacts_empty_serp():

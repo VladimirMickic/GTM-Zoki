@@ -12,7 +12,11 @@ not a stacked pitch.
 ## Format (locked, enforced by `draft`/QA)
 - 2-email sequence: initial + one follow-up.
 - 2 versions of each (4 drafts per prospect total).
-- Subject line: under 40 characters.
+- Subject line: under 40 characters, **trigger-first** — lead with the prospect's own
+  event or pain (their contract win, launch, shipping gap), never with our product-line
+  names (`AV-Field`, `AV-Micro`, `AV-Ops`, `AV-Convoy` — the prospect has never heard them)
+  and never with the bare word "case". Good: *"Switchblade 400 field kit?"*. Bad:
+  *"AV-Field case for the Switchblade?"*.
 - Body: capped at ~150 characters — one or two sentences, no more.
 - Personalization variables: `{FIRST_NAME}`, `{COMPANY}`.
 - No links in the body.
@@ -38,17 +42,17 @@ Real prospect, real buying signal (US Army SRR program win), matched to ICP.md's
 "Defense/NDAA win" outreach angle. Use these as the tone/length reference, not a template to
 fill in — every real draft should read this specific, using that prospect's own signals.
 
-**Initial, v1** — *"Case built for the Teal 2?"*
+**Initial, v1** — *"Teal's SRR win + transport?"*
 > {FIRST_NAME} — saw Teal's SRR win. We build MIL-STD cases sized to the Teal 2, made in the
 > US like you. Worth 10 min this week?
 
-**Initial, v2** — *"US-made case, Teal-sized"*
+**Initial, v2** — *"Congrats on SRR — quick Q"*
 > {FIRST_NAME}, congrats on SRR. Curious what Teal 2 units ship in today — we build
 > MIL-STD-810H cases sized to it. Quick call?
 
-**Follow-up, v1** — *"Following up — Teal 2 case"*
+**Follow-up, v1** — *"Following up — Teal 2 transport"*
 > {FIRST_NAME}, still curious what you're using for Teal 2 transport. Happy to send our
-> AV-Field specs if useful, no pressure.
+> spec sheet if useful, no pressure.
 
 **Follow-up, v2** — *"One more try — worth 10 min?"*
 > {FIRST_NAME}, know outbound gets ignored — one real question: does Teal's shipping case

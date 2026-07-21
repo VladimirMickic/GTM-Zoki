@@ -59,7 +59,10 @@ and format rules below are non-negotiable:
 Tailor the value prop to the contact's persona tier (see the voice guide's "Persona tailoring").
 
 ## Format (self-enforce — do not exceed)
-- Subject line: under 40 characters.
+- Subject line: under 40 characters, TRIGGER-FIRST — lead with the prospect's own
+  event or pain (from outreach_angle / buying_signals / key_news), never with our
+  product-line names (AV-Field, AV-Micro, AV-Ops, AV-Convoy) — the prospect has never
+  heard them. Good: "Switchblade 400 field kit?". Bad: "AV-Field case for X?".
 - Body: capped at ~150 characters — one or two sentences, no more.
 - Personalization variables: {{FIRST_NAME}}, {{COMPANY}}.
 - No links in the body. No banned phrases (see voice guide). Close with the signature block

@@ -45,6 +45,29 @@ def test_tier_derives_from_status_and_renders_on_sheet():
     assert row[SHEET_COLUMNS.index("tier")] == "2"
 
 
+def test_why_fit_summarizes_company_in_one_line():
+    # 2026-07-21 (user): one-line scannable summary column on the Companies tab.
+    p = Prospect(
+        company="AeroVironment", website="https://avinc.com", fit_score=78, status="priority",
+        best_case_line="AV-Field",
+        buying_signals=["Pentagon awarded an $80.5M task order (defensescoop.com, 2026-07-06) — a production ramp"],
+    )
+    wf = p.why_fit
+    assert wf.startswith("Strong fit (78/100)")
+    assert "AV-Field case" in wf
+    assert "Pentagon awarded an $80.5M task order" in wf
+    assert " — " not in wf and "(defensescoop" not in wf  # rationale/source trimmed off
+    # renders on the sheet, right after tier
+    row = p.to_sheet_row()
+    assert SHEET_COLUMNS[SHEET_COLUMNS.index("tier") + 1] == "why_fit"
+    assert row[SHEET_COLUMNS.index("why_fit")] == wf
+
+
+def test_why_fit_bands_and_unscored():
+    assert Prospect(company="X", website="https://x.com", status="drop", fit_score=12).why_fit.startswith("Dropped (12/100)")
+    assert Prospect(company="X", website="https://x.com").why_fit == "Unscored"
+
+
 def test_unscored_fit_renders_blank_not_slash_100():
     p = Prospect(company="X", website="https://x.com")
     row = p.to_sheet_row()
@@ -84,6 +107,23 @@ def test_news_and_signals_render_one_per_line():
     assert row[SHEET_COLUMNS.index("key_news")] == "A — a (url1)\nB — b (url2)"
     assert row[SHEET_COLUMNS.index("buying_signals")] == "Signal one — why (src)\nSignal two — why (src)"
     assert row[SHEET_COLUMNS.index("community_signals")] == "Reddit thread — hot take (url3)\nX post — reveal (url4)"
+
+
+def test_long_sheet_cells_are_trimmed():
+    # 2026-07-21 (user): keep the Companies tab scannable — cap long cells.
+    p = Prospect(
+        company="X", website="https://x.com",
+        fit_reason="word " * 200,  # ~1000 chars
+        buying_signals=[f"signal {i} " + "detail " * 40 for i in range(5)],
+    )
+    row = p.to_sheet_row()
+    assert len(row[SHEET_COLUMNS.index("fit_reason")]) <= 401  # 400 + ellipsis
+    assert row[SHEET_COLUMNS.index("fit_reason")].endswith("…")
+    signals_cell = row[SHEET_COLUMNS.index("buying_signals")]
+    assert signals_cell.count("\n") == 2  # only top-3 of 5 entries kept
+    assert all(len(line) <= 181 for line in signals_cell.split("\n"))  # each entry trimmed
+    # full detail is untouched on the model itself (only the sheet render is capped)
+    assert len(p.fit_reason) > 400
 
 
 def test_contact_fields_are_state_only_not_on_sheet():

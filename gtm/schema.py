@@ -27,6 +27,7 @@ SHEET_COLUMNS = [
     "us_made_ndaa",
     "fit_score",
     "tier",
+    "why_fit",
     "fit_reason",
     "buying_signals",
     "key_news",
@@ -37,6 +38,19 @@ SHEET_COLUMNS = [
 # status → tier band (ICP.md): priority=Tier 1, keep=Tier 2, drop=Tier 3.
 # error/unscored companies have no tier (blank).
 _STATUS_TIER = {"priority": "1", "keep": "2", "drop": "3"}
+
+# 2026-07-21 (user): keep sheet cells scannable — trim the long-form cells. Full
+# untrimmed detail stays in prospects.json (local state), only the sheet is capped.
+_LONG_LIST_COLS = ("key_news", "buying_signals", "community_signals")
+_LIST_MAX_ITEMS = 3  # top-N entries per long-list cell
+_ENTRY_MAX_CHARS = 180  # per entry
+_FIT_REASON_MAX_CHARS = 400
+
+
+def _trim(s: str, n: int) -> str:
+    """Cap a string to n chars on a word boundary, adding an ellipsis when cut."""
+    s = s.strip()
+    return s if len(s) <= n else s[:n].rsplit(" ", 1)[0].rstrip() + "…"
 
 
 class Prospect(BaseModel):
@@ -91,6 +105,25 @@ class Prospect(BaseModel):
         Read by SHEET_COLUMNS via getattr in to_sheet_row (not a stored field)."""
         return _STATUS_TIER.get(self.status, "")
 
+    @property
+    def why_fit(self) -> str:
+        """One-line scannable summary for the Companies tab, so a reader gets the
+        gist without opening the long fit_reason/buying_signals/key_news cells.
+        Derived (not stored, like `tier`): band + score · case line · top signal."""
+        band = {"1": "Strong fit", "2": "Possible fit", "3": "Dropped"}.get(self.tier, "Unscored")
+        head = f"{band} ({self.fit_score}/100)" if self.fit_score is not None else band
+        parts = [head]
+        if self.best_case_line:
+            parts.append(f"{self.best_case_line} case")
+        if self.buying_signals:
+            # leading clause of the top buying signal, before the em-dash rationale
+            # or the parenthetical source; trimmed so the cell stays one glance.
+            top = self.buying_signals[0].split(" — ")[0].split(" (")[0].strip()
+            if len(top) > 90:  # trim on a word boundary, never mid-number/word
+                top = top[:90].rsplit(" ", 1)[0] + "…"
+            parts.append(top)
+        return " · ".join(parts)
+
     def to_sheet_row(self) -> list[str]:
         """Render one sheet row in SHEET_COLUMNS order (lists joined, None blank)."""
         row = []
@@ -102,10 +135,15 @@ class Prospect(BaseModel):
                 row.append(f"{v}/100")
             elif isinstance(v, bool):
                 row.append("yes" if v else "no")
+            elif col == "fit_reason":
+                row.append(_trim(str(v), _FIT_REASON_MAX_CHARS))
             elif isinstance(v, list):
-                # long-form cells read one-item-per-line; short specs stay inline
-                sep = "\n" if col in ("key_news", "buying_signals", "community_signals") else "; "
-                row.append(sep.join(str(x) for x in v))
+                if col in _LONG_LIST_COLS:
+                    # long-form cells: top-N entries, each trimmed, one per line
+                    items = [_trim(str(x), _ENTRY_MAX_CHARS) for x in v[:_LIST_MAX_ITEMS]]
+                    row.append("\n".join(items))
+                else:
+                    row.append("; ".join(str(x) for x in v))  # short specs stay inline
             else:
                 row.append(str(v))
         return row

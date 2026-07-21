@@ -14,9 +14,13 @@ import csv
 import os
 from pathlib import Path
 
-from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, Prospect
+from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, Prospect, _trim
 
 SERVICE_ACCOUNT_FILE = "credentials/service_account.json"
+
+# 2026-07-21 (user): the outreach_angle blob repeats on every contact row — cap it
+# on the sheet so the cell stays scannable; full text stays in prospects.json.
+_OUTREACH_ANGLE_MAX_CHARS = 220
 
 CONTACT_COLUMNS = [
     "company",
@@ -82,18 +86,28 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
     rows = []
     for i, name in enumerate(names):
         email, status = _parse_email_entry(emails[i]) if i < len(emails) else ("", "miss")
+        name = name.strip()
+        first = name.split()[0] if name else ""
+
+        def merge(text: str) -> str:
+            # {FIRST_NAME}/{COMPANY} are drafted once per company; substitute this
+            # contact's own first name so no placeholder ever ships literal.
+            return text.replace("{FIRST_NAME}", first or "there").replace(
+                "{COMPANY}", prospect.company
+            )
+
         rows.append({
             "company": prospect.company,
-            "contact_name": name.strip(),
+            "contact_name": name,
             "contact_title": titles[i].strip() if i < len(titles) else "",
             "contact_linkedin": linkedins[i].strip() if i < len(linkedins) else "",
             "contact_email": email,
             "email_status": status,
-            "outreach_angle": prospect.outreach_angle,
-            "draft_initial_subject": prospect.draft_initial_subject,
-            "draft_initial_body": prospect.draft_initial_body,
-            "draft_followup_subject": prospect.draft_followup_subject,
-            "draft_followup_body": prospect.draft_followup_body,
+            "outreach_angle": _trim(prospect.outreach_angle, _OUTREACH_ANGLE_MAX_CHARS),
+            "draft_initial_subject": merge(prospect.draft_initial_subject),
+            "draft_initial_body": merge(prospect.draft_initial_body),
+            "draft_followup_subject": merge(prospect.draft_followup_subject),
+            "draft_followup_body": merge(prospect.draft_followup_body),
             "qa_flag": prospect.qa_flag,
             "date_processed": prospect.date_processed,
         })
