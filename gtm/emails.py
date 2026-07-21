@@ -1,8 +1,10 @@
-"""S8 — email waterfall: pattern tier → Hunter.io finder → AI hunt, all verified.
+"""S8 — email waterfall: pattern tier → provider-chain finder → AI hunt, all verified.
 
 Stack cheap→expensive; a tier only runs when the previous one missed; every email is
-validated before it reaches the sheet (docs/tools/hunter.md — read it before editing
-the Hunter calls). Live calls need HUNTER_API_KEY.
+validated before it reaches the sheet. The finder/verifier provider chain (Prospeo,
+GetProspect, Hunter for finding; MyEmailVerifier, Abstract, GetProspect, Hunter for
+verifying) lives in gtm/email_providers.py — read docs/tools/<vendor>.md before editing
+any one vendor's calls. Live calls need that vendor's *_API_KEY set.
 """
 from __future__ import annotations
 
@@ -13,6 +15,7 @@ from pydantic import BaseModel
 from gtm.contacts import serper_search
 from gtm.email_providers import (
     AbstractProvider,
+    GetProspectProvider,
     HunterProvider,
     MyEmailVerifierProvider,
     ProspeoProvider,
@@ -79,10 +82,18 @@ def hunter_find(first: str, last: str, domain: str) -> dict:
 def default_providers() -> list:
     """Ordered provider chain (Task 2.4). Each adapter answers verify/find for itself
     or returns None ("can't answer / not my capability / quota hit") so the chain
-    naturally skips it: a verify walk yields MEV -> Abstract -> Hunter (Prospeo is
-    find-only and always defers); a find walk yields Prospeo -> Hunter (MEV/Abstract
-    are verify-only and always defer). One ordered list handles both directions."""
-    return [MyEmailVerifierProvider(), AbstractProvider(), ProspeoProvider(), HunterProvider()]
+    naturally skips it: a verify walk yields MEV -> Abstract -> GetProspect -> Hunter
+    (Prospeo is find-only and always defers); a find walk yields Prospeo -> GetProspect
+    -> Hunter (MEV/Abstract are verify-only and always defer). GetProspect sits before
+    Hunter (free tier ahead of the more expensive/paid one). One ordered list handles
+    both directions."""
+    return [
+        MyEmailVerifierProvider(),
+        AbstractProvider(),
+        ProspeoProvider(),
+        GetProspectProvider(),
+        HunterProvider(),
+    ]
 
 
 def _verify_chain(providers: list, email: str) -> dict:

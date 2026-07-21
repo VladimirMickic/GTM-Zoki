@@ -1,5 +1,6 @@
 from gtm.email_providers import (
     AbstractProvider,
+    GetProspectProvider,
     HunterProvider,
     MyEmailVerifierProvider,
     ProspeoProvider,
@@ -116,3 +117,47 @@ def test_prospeo_find_none_on_quota(monkeypatch):
 def test_prospeo_verify_always_none(monkeypatch):
     monkeypatch.setenv("PROSPEO_API_KEY", "x")
     assert ProspeoProvider().verify("a@b.com") is None
+
+def test_getprospect_find_normalizes(monkeypatch):
+    class R:
+        status_code = 200
+        def json(self): return {"email": "j@x.com"}
+    monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
+    monkeypatch.setenv("GETPROSPECT_API_KEY", "x")
+    assert GetProspectProvider().find("Jane", "Doe", "x.com") == {"email": "j@x.com", "score": 0}
+
+def test_getprospect_find_none_on_missing_key(monkeypatch):
+    monkeypatch.delenv("GETPROSPECT_API_KEY", raising=False)
+    assert GetProspectProvider().find("Jane", "Doe", "x.com") is None
+
+def test_getprospect_find_none_on_error_status(monkeypatch):
+    class R:
+        status_code = 404
+        def json(self): return {}
+    monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
+    monkeypatch.setenv("GETPROSPECT_API_KEY", "x")
+    assert GetProspectProvider().find("Jane", "Doe", "x.com") is None
+
+def test_getprospect_find_none_on_unrecognized_shape(monkeypatch):
+    class R:
+        status_code = 200
+        def json(self): return {"unexpected": "shape"}
+    monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
+    monkeypatch.setenv("GETPROSPECT_API_KEY", "x")
+    assert GetProspectProvider().find("Jane", "Doe", "x.com") is None
+
+def test_getprospect_verify_normalizes(monkeypatch):
+    class R:
+        status_code = 200
+        def json(self): return {"status": "valid"}
+    monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
+    monkeypatch.setenv("GETPROSPECT_API_KEY", "x")
+    assert GetProspectProvider().verify("a@b.com") == {"status": "valid", "score": 100}
+
+def test_getprospect_verify_none_on_unrecognized_status(monkeypatch):
+    class R:
+        status_code = 200
+        def json(self): return {"status": "bogus"}
+    monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
+    monkeypatch.setenv("GETPROSPECT_API_KEY", "x")
+    assert GetProspectProvider().verify("a@b.com") is None

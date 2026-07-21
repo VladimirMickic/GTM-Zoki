@@ -149,6 +149,78 @@ class AbstractProvider:
         return None
 
 
+GETPROSPECT_FIND_URL = "https://api.getprospect.com/public/v1/email/find"
+GETPROSPECT_VERIFY_URL = "https://api.getprospect.com/public/v1/email/verify"
+
+# GetProspect's response-body field names are unconfirmed (docs/tools/getprospect.md —
+# the "Try It" example payloads are behind readme.io's JS panel, unreachable). These are
+# best-guess field paths; a wrong guess just makes this provider always miss (falls
+# through to Hunter), never crashes. Fix once a live call confirms the real shape.
+_GETPROSPECT_EMAIL_PATHS = [("email",), ("data", "email")]
+_GETPROSPECT_STATUS_PATHS = [("status",), ("data", "status")]
+
+# Same vocabulary as MyEmailVerifier's map — best guess at GetProspect's status strings.
+_GETPROSPECT_STATUS_MAP = {
+    "valid": "valid",
+    "invalid": "invalid",
+    "catch-all": "accept_all",
+    "catch_all": "accept_all",
+    "unknown": "unknown",
+    "disposable": "invalid",
+}
+
+
+def _dig(data: dict, path: tuple[str, ...]):
+    for key in path:
+        if not isinstance(data, dict):
+            return None
+        data = data.get(key)
+    return data
+
+
+class GetProspectProvider:
+    """GetProspect email finder + verifier (docs/tools/getprospect.md). Response field
+    names are unconfirmed — see the docs file before trusting this over other providers."""
+
+    name = "getprospect"
+
+    def _get(self, url: str, params: dict) -> dict | None:
+        api_key = os.environ.get("GETPROSPECT_API_KEY")
+        if not api_key:  # no key configured — can't answer, let the next provider try
+            return None
+        resp = requests.get(url, params=params, headers={"apiKey": api_key}, timeout=20)
+        if resp.status_code != 200:
+            return None
+        return resp.json()
+
+    def verify(self, email: str) -> dict | None:
+        data = self._get(GETPROSPECT_VERIFY_URL, {"email": email})
+        if data is None:
+            return None
+        raw_status = next(
+            (v for p in _GETPROSPECT_STATUS_PATHS if (v := _dig(data, p)) is not None), None
+        )
+        if not isinstance(raw_status, str):
+            return None
+        verdict = _GETPROSPECT_STATUS_MAP.get(raw_status.lower())
+        if verdict is None:
+            return None
+        return {"status": verdict, "score": 100 if verdict == "valid" else 0}
+
+    def find(self, first: str, last: str, domain: str) -> dict | None:
+        data = self._get(
+            GETPROSPECT_FIND_URL, {"name": f"{first} {last}".strip(), "company": domain}
+        )
+        if data is None:
+            return None
+        email = next(
+            (v for p in _GETPROSPECT_EMAIL_PATHS if (v := _dig(data, p)) is not None), None
+        )
+        if not isinstance(email, str) or not email:
+            return None
+        return {"email": email, "score": 0}
+
+
 PROSPEO_ENRICH_URL = "https://api.prospeo.io/enrich-person"
 
 # HTTP 400/429 both carry a JSON {"error": true, "error_code": ...} body per the doc's
