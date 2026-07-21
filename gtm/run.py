@@ -30,7 +30,7 @@ from gtm.costlog import CostLog
 from gtm.draft import build_draft_prompt, build_redraft_prompt, qa_check
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
-from gtm.schema import Prospect
+from gtm.schema import DraftSet, Prospect
 from gtm.scrape import scrape, scrape_deep
 from gtm.segment import assign_segment
 from gtm.spechunt import hunt_specs
@@ -219,18 +219,23 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
 
 def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
     for p in prospects:
-        d = raw.get(p.company)
-        if not d:
+        tiers = raw.get(p.company)
+        if not tiers:
             continue
-        initial, followup = d.get("draft_initial", {}), d.get("draft_followup", {})
-        p.draft_initial_subject = initial.get("v1", {}).get("subject", "")
-        p.draft_initial_body = initial.get("v1", {}).get("body", "")
-        p.draft_initial_subject_alt = initial.get("v2", {}).get("subject", "")
-        p.draft_initial_body_alt = initial.get("v2", {}).get("body", "")
-        p.draft_followup_subject = followup.get("v1", {}).get("subject", "")
-        p.draft_followup_body = followup.get("v1", {}).get("body", "")
-        p.draft_followup_subject_alt = followup.get("v2", {}).get("subject", "")
-        p.draft_followup_body_alt = followup.get("v2", {}).get("body", "")
+        for tier, d in tiers.items():
+            initial, followup = d.get("draft_initial", {}), d.get("draft_followup", {})
+            # setdefault + in-place attribute writes (not a fresh DraftSet) so an
+            # existing tier's qa_flag survives a content-only re-merge — the
+            # cmd_redraft round-trip depends on this (see Task 8's docstring note).
+            draft = p.drafts_by_tier.setdefault(tier, DraftSet())
+            draft.initial_subject = initial.get("v1", {}).get("subject", "")
+            draft.initial_body = initial.get("v1", {}).get("body", "")
+            draft.initial_subject_alt = initial.get("v2", {}).get("subject", "")
+            draft.initial_body_alt = initial.get("v2", {}).get("body", "")
+            draft.followup_subject = followup.get("v1", {}).get("subject", "")
+            draft.followup_body = followup.get("v1", {}).get("body", "")
+            draft.followup_subject_alt = followup.get("v2", {}).get("subject", "")
+            draft.followup_body_alt = followup.get("v2", {}).get("body", "")
 
 
 # ---------------------------------------------------------------- CLI stages
@@ -342,6 +347,8 @@ def cmd_signals(run: str, signals_json: str) -> None:
 
 
 def cmd_segment(run: str) -> None:
+    from gtm.persona import distinct_tiers_present
+
     with _track_stage(run, "segment"):
         prospects = load_state(run_dir(run))
         for p in prospects:
@@ -350,13 +357,14 @@ def cmd_segment(run: str) -> None:
         save_state(prospects, run_dir(run))
 
         voice_guide = VOICE_GUIDE.read_text()
-        print("\n=== DRAFT PROMPTS — Claude: draft each, save {company: {...}} to drafts.json ===")
+        print("\n=== DRAFT PROMPTS — Claude: draft each, save {company: {tier: {...}}} to drafts.json ===")
         needs_draft = False
         for p in prospects:
             if p.status in ("priority", "keep"):
                 needs_draft = True
-                print(f"\n----- {p.company} -----")
-                print(build_draft_prompt(voice_guide, p))
+                for tier in distinct_tiers_present(p.contact_title):
+                    print(f"\n----- {p.company} [{tier}] -----")
+                    print(build_draft_prompt(voice_guide, p, tier))
 
         if needs_draft:
             raise CheckpointPending(
@@ -375,27 +383,33 @@ def cmd_draft(run: str, drafts_json: str) -> None:
         costlog = run_costlog(run)
         n, flagged = 0, 0
         for p in prospects:
-            if not p.draft_initial_subject:
-                continue
-            n += 1
-            try:
-                flag = qa_check(p, costlog=costlog)
-                p.qa_flag = flag or "passed"
-                if flag:
-                    flagged += 1
-            except Exception as e:
-                _log_error(ERROR_LOG, p.company, "qa", e)
+            for tier, draft in p.drafts_by_tier.items():
+                if not draft.initial_subject:
+                    continue
+                n += 1
+                try:
+                    flag = qa_check(p, draft, costlog=costlog)
+                    draft.qa_flag = flag or "passed"
+                    if flag:
+                        flagged += 1
+                except Exception as e:
+                    _log_error(ERROR_LOG, p.company, "qa", e)
         save_state(prospects, run_dir(run))
         print(f"{n} drafted, {flagged} flagged")
         _print_cost_summary(run)
 
-        needs_redraft = [p for p in prospects if p.qa_flag and p.qa_flag != "passed"]
+        needs_redraft = [
+            (p, tier, draft)
+            for p in prospects
+            for tier, draft in p.drafts_by_tier.items()
+            if draft.qa_flag and draft.qa_flag != "passed"
+        ]
         if needs_redraft:
             voice_guide = VOICE_GUIDE.read_text()
-            print("\n=== REDRAFT PROMPTS — Claude: fix the flagged claim, save {company: {...}} to drafts.json ===")
-            for p in needs_redraft:
-                print(f"\n----- {p.company} (flagged: {p.qa_flag}) -----")
-                print(build_redraft_prompt(voice_guide, p))
+            print("\n=== REDRAFT PROMPTS — Claude: fix the flagged claim, save {company: {tier: {...}}} to drafts.json ===")
+            for p, tier, draft in needs_redraft:
+                print(f"\n----- {p.company} [{tier}] (flagged: {draft.qa_flag}) -----")
+                print(build_redraft_prompt(voice_guide, p, tier, draft))
             raise CheckpointPending(
                 file="drafts.json",
                 action="redraft flagged emails (qa fact-check failed)",
@@ -405,9 +419,9 @@ def cmd_draft(run: str, drafts_json: str) -> None:
 
 def cmd_redraft(run: str, drafts_json: str) -> None:
     """Single retry after a qa_check failure (cmd_draft's checkpoint): merges the
-    fixed drafts, re-checks only the previously-flagged prospects, and finalizes
-    qa_flag to "passed" or the (final) failure text — no further checkpoint, so
-    this never loops more than once."""
+    fixed drafts, re-checks only the previously-flagged (prospect, tier) pairs,
+    and finalizes each qa_flag to "passed" or the (final) failure text — no
+    further checkpoint, so this never loops more than once."""
     with _track_stage(run, "redraft"):
         prospects = load_state(run_dir(run))
         merge_drafts(prospects, json.loads(Path(drafts_json).read_text()))
@@ -416,16 +430,17 @@ def cmd_redraft(run: str, drafts_json: str) -> None:
         costlog = run_costlog(run)
         n, still_flagged = 0, 0
         for p in prospects:
-            if not p.draft_initial_subject or p.qa_flag in ("", "passed"):
-                continue
-            n += 1
-            try:
-                flag = qa_check(p, costlog=costlog)
-                p.qa_flag = flag or "passed"
-                if flag:
-                    still_flagged += 1
-            except Exception as e:
-                _log_error(ERROR_LOG, p.company, "qa", e)
+            for tier, draft in p.drafts_by_tier.items():
+                if not draft.initial_subject or draft.qa_flag in ("", "passed"):
+                    continue
+                n += 1
+                try:
+                    flag = qa_check(p, draft, costlog=costlog)
+                    draft.qa_flag = flag or "passed"
+                    if flag:
+                        still_flagged += 1
+                except Exception as e:
+                    _log_error(ERROR_LOG, p.company, "qa", e)
         save_state(prospects, run_dir(run))
         print(f"{n} redrafted, {still_flagged} still flagged after retry")
         _print_cost_summary(run)

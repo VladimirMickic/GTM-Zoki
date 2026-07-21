@@ -26,7 +26,7 @@ from gtm.run import (
     run_dir,
     save_state,
 )
-from gtm.schema import Prospect
+from gtm.schema import DraftSet, Prospect
 
 
 def test_company_name_from_url():
@@ -144,30 +144,60 @@ def test_merge_drafts_writes_v1_to_surfaced_fields_v2_to_alt_fields():
     prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
     raw = {
         "Teal Drones": {
-            "draft_initial": {
-                "v1": {"subject": "Case built for the Teal 2?", "body": "hook v1"},
-                "v2": {"subject": "US-made case, Teal-sized", "body": "hook v2"},
-            },
-            "draft_followup": {
-                "v1": {"subject": "Following up", "body": "follow v1"},
-                "v2": {"subject": "One more try", "body": "follow v2"},
-            },
+            "c-suite": {
+                "draft_initial": {
+                    "v1": {"subject": "Case built for the Teal 2?", "body": "hook v1"},
+                    "v2": {"subject": "US-made case, Teal-sized", "body": "hook v2"},
+                },
+                "draft_followup": {
+                    "v1": {"subject": "Following up", "body": "follow v1"},
+                    "v2": {"subject": "One more try", "body": "follow v2"},
+                },
+            }
         }
     }
     merge_drafts(prospects, raw)
-    p = prospects[0]
-    assert p.draft_initial_subject == "Case built for the Teal 2?"
-    assert p.draft_initial_body == "hook v1"
-    assert p.draft_initial_subject_alt == "US-made case, Teal-sized"
-    assert p.draft_initial_body_alt == "hook v2"
-    assert p.draft_followup_subject == "Following up"
-    assert p.draft_followup_body_alt == "follow v2"
+    draft = prospects[0].drafts_by_tier["c-suite"]
+    assert draft.initial_subject == "Case built for the Teal 2?"
+    assert draft.initial_body == "hook v1"
+    assert draft.initial_subject_alt == "US-made case, Teal-sized"
+    assert draft.initial_body_alt == "hook v2"
+    assert draft.followup_subject == "Following up"
+    assert draft.followup_body_alt == "follow v2"
 
 
 def test_merge_drafts_skips_companies_not_in_raw():
     prospects = [Prospect(company="Untouched Co", website="https://x.com", status="priority")]
     merge_drafts(prospects, {})
-    assert prospects[0].draft_initial_subject == ""
+    assert prospects[0].drafts_by_tier == {}
+
+
+def test_merge_drafts_multiple_tiers_land_in_separate_draft_sets():
+    prospects = [Prospect(company="AeroVironment", website="https://avinc.com", status="priority")]
+    raw = {
+        "AeroVironment": {
+            "c-suite": {"draft_initial": {"v1": {"subject": "C-suite subject", "body": "b"}}, "draft_followup": {}},
+            "director": {"draft_initial": {"v1": {"subject": "Director subject", "body": "b"}}, "draft_followup": {}},
+        }
+    }
+    merge_drafts(prospects, raw)
+    assert prospects[0].drafts_by_tier["c-suite"].initial_subject == "C-suite subject"
+    assert prospects[0].drafts_by_tier["director"].initial_subject == "Director subject"
+
+
+def test_merge_drafts_preserves_qa_flag_on_existing_tier_content_update():
+    # Redraft round-trip: re-merging new content for an already-flagged tier must
+    # NOT reset its qa_flag — cmd_redraft's "already checked" skip logic depends
+    # on the flag surviving until its own QA loop overwrites it.
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
+    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Old", "body": "b"}}, "draft_followup": {}}}})
+    prospects[0].drafts_by_tier["c-suite"].qa_flag = "unsupported claim"
+
+    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Fixed", "body": "b2"}}, "draft_followup": {}}}})
+
+    draft = prospects[0].drafts_by_tier["c-suite"]
+    assert draft.initial_subject == "Fixed"
+    assert draft.qa_flag == "unsupported claim"  # untouched by content-only merge
 
 
 def test_process_company_hunts_missing_specs_and_fills_only_gaps():
@@ -492,6 +522,24 @@ def test_cmd_segment_assigns_and_raises_checkpoint_for_draft_prompts(monkeypatch
     assert saved[0].segment == "defense-ndaa-win"  # assigned before the checkpoint fired
 
 
+def test_cmd_segment_prints_one_draft_prompt_block_per_distinct_tier(monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="AeroVironment", website="https://avinc.com", status="priority",
+        contact_title="Vice President and Chief Technologist; Senior Director International Sales",
+    )]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending):
+        cmd_segment("teal-demo-tiers")
+
+    out = capsys.readouterr().out
+    assert "[c-suite]" in out
+    assert "[director]" in out
+
+
 def test_cmd_segment_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_path):
     import gtm.run as run_mod
 
@@ -512,12 +560,14 @@ def test_cmd_draft_flags_unsupported_claim_and_raises_redraft_checkpoint(monkeyp
     drafts_path = tmp_path / "drafts.json"
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
-            "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
-            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            "c-suite": {
+                "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            }
         }
     }))
 
-    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "unsupported $1M claim")
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, draft, **kw: "unsupported $1M claim")
 
     with pytest.raises(CheckpointPending) as exc_info:
         cmd_draft("teal-demo-10", str(drafts_path))
@@ -529,8 +579,8 @@ def test_cmd_draft_flags_unsupported_claim_and_raises_redraft_checkpoint(monkeyp
     assert "redraft" in cp.resume
 
     saved = load_state(tmp_path)
-    assert saved[0].draft_initial_subject == "Case built for the Teal 2?"
-    assert saved[0].qa_flag == "unsupported $1M claim"  # pending retry, not finalized
+    assert saved[0].drafts_by_tier["c-suite"].initial_subject == "Case built for the Teal 2?"
+    assert saved[0].drafts_by_tier["c-suite"].qa_flag == "unsupported $1M claim"  # pending retry, not finalized
 
     out = capsys.readouterr().out
     assert "REDRAFT" in out
@@ -548,12 +598,14 @@ def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
     drafts_path = tmp_path / "drafts.json"
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
-            "draft_initial": {"v1": {"subject": "s", "body": "b"}, "v2": {"subject": "s2", "body": "b2"}},
-            "draft_followup": {"v1": {"subject": "s3", "body": "b3"}, "v2": {"subject": "s4", "body": "b4"}},
+            "c-suite": {
+                "draft_initial": {"v1": {"subject": "s", "body": "b"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_followup": {"v1": {"subject": "s3", "body": "b3"}, "v2": {"subject": "s4", "body": "b4"}},
+            }
         }
     }))
 
-    def _raise(p, **kw):
+    def _raise(p, draft, **kw):
         raise RuntimeError("API down")
 
     monkeypatch.setattr(run_mod, "qa_check", _raise)
@@ -561,7 +613,7 @@ def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
     cmd_draft("teal-demo-11", str(drafts_path))  # must NOT raise
 
     saved = load_state(tmp_path)
-    assert saved[0].qa_flag == ""  # left blank, not blocked
+    assert saved[0].drafts_by_tier["c-suite"].qa_flag == ""  # left blank, not blocked
     assert (tmp_path / "errors.log").exists()
 
 
@@ -571,24 +623,26 @@ def test_cmd_redraft_merges_and_finalizes_qa_passed(monkeypatch, tmp_path):
     monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
     prospects = [Prospect(
         company="Teal Drones", website="https://tealdrones.com", status="priority",
-        draft_initial_subject="old subject", qa_flag="unsupported $1M claim",
+        drafts_by_tier={"c-suite": DraftSet(initial_subject="old subject", qa_flag="unsupported $1M claim")},
     )]
     save_state(prospects, tmp_path)
 
     drafts_path = tmp_path / "drafts.json"
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
-            "draft_initial": {"v1": {"subject": "Fixed subject", "body": "fixed hook"}, "v2": {"subject": "s2", "body": "b2"}},
-            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            "c-suite": {
+                "draft_initial": {"v1": {"subject": "Fixed subject", "body": "fixed hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            }
         }
     }))
-    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "")
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, draft, **kw: "")
 
     cmd_redraft("teal-demo-13", str(drafts_path))  # must NOT raise — single retry cap
 
     saved = load_state(tmp_path)
-    assert saved[0].draft_initial_subject == "Fixed subject"
-    assert saved[0].qa_flag == "passed"
+    assert saved[0].drafts_by_tier["c-suite"].initial_subject == "Fixed subject"
+    assert saved[0].drafts_by_tier["c-suite"].qa_flag == "passed"
 
 
 def test_cmd_redraft_keeps_flag_text_if_still_failing_after_retry(monkeypatch, tmp_path):
@@ -597,23 +651,25 @@ def test_cmd_redraft_keeps_flag_text_if_still_failing_after_retry(monkeypatch, t
     monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
     prospects = [Prospect(
         company="Teal Drones", website="https://tealdrones.com", status="priority",
-        draft_initial_subject="old subject", qa_flag="unsupported $1M claim",
+        drafts_by_tier={"c-suite": DraftSet(initial_subject="old subject", qa_flag="unsupported $1M claim")},
     )]
     save_state(prospects, tmp_path)
 
     drafts_path = tmp_path / "drafts.json"
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
-            "draft_initial": {"v1": {"subject": "Still bad", "body": "still bad hook"}, "v2": {"subject": "s2", "body": "b2"}},
-            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            "c-suite": {
+                "draft_initial": {"v1": {"subject": "Still bad", "body": "still bad hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            }
         }
     }))
-    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "still references unsupported claim")
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, draft, **kw: "still references unsupported claim")
 
     cmd_redraft("teal-demo-14", str(drafts_path))  # must NOT raise — no infinite retry loop
 
     saved = load_state(tmp_path)
-    assert saved[0].qa_flag == "still references unsupported claim"
+    assert saved[0].drafts_by_tier["c-suite"].qa_flag == "still references unsupported claim"
 
 
 def test_cmd_redraft_does_not_recheck_already_passed_prospects(monkeypatch, tmp_path):
@@ -622,14 +678,14 @@ def test_cmd_redraft_does_not_recheck_already_passed_prospects(monkeypatch, tmp_
     monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
     prospects = [Prospect(
         company="Already Fine Co", website="https://x.com", status="priority",
-        draft_initial_subject="Fine subject", qa_flag="passed",
+        drafts_by_tier={"c-suite": DraftSet(initial_subject="Fine subject", qa_flag="passed")},
     )]
     save_state(prospects, tmp_path)
 
     drafts_path = tmp_path / "drafts.json"
     drafts_path.write_text(json.dumps({}))  # nothing to merge — this company wasn't flagged
 
-    def _fail(p, **kw):
+    def _fail(p, draft, **kw):
         raise AssertionError("qa_check must not be called for an already-passed prospect")
 
     monkeypatch.setattr(run_mod, "qa_check", _fail)
@@ -637,7 +693,7 @@ def test_cmd_redraft_does_not_recheck_already_passed_prospects(monkeypatch, tmp_
     cmd_redraft("teal-demo-15", str(drafts_path))  # must NOT raise / must NOT call qa_check
 
     saved = load_state(tmp_path)
-    assert saved[0].qa_flag == "passed"
+    assert saved[0].drafts_by_tier["c-suite"].qa_flag == "passed"
 
 
 def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
@@ -732,7 +788,7 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
     import gtm.run as run_mod
 
     monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
-    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "")
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, draft, **kw: "")
     prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", us_made_ndaa=True, status="priority")]
     save_state(prospects, tmp_path)
 
@@ -746,8 +802,10 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
     drafts_path = tmp_path / "drafts.json"
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
-            "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
-            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            "unknown": {
+                "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+            }
         }
     }))
 
@@ -757,8 +815,8 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
     assert len(saved) == 1
     p = saved[0]
     assert p.segment == "defense-ndaa-win"  # survived the round-trip from cmd_segment
-    assert p.draft_initial_subject == "Case built for the Teal 2?"
-    assert p.qa_flag == "passed"
+    assert p.drafts_by_tier["unknown"].initial_subject == "Case built for the Teal 2?"
+    assert p.drafts_by_tier["unknown"].qa_flag == "passed"
 
 
 def test_main_exits_5_and_prints_resume_when_start_checkpoints(monkeypatch, capsys):
