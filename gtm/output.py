@@ -115,7 +115,7 @@ def write_contacts_csv(prospects: list[Prospect], path: str | Path) -> int:
     return n
 
 
-def _open_worksheet(name: str = "companies"):
+def _open_worksheet(name: str = "Companies"):
     import gspread
 
     gc = gspread.service_account(filename=SERVICE_ACCOUNT_FILE)

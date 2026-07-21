@@ -133,12 +133,12 @@ def test_contact_columns_locked_order():
 
 
 def test_open_worksheet_default_name_is_companies():
-    # main tab must be named "companies" — never gspread's generic default
-    # "Sheet1" (2026-07-21: a run pushed to "Sheet1" instead of the user's
-    # existing "Companies" tab).
+    # main tab must match the user's existing "Companies" sheet tab (exact
+    # case — gspread's worksheet() lookup is case-sensitive) — never gspread's
+    # generic default "Sheet1" (2026-07-21: a run pushed to "Sheet1" instead).
     import inspect
 
-    assert inspect.signature(_open_worksheet).parameters["name"].default == "companies"
+    assert inspect.signature(_open_worksheet).parameters["name"].default == "Companies"
 
 
 def test_build_contact_rows_keeps_all_contacts_including_email_miss():
