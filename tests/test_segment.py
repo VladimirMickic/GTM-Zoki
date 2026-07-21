@@ -18,10 +18,15 @@ def test_soft_case_evidence_gives_upgrade_gap_segment():
     assert assign_segment(p) == "generic-case-upgrade"
 
 
-def test_named_rugged_brand_does_not_count_as_upgrade_gap():
-    # evidence names an incumbent rugged-case brand alongside upgrade language — excluded
+def test_named_competitor_brand_gives_displacement_segment():
     p = Prospect(company="X", website="https://x.com", us_made_ndaa=False, case_evidence="upgraded to a soft-sided Pelican-branded case")
-    assert assign_segment(p) != "generic-case-upgrade"
+    assert assign_segment(p) == "competitor-displacement"
+
+
+def test_ndaa_beats_competitor_displacement():
+    # priority order: defense-ndaa-win beats competitor-displacement even when both match
+    p = Prospect(company="X", website="https://x.com", us_made_ndaa=True, case_evidence="ships in a Pelican 1520 case")
+    assert assign_segment(p) == "defense-ndaa-win"
 
 
 def test_launch_signal_gives_new_model_launch_segment():
