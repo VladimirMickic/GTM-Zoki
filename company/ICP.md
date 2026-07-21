@@ -78,16 +78,18 @@ Score each scraped prospect 0–100. Auto-reject on any disqualifier regardless 
 | Field-deployed / rugged use case | 25 | Scrape + enrichment |
 | Volume / price point signals real budget | 15 | Enrichment |
 | US-made / NDAA / defense/gov buyers | 15 | Scrape + enrichment |
-| Ships in weak/generic case today (upgrade gap) | 15 | Scrape |
+| Displacement opportunity — named competitor case, or blank slate | 15 | Scrape + enrichment |
 
 Physical-fit scoring must cite published folded dimensions when available; when inferring
 from weight/class alone, cap at 26/30 and say "inferred" in fit_reason. Dimensions found by
 the web hunt (specs pages, reviews, Reddit) count as published — cite the source.
 
-Upgrade-gap scoring must cite case_evidence: real evidence scores the full range (a named
-rugged-case partner ≈ 0-3/15 — we'd be displacing an incumbent, say so; a soft bag/generic
-box ≈ 10-15/15). If case_evidence is still unknown after the web hunt, score exactly 3/15
-and write "unknown" — never award midpoint points for missing evidence.
+Displacement-opportunity scoring must cite case_evidence: a named rugged-case competitor
+(Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer, etc.) is a concrete displacement target —
+score 12-15/15 and say so; a soft bag/generic case/no case at all is still an upgrade
+opportunity but with no named incumbent to research — score 8-11/15. If case_evidence is
+still unknown after the web hunt, score exactly 3/15 and write "unknown" — never award
+midpoint points for missing evidence.
 
 - **Tier 1 (70–100)** → `status="priority"` — push to sheet, full personalized outreach (drafted).
 - **Tier 2 (40–69)** → `status="keep"` — push to sheet, lower priority, still gets a personalized draft.
@@ -100,6 +102,7 @@ and write "unknown" — never award midpoint points for missing evidence.
 - **Defense/NDAA win** → "US-made, MIL-STD case to match your US-made drone."
 - **Field/harsh-environment marketing** → "IP67 protection from truck to mission."
 - **Generic case today** → co-branded custom-foam upgrade, better unboxing + protection.
+- **Competitor detected** → named-competitor weakness, cited — displace with proof.
 
 ## Buying signals to watch (enrichment stage)
 New drone launch · defense/gov contract award · NDAA/Blue UAS certification · funding

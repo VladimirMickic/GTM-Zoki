@@ -78,3 +78,14 @@ def test_fit_prompt_shows_case_evidence_or_flags_unknown():
     assert "ships with soft backpack" in build_fit_prompt("ICP", "Skydio", ex)
     # unknown after hunting must be visible so the ICP's 3/15 rule can bite
     assert "unknown" in build_fit_prompt("ICP", "Ghost", DroneExtraction()).lower()
+
+
+from pathlib import Path
+
+
+def test_icp_uses_displacement_opportunity_not_upgrade_gap():
+    text = Path("company/ICP.md").read_text()
+    assert "Displacement opportunity" in text
+    lowered = text.lower()
+    assert "upgrade gap" not in lowered
+    assert "upgrade-gap" not in lowered
