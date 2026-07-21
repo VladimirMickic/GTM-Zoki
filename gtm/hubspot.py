@@ -23,7 +23,7 @@ from pathlib import Path
 
 import requests
 
-from gtm.schema import Prospect
+from gtm.schema import CONTACT_FIELD_SEP, Prospect
 
 API_BASE = "https://api.hubapi.com"
 ERROR_LOG = Path("data") / "errors.log"
@@ -70,14 +70,16 @@ def _parse_email(entry: str) -> str | None:
 
 
 def _split_contacts(prospect: Prospect) -> list[dict]:
-    """Reconstructs one contact per index from the "; "-joined parallel strings
-    (contact_name/contact_title/contact_linkedin/contact_emails). Skips any index
-    whose email entry is a miss — never push a contact to HubSpot with no real
-    email."""
-    names = prospect.contact_name.split("; ") if prospect.contact_name else []
-    titles = prospect.contact_title.split("; ") if prospect.contact_title else []
-    linkedins = prospect.contact_linkedin.split("; ") if prospect.contact_linkedin else []
-    emails = prospect.contact_emails.split("; ") if prospect.contact_emails else []
+    """Reconstructs one contact per index from the CONTACT_FIELD_SEP-joined
+    parallel strings (contact_name/contact_title/contact_linkedin/contact_emails).
+    Skips any index whose email entry is a miss — never push a contact to
+    HubSpot with no real email."""
+    names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
+    titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
+    linkedins = (
+        prospect.contact_linkedin.split(CONTACT_FIELD_SEP) if prospect.contact_linkedin else []
+    )
+    emails = prospect.contact_emails.split(CONTACT_FIELD_SEP) if prospect.contact_emails else []
 
     contacts = []
     for i, name in enumerate(names):
@@ -91,8 +93,8 @@ def _split_contacts(prospect: Prospect) -> list[dict]:
                 "email": email,
                 "firstname": first,
                 "lastname": last,
-                "jobtitle": titles[i] if i < len(titles) else "",
-                "linkedin": linkedins[i] if i < len(linkedins) else "",
+                "jobtitle": titles[i].strip() if i < len(titles) else "",
+                "linkedin": linkedins[i].strip() if i < len(linkedins) else "",
             }
         )
     return contacts

@@ -14,7 +14,7 @@ import csv
 import os
 from pathlib import Path
 
-from gtm.schema import SHEET_COLUMNS, Prospect
+from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, Prospect
 
 SERVICE_ACCOUNT_FILE = "credentials/service_account.json"
 
@@ -47,29 +47,29 @@ def write_csv(prospects: list[Prospect], path: str | Path, include_drops: bool =
 
 def _parse_email_entry(entry: str) -> tuple[str, str]:
     """Splits one "email (status)" entry from Prospect.contact_emails into
-    (email, status). "-" (or blank) means no email was found — returns
-    ("", "miss"), never dropped (unlike gtm/hubspot.py::_parse_email, which
-    drops misses for its own CRM-push purposes; the Contacts tab must show
-    every tracked person)."""
+    (email, status). Anything that isn't a well-formed "email (status)" entry —
+    "-", blank, or malformed — is a miss: returns ("", "miss"), never dropped
+    (unlike gtm/hubspot.py::_parse_email, which drops misses for its own
+    CRM-push purposes; the Contacts tab must show every tracked person)."""
     entry = entry.strip()
-    if not entry or entry == "-":
-        return "", "miss"
     if entry.endswith(")") and " (" in entry:
         email, _, status = entry[:-1].partition(" (")
         return email.strip(), status.strip()
-    return entry, ""
+    return "", "miss"
 
 
 def build_contact_rows(prospect: Prospect) -> list[dict]:
-    """Reconstructs one dict per tracked contact from the "; "-joined parallel
-    fields (contact_name/contact_title/contact_linkedin/contact_emails). Every
-    index is kept, including email misses. Only the top-ranked contact (index
-    0 — the same person build_draft_prompt addresses) carries outreach_angle
-    and the draft fields; other rows leave those blank."""
-    names = prospect.contact_name.split("; ") if prospect.contact_name else []
-    titles = prospect.contact_title.split("; ") if prospect.contact_title else []
-    linkedins = prospect.contact_linkedin.split("; ") if prospect.contact_linkedin else []
-    emails = prospect.contact_emails.split("; ") if prospect.contact_emails else []
+    """Reconstructs one dict per tracked contact from the CONTACT_FIELD_SEP-joined
+    parallel fields (contact_name/contact_title/contact_linkedin/contact_emails).
+    Every index is kept, including email misses. Only the top-ranked contact
+    (index 0 — the same person build_draft_prompt addresses) carries
+    outreach_angle and the draft fields; other rows leave those blank."""
+    names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
+    titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
+    linkedins = (
+        prospect.contact_linkedin.split(CONTACT_FIELD_SEP) if prospect.contact_linkedin else []
+    )
+    emails = prospect.contact_emails.split(CONTACT_FIELD_SEP) if prospect.contact_emails else []
 
     rows = []
     for i, name in enumerate(names):
@@ -77,8 +77,8 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
         row = {
             "company": prospect.company,
             "contact_name": name.strip(),
-            "contact_title": titles[i] if i < len(titles) else "",
-            "contact_linkedin": linkedins[i] if i < len(linkedins) else "",
+            "contact_title": titles[i].strip() if i < len(titles) else "",
+            "contact_linkedin": linkedins[i].strip() if i < len(linkedins) else "",
             "contact_email": email,
             "email_status": status,
             "outreach_angle": "",

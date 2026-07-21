@@ -5,6 +5,11 @@ from typing import Optional
 
 from pydantic import BaseModel
 
+# Separator for the parallel "; "-joined contact_name/contact_title/
+# contact_linkedin/contact_emails fields — shared by gtm/hubspot.py::_split_contacts
+# and gtm/output.py::build_contact_rows, the two places that split them back apart.
+CONTACT_FIELD_SEP = "; "
+
 # Locked column order for the Google Sheet (docs/PLAN.md).
 SHEET_COLUMNS = [
     "company",
