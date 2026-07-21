@@ -3,14 +3,15 @@ then automated gpt-4.1-mini fact-check (qa_check) once merged.
 
 Claude does the judgment (drafting, matching company/voice-guide.md's tone) —
 Python only builds the prompt and, after the human round-trip, fact-checks it.
+One call per (prospect, persona tier present) pair — a CFO and a director at
+the same company never get the same email.
 """
 from __future__ import annotations
 
 from pydantic import BaseModel
 
 from gtm.costlog import CostLog
-from gtm.persona import classify_persona
-from gtm.schema import Prospect
+from gtm.schema import DraftSet, Prospect
 
 MODEL = "gpt-4.1-mini"
 # docs/tools/openai.md — confirmed live 2026-07-20, still API-accessible though
@@ -26,17 +27,27 @@ class QAResult(BaseModel):
     flag: str = ""  # empty = every claim is supported; else a short note of what isn't
 
 
-def build_draft_prompt(voice_guide: str, p: Prospect) -> str:
-    top_title = p.contact_title.split(";")[0].strip() if p.contact_title else ""
-    persona = classify_persona(top_title)
+def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
     contact_block = ""
-    if persona != "unknown":
+    if tier != "unknown":
         contact_block = (
             f"\n## This contact (tailor the pitch to their seniority)\n"
-            f"- top contact title: {top_title}\n"
-            f"- persona tier: {persona}\n"
-            f"Apply the matching rule from the voice guide's \"Persona tailoring\" section.\n"
+            f"- persona tier: {tier}\n"
+            f"This draft is for every contact at {p.company} classified into the '{tier}' "
+            f"tier (gtm/persona.py::classify_persona) — apply the matching rule from the "
+            f"voice guide's \"Persona tailoring\" section.\n"
         )
+
+    competitor_block = ""
+    if p.competitor_weaknesses:
+        weaknesses = "\n".join(f"- {w}" for w in p.competitor_weaknesses)
+        competitor_block = (
+            f"\n## Displacement ammo — {p.company} currently ships in a {p.competitor} case\n"
+            f"Name {p.competitor} specifically in the value prop and cite ONE of these "
+            f"researched weaknesses verbatim — never a generic \"better than X\" claim:\n"
+            f"{weaknesses}\n"
+        )
+
     return f"""Draft a 2-email cold sequence (initial + follow-up), 2 versions each, for
 {p.company}. Follow company/voice-guide.md exactly — its tone, banned phrases, signature,
 and format rules below are non-negotiable:
@@ -50,13 +61,14 @@ and format rules below are non-negotiable:
 - buying_signals: {p.buying_signals}
 - key_news: {p.key_news}
 - fit_reason: {p.fit_reason}
-{contact_block}
+{contact_block}{competitor_block}
 ## Structure (self-enforce — from the voice guide's "Email structure")
 1. Open with a real, specific fact about {p.company} (drawn from outreach_angle /
    buying_signals / key_news) — never a generic greeting or banned opener.
-2. Value prop: a use case + social proof (a comparable, well-known customer) + the pain it removes.
+2. Value prop: a use case + social proof (category-level only — AeroVault has no named
+   customers to cite) + the pain it removes.
 3. Close with ONE closed-ended (yes/no) ask or a low-pressure negative-CTA — never stack asks.
-Tailor the value prop to the contact's persona tier (see the voice guide's "Persona tailoring").
+Tailor the value prop to the '{tier}' persona tier (see the voice guide's "Persona tailoring").
 
 ## Format (self-enforce — do not exceed)
 - Subject line: under 40 characters, TRIGGER-FIRST — lead with the prospect's own
@@ -68,26 +80,26 @@ Tailor the value prop to the contact's persona tier (see the voice guide's "Pers
 - No links in the body. No banned phrases (see voice guide). Close with the signature block
   from the voice guide.
 
-Reply with ONLY this JSON (no prose), keyed by company name:
-{{"{p.company}": {{"draft_initial": {{"v1": {{"subject": "...", "body": "..."}}, "v2": {{"subject": "...", "body": "..."}}}},
-"draft_followup": {{"v1": {{"subject": "...", "body": "..."}}, "v2": {{"subject": "...", "body": "..."}}}}}}}}
+Reply with ONLY this JSON (no prose), keyed by company name then persona tier:
+{{"{p.company}": {{"{tier}": {{"draft_initial": {{"v1": {{"subject": "...", "body": "..."}}, "v2": {{"subject": "...", "body": "..."}}}},
+"draft_followup": {{"v1": {{"subject": "...", "body": "..."}}, "v2": {{"subject": "...", "body": "..."}}}}}}}}}}
 
 Save the answer to drafts.json."""
 
 
-def build_redraft_prompt(voice_guide: str, p: Prospect) -> str:
+def build_redraft_prompt(voice_guide: str, p: Prospect, tier: str, draft: DraftSet) -> str:
     """Same brief as build_draft_prompt, plus the QA fact-check failure reason
-    (p.qa_flag) so the rewrite fixes only the flagged claim, not a fresh draft."""
-    base = build_draft_prompt(voice_guide, p)
+    (draft.qa_flag) so the rewrite fixes only the flagged claim, not a fresh draft."""
+    base = build_draft_prompt(voice_guide, p, tier)
     return (
         f"{base}\n\n## QA rewrite required\n"
-        f"The previous draft failed fact-check: {p.qa_flag}\n"
+        f"The previous draft failed fact-check: {draft.qa_flag}\n"
         f"Rewrite to remove or fix that unsupported claim — keep everything else "
         f"(tone, structure, format) as specified above."
     )
 
 
-def qa_check(p: Prospect, *, client=None, costlog: CostLog | None = None) -> str:
+def qa_check(p: Prospect, draft: DraftSet, *, client=None, costlog: CostLog | None = None) -> str:
     if client is None:
         from dotenv import load_dotenv
         from openai import OpenAI
@@ -98,8 +110,8 @@ def qa_check(p: Prospect, *, client=None, costlog: CostLog | None = None) -> str
     evidence = (
         f"buying_signals: {p.buying_signals}\nkey_news: {p.key_news}\nfit_reason: {p.fit_reason}"
     )
-    initial = f"Subject: {p.draft_initial_subject}\n{p.draft_initial_body}"
-    followup = f"Subject: {p.draft_followup_subject}\n{p.draft_followup_body}"
+    initial = f"Subject: {draft.initial_subject}\n{draft.initial_body}"
+    followup = f"Subject: {draft.followup_subject}\n{draft.followup_body}"
     completion = client.chat.completions.parse(
         model=MODEL,
         messages=[
