@@ -12,6 +12,7 @@ from gtm.run import (
     cmd_enrich,
     cmd_fit,
     cmd_output,
+    cmd_redraft,
     cmd_segment,
     cmd_signals,
     cmd_start,
@@ -497,7 +498,7 @@ def test_cmd_segment_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_pat
     cmd_segment("teal-demo-9")  # must NOT raise — nothing needs a draft prompt
 
 
-def test_cmd_draft_merges_and_runs_qa_flagging_unsupported_claims(monkeypatch, tmp_path):
+def test_cmd_draft_flags_unsupported_claim_and_raises_redraft_checkpoint(monkeypatch, tmp_path, capsys):
     import gtm.run as run_mod
 
     monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
@@ -514,11 +515,22 @@ def test_cmd_draft_merges_and_runs_qa_flagging_unsupported_claims(monkeypatch, t
 
     monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "unsupported $1M claim")
 
-    cmd_draft("teal-demo-10", str(drafts_path))
+    with pytest.raises(CheckpointPending) as exc_info:
+        cmd_draft("teal-demo-10", str(drafts_path))
+
+    cp = exc_info.value
+    assert cp.file == "drafts.json"
+    assert "redraft" in cp.action
+    assert "teal-demo-10" in cp.resume
+    assert "redraft" in cp.resume
 
     saved = load_state(tmp_path)
     assert saved[0].draft_initial_subject == "Case built for the Teal 2?"
-    assert saved[0].qa_flag == "unsupported $1M claim"
+    assert saved[0].qa_flag == "unsupported $1M claim"  # pending retry, not finalized
+
+    out = capsys.readouterr().out
+    assert "REDRAFT" in out
+    assert "unsupported $1M claim" in out
 
 
 def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
@@ -547,6 +559,81 @@ def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
     saved = load_state(tmp_path)
     assert saved[0].qa_flag == ""  # left blank, not blocked
     assert (tmp_path / "errors.log").exists()
+
+
+def test_cmd_redraft_merges_and_finalizes_qa_passed(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="Teal Drones", website="https://tealdrones.com", status="priority",
+        draft_initial_subject="old subject", qa_flag="unsupported $1M claim",
+    )]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Teal Drones": {
+            "draft_initial": {"v1": {"subject": "Fixed subject", "body": "fixed hook"}, "v2": {"subject": "s2", "body": "b2"}},
+            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+        }
+    }))
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "")
+
+    cmd_redraft("teal-demo-13", str(drafts_path))  # must NOT raise — single retry cap
+
+    saved = load_state(tmp_path)
+    assert saved[0].draft_initial_subject == "Fixed subject"
+    assert saved[0].qa_flag == "passed"
+
+
+def test_cmd_redraft_keeps_flag_text_if_still_failing_after_retry(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="Teal Drones", website="https://tealdrones.com", status="priority",
+        draft_initial_subject="old subject", qa_flag="unsupported $1M claim",
+    )]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Teal Drones": {
+            "draft_initial": {"v1": {"subject": "Still bad", "body": "still bad hook"}, "v2": {"subject": "s2", "body": "b2"}},
+            "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
+        }
+    }))
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, **kw: "still references unsupported claim")
+
+    cmd_redraft("teal-demo-14", str(drafts_path))  # must NOT raise — no infinite retry loop
+
+    saved = load_state(tmp_path)
+    assert saved[0].qa_flag == "still references unsupported claim"
+
+
+def test_cmd_redraft_does_not_recheck_already_passed_prospects(monkeypatch, tmp_path):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="Already Fine Co", website="https://x.com", status="priority",
+        draft_initial_subject="Fine subject", qa_flag="passed",
+    )]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({}))  # nothing to merge — this company wasn't flagged
+
+    def _fail(p, **kw):
+        raise AssertionError("qa_check must not be called for an already-passed prospect")
+
+    monkeypatch.setattr(run_mod, "qa_check", _fail)
+
+    cmd_redraft("teal-demo-15", str(drafts_path))  # must NOT raise / must NOT call qa_check
+
+    saved = load_state(tmp_path)
+    assert saved[0].qa_flag == "passed"
 
 
 def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
@@ -667,7 +754,7 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
     p = saved[0]
     assert p.segment == "defense-ndaa-win"  # survived the round-trip from cmd_segment
     assert p.draft_initial_subject == "Case built for the Teal 2?"
-    assert p.qa_flag == ""
+    assert p.qa_flag == "passed"
 
 
 def test_main_exits_5_and_prints_resume_when_start_checkpoints(monkeypatch, capsys):

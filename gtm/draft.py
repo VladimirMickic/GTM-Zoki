@@ -72,6 +72,18 @@ Reply with ONLY this JSON (no prose), keyed by company name:
 Save the answer to drafts.json."""
 
 
+def build_redraft_prompt(voice_guide: str, p: Prospect) -> str:
+    """Same brief as build_draft_prompt, plus the QA fact-check failure reason
+    (p.qa_flag) so the rewrite fixes only the flagged claim, not a fresh draft."""
+    base = build_draft_prompt(voice_guide, p)
+    return (
+        f"{base}\n\n## QA rewrite required\n"
+        f"The previous draft failed fact-check: {p.qa_flag}\n"
+        f"Rewrite to remove or fix that unsupported claim — keep everything else "
+        f"(tone, structure, format) as specified above."
+    )
+
+
 def qa_check(p: Prospect, *, client=None, costlog: CostLog | None = None) -> str:
     if client is None:
         from dotenv import load_dotenv

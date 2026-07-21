@@ -1,6 +1,6 @@
 import pytest
 
-from gtm.draft import QAError, QAResult, build_draft_prompt, qa_check
+from gtm.draft import QAError, QAResult, build_draft_prompt, build_redraft_prompt, qa_check
 from gtm.schema import Prospect
 
 VOICE_GUIDE_SAMPLE = "## Tone\nWarm, consultative.\n## Banned phrases\ncircle back"
@@ -107,3 +107,15 @@ def test_draft_prompt_omits_persona_block_when_no_contact():
     p = Prospect(company="Teal", website="https://tealdrones.com", contact_title="")
     prompt = build_draft_prompt("VOICE", p)
     assert "## This contact" not in prompt
+
+
+def test_build_redraft_prompt_includes_qa_flag_reason_and_original_prompt():
+    p = Prospect(
+        company="Teal Drones", website="https://tealdrones.com",
+        buying_signals=["SRR win — US Army contract"], fit_reason="NDAA 15/15",
+        qa_flag="references a $1M contract not in evidence",
+    )
+    prompt = build_redraft_prompt(VOICE_GUIDE_SAMPLE, p)
+    assert "Teal Drones" in prompt
+    assert "references a $1M contract not in evidence" in prompt
+    assert "drafts.json" in prompt

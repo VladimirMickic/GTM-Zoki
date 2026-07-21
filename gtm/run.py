@@ -6,6 +6,7 @@
   python -m gtm.run signals <run> <signals.json>     # apply Claude's buying_signals/outreach_angle
   python -m gtm.run segment <run>                    # bucket passers → draft prompts
   python -m gtm.run draft <run> <drafts.json>        # apply Claude's drafts → auto QA
+  python -m gtm.run redraft <run> <drafts.json>      # apply fixed drafts for QA-flagged prospects → recheck (final)
   python -m gtm.run output <run>                     # CSV (+ Sheet push if creds present)
   python -m gtm.run learn                            # show feedback for ICP/denylist proposals
   python -m gtm.run smoke <url> [--live]             # one company, end-to-end; --live also pushes to Sheet
@@ -26,7 +27,7 @@ import gtm.github_state as github_state
 from gtm.brief import freeze_brief, load_brief
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
-from gtm.draft import build_draft_prompt, qa_check
+from gtm.draft import build_draft_prompt, build_redraft_prompt, qa_check
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
 from gtm.schema import Prospect
@@ -61,7 +62,7 @@ VOICE_GUIDE = Path("company/voice-guide.md")
 # the lifecycle states a stage can be in. Validated once per stage transition
 # (pre-flight, no network call) so a future typo here fails loud in tests
 # instead of silently sending a garbage label to GitHub.
-STAGE_NAMES = {"start", "fit", "enrich", "signals", "segment", "draft", "output", "emails"}
+STAGE_NAMES = {"start", "fit", "enrich", "signals", "segment", "draft", "redraft", "output", "emails"}
 STATUS_NAMES = {"running", "complete", "checkpoint", "failed"}
 
 
@@ -372,13 +373,55 @@ def cmd_draft(run: str, drafts_json: str) -> None:
                 continue
             n += 1
             try:
-                p.qa_flag = qa_check(p, costlog=costlog)
-                if p.qa_flag:
+                flag = qa_check(p, costlog=costlog)
+                p.qa_flag = flag or "passed"
+                if flag:
                     flagged += 1
             except Exception as e:
                 _log_error(ERROR_LOG, p.company, "qa", e)
         save_state(prospects, run_dir(run))
         print(f"{n} drafted, {flagged} flagged")
+        _print_cost_summary(run)
+
+        needs_redraft = [p for p in prospects if p.qa_flag and p.qa_flag != "passed"]
+        if needs_redraft:
+            voice_guide = VOICE_GUIDE.read_text()
+            print("\n=== REDRAFT PROMPTS — Claude: fix the flagged claim, save {company: {...}} to drafts.json ===")
+            for p in needs_redraft:
+                print(f"\n----- {p.company} (flagged: {p.qa_flag}) -----")
+                print(build_redraft_prompt(voice_guide, p))
+            raise CheckpointPending(
+                file="drafts.json",
+                action="redraft flagged emails (qa fact-check failed)",
+                resume=f"python -m gtm.run redraft {run} drafts.json",
+            )
+
+
+def cmd_redraft(run: str, drafts_json: str) -> None:
+    """Single retry after a qa_check failure (cmd_draft's checkpoint): merges the
+    fixed drafts, re-checks only the previously-flagged prospects, and finalizes
+    qa_flag to "passed" or the (final) failure text — no further checkpoint, so
+    this never loops more than once."""
+    with _track_stage(run, "redraft"):
+        prospects = load_state(run_dir(run))
+        merge_drafts(prospects, json.loads(Path(drafts_json).read_text()))
+        save_state(prospects, run_dir(run))
+
+        costlog = run_costlog(run)
+        n, still_flagged = 0, 0
+        for p in prospects:
+            if not p.draft_initial_subject or p.qa_flag in ("", "passed"):
+                continue
+            n += 1
+            try:
+                flag = qa_check(p, costlog=costlog)
+                p.qa_flag = flag or "passed"
+                if flag:
+                    still_flagged += 1
+            except Exception as e:
+                _log_error(ERROR_LOG, p.company, "qa", e)
+        save_state(prospects, run_dir(run))
+        print(f"{n} redrafted, {still_flagged} still flagged after retry")
         _print_cost_summary(run)
 
 
@@ -488,6 +531,8 @@ def main() -> None:
                 cmd_segment(run)
             case ["draft", run, drafts_json]:
                 cmd_draft(run, drafts_json)
+            case ["redraft", run, drafts_json]:
+                cmd_redraft(run, drafts_json)
             case ["output", run]:
                 cmd_output(run)
             case ["output", run, "--dry-run"]:

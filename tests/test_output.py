@@ -3,6 +3,7 @@ import csv
 
 from gtm.output import (
     CONTACT_COLUMNS,
+    _open_worksheet,
     build_contact_rows,
     push_contacts_to_sheet,
     push_to_sheet,
@@ -38,6 +39,7 @@ MULTI = Prospect(
     draft_initial_body="{FIRST_NAME} — saw Teal's SRR win.",
     draft_followup_subject="Following up",
     draft_followup_body="Just circling back.",
+    qa_flag="passed",
 )
 
 
@@ -125,8 +127,18 @@ def test_contact_columns_locked_order():
         "draft_initial_body",
         "draft_followup_subject",
         "draft_followup_body",
+        "qa_flag",
         "date_processed",
     ]
+
+
+def test_open_worksheet_default_name_is_companies():
+    # main tab must be named "companies" — never gspread's generic default
+    # "Sheet1" (2026-07-21: a run pushed to "Sheet1" instead of the user's
+    # existing "Companies" tab).
+    import inspect
+
+    assert inspect.signature(_open_worksheet).parameters["name"].default == "companies"
 
 
 def test_build_contact_rows_keeps_all_contacts_including_email_miss():
@@ -164,6 +176,7 @@ def test_build_contact_rows_drafts_repeat_on_every_contact_row():
         assert r["draft_initial_body"] == "{FIRST_NAME} — saw Teal's SRR win."
         assert r["draft_followup_subject"] == "Following up"
         assert r["draft_followup_body"] == "Just circling back."
+        assert r["qa_flag"] == "passed"
 
 
 def test_build_contact_rows_zero_contacts_returns_empty_list():

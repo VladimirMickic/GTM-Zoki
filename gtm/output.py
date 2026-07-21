@@ -30,6 +30,7 @@ CONTACT_COLUMNS = [
     "draft_initial_body",
     "draft_followup_subject",
     "draft_followup_body",
+    "qa_flag",
     "date_processed",
 ]
 
@@ -93,6 +94,7 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
             "draft_initial_body": prospect.draft_initial_body,
             "draft_followup_subject": prospect.draft_followup_subject,
             "draft_followup_body": prospect.draft_followup_body,
+            "qa_flag": prospect.qa_flag,
             "date_processed": prospect.date_processed,
         })
     return rows
@@ -113,7 +115,7 @@ def write_contacts_csv(prospects: list[Prospect], path: str | Path) -> int:
     return n
 
 
-def _open_worksheet(name: str = "Sheet1"):
+def _open_worksheet(name: str = "companies"):
     import gspread
 
     gc = gspread.service_account(filename=SERVICE_ACCOUNT_FILE)
