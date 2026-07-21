@@ -70,9 +70,9 @@ rugged-case partner ≈ 0-3/15 — we'd be displacing an incumbent, say so; a so
 box ≈ 10-15/15). If case_evidence is still unknown after the web hunt, score exactly 3/15
 and write "unknown" — never award midpoint points for missing evidence.
 
-- **70–100** = push to sheet, priority outreach
-- **40–69** = keep, lower priority
-- **<40 or any disqualifier** = drop
+- **Tier 1 (70–100)** → `status="priority"` — push to sheet, full personalized outreach (drafted).
+- **Tier 2 (40–69)** → `status="keep"` — push to sheet, lower priority, still gets a personalized draft.
+- **Tier 3 (<40, or any disqualifier)** → `status="drop"` — logged, excluded from the sheet, **never drafted**. Fit is the last stage a Tier 3 company reaches: enrich/segment/draft all gate on `status in ("priority", "keep")`, so no email is ever personalized for it.
 
 ---
 

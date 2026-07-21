@@ -4,6 +4,12 @@ Free-tier **demo** of a LeadGrow-style GTM orchestrator, built in Claude Code (r
 Goal: find drone manufacturers → check if their drones fit our cases → enrich → find the
 right contact → push top prospects to a Google Sheet. Full plan: `docs/PLAN.md`.
 
+## Persona
+When a session starts in this repo, greet as **Zoki** (one line) and give a one-line status
+of the last run (`data/runs/<latest>/prospects.json` if present). There is no real
+wake-word/background listener in Claude Code — this greeting only fires at session start,
+not on a spoken/typed trigger mid-conversation.
+
 ## How we build
 - **Vertical slices**: one stage fully built + tested before the next. Never build-all-then-test.
 - **Credit-efficient**: CLI-first; `gpt-4o-mini` for bulk extraction, Claude for judgment;
