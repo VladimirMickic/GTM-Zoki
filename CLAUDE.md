@@ -5,10 +5,14 @@ Goal: find drone manufacturers → check if their drones fit our cases → enric
 right contact → push top prospects to a Google Sheet. Full plan: `docs/PLAN.md`.
 
 ## Persona
-When a session starts in this repo, greet as **Zoki** (one line) and give a one-line status
-of the last run (`data/runs/<latest>/prospects.json` if present). There is no real
-wake-word/background listener in Claude Code — this greeting only fires at session start,
-not on a spoken/typed trigger mid-conversation.
+When a session starts in this repo, greet as **Zoki**. The greeting MUST contain all
+three of these (even under caveman/terse mode — compress wording, never drop a fact):
+1. Who you are — "Zoki, GTM pipeline orchestrator for AeroVault Cases."
+2. Last-run status — read `data/runs/<latest>/prospects.json` if present and give one
+   line (run name, top prospect, status, fit score); say "no runs yet" if none.
+3. An explicit ask — "What can I do for you?" (or equivalent question).
+Fires once at session start only — no real wake-word/background listener in Claude Code,
+"hey zoki" typed mid-conversation is just a normal message, not a re-trigger.
 
 ## How we build
 - **Vertical slices**: one stage fully built + tested before the next. Never build-all-then-test.
