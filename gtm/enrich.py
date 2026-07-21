@@ -6,6 +6,8 @@ build_signal_prompt() — the company-research skill adds depth when run in-loop
 """
 from __future__ import annotations
 
+import re
+
 from gtm.contacts import serper_search
 from gtm.schema import Prospect
 
@@ -13,10 +15,23 @@ MAX_NEWS = 5
 SNIPPET_WORDS = 25
 
 
+def _normalize(s: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", s.lower())
+
+
 def find_company_linkedin(company: str, *, search=serper_search) -> str:
+    """Only accepts a /company/ result whose URL slug overlaps the target
+    company name — a bare `"{company}"` quoted search can surface an unrelated
+    company's page (2026-07-21: AeroVironment matched Blue Halo LLC's LinkedIn,
+    because Blue Halo was mentioned alongside AV in an unrelated result)."""
+    target = _normalize(company)
     for r in search(f'site:linkedin.com/company "{company}"', num=10):
-        if "/company/" in r.get("link", ""):
-            return r["link"]
+        link = r.get("link", "")
+        if "/company/" not in link:
+            continue
+        slug = _normalize(link.rstrip("/").rsplit("/company/", 1)[-1].split("/")[0])
+        if slug and (slug in target or target in slug):
+            return link
     return ""
 
 

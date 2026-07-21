@@ -37,6 +37,24 @@ def test_company_linkedin_first_company_page():
     assert find_company_linkedin("Teal Drones", search=fake_search) == "https://www.linkedin.com/company/teal-drones"
 
 
+def test_company_linkedin_skips_result_for_a_different_company():
+    # 2026-07-21: AeroVironment search returned Blue Halo LLC's page first (Blue
+    # Halo is mentioned alongside AV in unrelated results) — must skip a /company/
+    # link whose slug doesn't match the target company name.
+    def search(query, num=10):
+        return [
+            {"title": "Blue Halo | LinkedIn", "link": "https://www.linkedin.com/company/bluehalollc", "snippet": "AV company"},
+            {"title": "AeroVironment | LinkedIn", "link": "https://www.linkedin.com/company/aerovironment", "snippet": "drones"},
+        ]
+    assert find_company_linkedin("AeroVironment", search=search) == "https://www.linkedin.com/company/aerovironment"
+
+
+def test_company_linkedin_empty_when_no_result_matches_company():
+    def search(query, num=10):
+        return [{"title": "Blue Halo | LinkedIn", "link": "https://www.linkedin.com/company/bluehalollc", "snippet": "AV company"}]
+    assert find_company_linkedin("AeroVironment", search=search) == ""
+
+
 def test_community_signals_multi_source_capped_at_five():
     sigs = find_community_signals("Teal Drones", search=fake_search)
     assert len(sigs) == 5
