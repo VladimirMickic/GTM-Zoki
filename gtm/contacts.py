@@ -30,7 +30,19 @@ class Contact(BaseModel):
     linkedin: str = ""
 
 
-def serper_search(query: str, num: int = 10) -> list[dict]:
+# Ambient per-run CostLog for serper credit tracking. CLI stages set this once
+# (gtm/run.py) so every serper_search call logs 1 credit into the run's cost
+# file without threading a costlog through every stage signature. None = no
+# logging (the default; unit tests inject fake `search=` and never reach here).
+_active_costlog = None
+
+
+def set_active_costlog(costlog) -> None:
+    global _active_costlog
+    _active_costlog = costlog
+
+
+def serper_search(query: str, num: int = 10, *, costlog=None) -> list[dict]:
     resp = requests.post(
         SERPER_URL,
         headers={"X-API-KEY": os.environ["SERPER_API_KEY"], "Content-Type": "application/json"},
@@ -38,6 +50,9 @@ def serper_search(query: str, num: int = 10) -> list[dict]:
         timeout=10,
     )
     resp.raise_for_status()
+    cl = costlog if costlog is not None else _active_costlog
+    if cl is not None:
+        cl.record_serper(credits=1)  # 1 credit per search (Serper free tier)
     return resp.json().get("organic", [])
 
 

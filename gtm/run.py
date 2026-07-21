@@ -38,6 +38,21 @@ DATA = Path("data")
 ERROR_LOG = DATA / "errors.log"
 COSTS = DATA / "costs.jsonl"
 FEEDBACK = DATA / "feedback.jsonl"
+
+
+def run_costlog(run: str) -> CostLog:
+    """Per-run cost file so `cost of each run` is separable (openai $ + serper
+    credits). Also arms serper credit logging: every serper_search call routes
+    through gtm.contacts and records 1 credit into this file (ambient hook)."""
+    import gtm.contacts as contacts
+
+    costlog = CostLog(run_dir(run) / "costs.jsonl")
+    contacts.set_active_costlog(costlog)
+    return costlog
+
+
+def _print_cost_summary(run: str) -> None:
+    print(f"\ncost this run — {CostLog(run_dir(run) / 'costs.jsonl').summary_line()}")
 ICP = Path("company/ICP.md")
 VOICE_GUIDE = Path("company/voice-guide.md")
 
@@ -224,7 +239,7 @@ def cmd_start(brief_path: str) -> None:
     # `run` (brief.run) only becomes known above, mid-body — the tracking
     # wrapper starts here, not at the top of the function.
     with _track_stage(brief.run, "start"):
-        costlog = CostLog(COSTS)
+        costlog = run_costlog(brief.run)
         prospects = [Prospect(company=company_from_url(u), website=u, source="brief") for u in brief.urls]
         if brief.query:
             from gtm.discover import discover
@@ -257,6 +272,7 @@ def cmd_start(brief_path: str) -> None:
             print(f"\n----- {company} -----")
             print(build_fit_prompt(icp, company, ex))
 
+        _print_cost_summary(brief.run)
         if ex_by_company:
             raise CheckpointPending(
                 file="fit.json",
@@ -280,6 +296,7 @@ def cmd_enrich(run: str) -> None:
     from gtm.enrich import build_signal_prompt, enrich
 
     with _track_stage(run, "enrich"):
+        run_costlog(run)  # arms serper credit logging for enrich + contacts
         prospects = load_state(run_dir(run))
         for p in prospects:
             if p.status not in ("priority", "keep"):
@@ -300,6 +317,7 @@ def cmd_enrich(run: str) -> None:
                 print(f"\n----- {p.company} -----")
                 print(build_signal_prompt(p))
 
+        _print_cost_summary(run)
         if needs_signals:
             raise CheckpointPending(
                 file="signals.json",
@@ -347,7 +365,7 @@ def cmd_draft(run: str, drafts_json: str) -> None:
         merge_drafts(prospects, json.loads(Path(drafts_json).read_text()))
         save_state(prospects, run_dir(run))
 
-        costlog = CostLog(COSTS)
+        costlog = run_costlog(run)
         n, flagged = 0, 0
         for p in prospects:
             if not p.draft_initial_subject:
@@ -361,6 +379,7 @@ def cmd_draft(run: str, drafts_json: str) -> None:
                 _log_error(ERROR_LOG, p.company, "qa", e)
         save_state(prospects, run_dir(run))
         print(f"{n} drafted, {flagged} flagged")
+        _print_cost_summary(run)
 
 
 def cmd_output(run: str, dry_run: bool = False) -> None:
@@ -406,6 +425,8 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         else:
             print("no HUBSPOT_SERVICE_KEY — skipped HubSpot push (CSV is ready)")
 
+        _print_cost_summary(run)  # final: full run spend, bucketed by provider
+
 
 def emails_for_prospect(p: Prospect, *, waterfall_fn=None) -> Prospect:
     from gtm.emails import split_contact_names, waterfall
@@ -422,6 +443,7 @@ def emails_for_prospect(p: Prospect, *, waterfall_fn=None) -> Prospect:
 
 def cmd_emails(run: str) -> None:
     with _track_stage(run, "emails"):
+        run_costlog(run)  # arms serper credit logging for the email waterfall
         prospects = load_state(run_dir(run))
         for p in prospects:
             if p.status not in ("priority", "keep") or not p.contact_name:
@@ -432,6 +454,7 @@ def cmd_emails(run: str) -> None:
             except Exception as e:
                 _log_error(ERROR_LOG, p.company, "emails", e)
         save_state(prospects, run_dir(run))
+        _print_cost_summary(run)
 
 
 def cmd_learn() -> None:

@@ -1,5 +1,37 @@
 """S4 — contacts: LinkedIn SERP parsing + ranking (no email, per plan)."""
+import gtm.contacts as contacts
 from gtm.contacts import Contact, build_contact_query, find_contacts, parse_linkedin_result
+from gtm.costlog import CostLog
+
+
+class _FakeResp:
+    def raise_for_status(self):
+        pass
+
+    def json(self):
+        return {"organic": [{"title": "x", "link": "y"}]}
+
+
+def test_serper_search_records_one_credit(tmp_path, monkeypatch):
+    # every serper call routes through serper_search — logging 1 credit here
+    # captures all serper spend (discover/enrich/contacts/spechunt/emails).
+    monkeypatch.setattr(contacts.requests, "post", lambda *a, **k: _FakeResp())
+    monkeypatch.setenv("SERPER_API_KEY", "test")
+    log = CostLog(tmp_path / "cost.jsonl")
+    contacts.serper_search("q", costlog=log)
+    assert log.by_provider()["serper"]["credits"] == 1
+
+
+def test_serper_search_uses_ambient_costlog(tmp_path, monkeypatch):
+    monkeypatch.setattr(contacts.requests, "post", lambda *a, **k: _FakeResp())
+    monkeypatch.setenv("SERPER_API_KEY", "test")
+    log = CostLog(tmp_path / "cost.jsonl")
+    contacts.set_active_costlog(log)
+    try:
+        contacts.serper_search("q")  # no explicit costlog — ambient picks it up
+    finally:
+        contacts.set_active_costlog(None)
+    assert log.by_provider()["serper"]["credits"] == 1
 
 FIXTURE_RESULTS = [
     {"title": "George Matus - Founder & CTO - Teal Drones | LinkedIn", "link": "https://www.linkedin.com/in/georgematus"},

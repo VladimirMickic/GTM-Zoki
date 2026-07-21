@@ -27,3 +27,37 @@ def test_per_stage_breakdown(tmp_path):
     by_stage = log.by_stage()
     assert by_stage["extract"]["cost_usd"] == 0.1
     assert by_stage["fit"]["tokens_in"] == 20
+
+
+def test_record_serper_logs_credits_not_dollars(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record_serper(stage="enrich", credits=3)
+    e = log._entries()[0]
+    assert e["provider"] == "serper"
+    assert e["credits"] == 3
+    assert e["cost_usd"] == 0.0
+
+
+def test_by_provider_buckets_openai_dollars_and_serper_credits(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record(stage="extract", model="gpt-4o-mini", tokens_in=1000, tokens_out=200, cost_usd=0.03)
+    log.record(stage="discover", model="gpt-4o-mini", tokens_in=500, tokens_out=100, cost_usd=0.01)
+    log.record_serper(stage="enrich", credits=3)
+    log.record_serper(stage="contacts", credits=1)
+    prov = log.by_provider()
+    assert round(prov["openai"]["cost_usd"], 4) == 0.04
+    assert prov["serper"]["credits"] == 4
+    assert prov["openai"]["credits"] == 0
+
+
+def test_summary_line_reads_dollars_for_openai_credits_for_serper(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record(stage="extract", model="gpt-4o-mini", tokens_in=1000, tokens_out=200, cost_usd=0.04)
+    log.record_serper(stage="enrich", credits=15)
+    line = log.summary_line()
+    assert "openai:$0.0400" in line
+    assert "serper:15 credits" in line
+
+
+def test_summary_line_empty_when_nothing_recorded(tmp_path):
+    assert CostLog(tmp_path / "cost.jsonl").summary_line() == "no spend recorded"

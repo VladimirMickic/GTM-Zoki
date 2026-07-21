@@ -345,6 +345,23 @@ def test_cmd_output_dry_run_skips_sheet_push_but_writes_csv(monkeypatch, tmp_pat
     assert (tmp_path / "prospects_contacts.csv").exists()
 
 
+def test_cmd_output_prints_bucketed_cost_summary(monkeypatch, tmp_path, capsys):
+    # user 2026-07-21: end of run shows spend bucketed by provider —
+    # openai in dollars, serper in credits.
+    from gtm.costlog import CostLog
+
+    _setup_output_run(monkeypatch, tmp_path)
+    cl = CostLog(tmp_path / "costs.jsonl")
+    cl.record(stage="extract", model="gpt-4o-mini", tokens_in=1000, tokens_out=200, cost_usd=0.04)
+    cl.record_serper(stage="enrich", credits=15)
+
+    cmd_output("ignored", dry_run=True)
+
+    out = capsys.readouterr().out
+    assert "openai:$0.0400" in out
+    assert "serper:15 credits" in out
+
+
 def test_cmd_output_live_still_pushes_to_sheet(monkeypatch, tmp_path):
     calls = _setup_output_run(monkeypatch, tmp_path)
 
