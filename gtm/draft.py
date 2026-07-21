@@ -38,6 +38,14 @@ def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
             f"voice guide's \"Persona tailoring\" section.\n"
         )
 
+    tailoring_line = (
+        f"Tailor the value prop to the '{tier}' persona tier (see the voice guide's "
+        f'"Persona tailoring").'
+        if tier != "unknown"
+        else "Tailor the value prop to the general pain points in outreach_angle / buying_signals — "
+        "no persona tier is known for this contact."
+    )
+
     competitor_block = ""
     if p.competitor_weaknesses:
         weaknesses = "\n".join(f"- {w}" for w in p.competitor_weaknesses)
@@ -68,7 +76,7 @@ and format rules below are non-negotiable:
 2. Value prop: a use case + social proof (category-level only — AeroVault has no named
    customers to cite) + the pain it removes.
 3. Close with ONE closed-ended (yes/no) ask or a low-pressure negative-CTA — never stack asks.
-Tailor the value prop to the '{tier}' persona tier (see the voice guide's "Persona tailoring").
+{tailoring_line}
 
 ## Format (self-enforce — do not exceed)
 - Subject line: under 40 characters, TRIGGER-FIRST — lead with the prospect's own

@@ -26,6 +26,18 @@ def test_detect_competitor_explorer_case_brand():
     assert detect_competitor("uses an Explorer Case 5325") == "Explorer Case 5325"
 
 
+def test_detect_competitor_ignores_ip_rating_as_model_number():
+    assert detect_competitor("Pelican case rated IP67") == "Pelican"
+
+
+def test_detect_competitor_ignores_mil_std_reference_as_model_number():
+    assert detect_competitor("uses a Pelican case, MIL-STD-810") == "Pelican"
+
+
+def test_detect_competitor_ignores_ip_rating_after_branded_case():
+    assert detect_competitor("ships in a Pelican-branded case with IP67 seal") == "Pelican"
+
+
 def test_build_displacement_prompt_names_company_and_competitor():
     prompt = build_displacement_prompt("AeroVironment", "Pelican 1520")
     assert "AeroVironment" in prompt

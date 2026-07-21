@@ -105,6 +105,31 @@ def test_merge_signals_by_company():
     assert ps[0].competitor_weaknesses == ["too heavy"]
 
 
+def test_merge_signals_omitting_competitor_weaknesses_preserves_existing_value():
+    # cmd_enrich prints the signal prompt and the displacement prompt as two
+    # separate blocks — if only the signal prompt gets answered, the
+    # signals.json entry for this company won't include competitor_weaknesses
+    # at all. That must NOT wipe out ammo already set by displacement research.
+    ps = [Prospect(company="A", website="https://a.com", competitor="Pelican 1520",
+                    competitor_weaknesses=["too heavy for field carry"])]
+    merge_signals(ps, {"A": {"buying_signals": ["won contract"], "outreach_angle": "new angle"}})
+    assert ps[0].competitor_weaknesses == ["too heavy for field carry"]
+
+
+def test_merge_signals_explicit_empty_competitor_weaknesses_still_clears_it():
+    ps = [Prospect(company="A", website="https://a.com", competitor="Pelican 1520",
+                    competitor_weaknesses=["too heavy for field carry"])]
+    merge_signals(ps, {"A": {"buying_signals": [], "outreach_angle": "", "competitor_weaknesses": []}})
+    assert ps[0].competitor_weaknesses == []
+
+
+def test_merge_signals_explicit_new_competitor_weaknesses_overrides_existing():
+    ps = [Prospect(company="A", website="https://a.com", competitor="Pelican 1520",
+                    competitor_weaknesses=["too heavy for field carry"])]
+    merge_signals(ps, {"A": {"competitor_weaknesses": ["cracks in cold weather"]}})
+    assert ps[0].competitor_weaknesses == ["cracks in cold weather"]
+
+
 def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
     # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row
     from gtm.run import known_domains, save_state

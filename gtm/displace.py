@@ -15,13 +15,24 @@ import re
 # imports this rather than keeping its own copy.
 _RUGGED_BRANDS = ("pelican", "seahorse", "nanuk", "skb", "hardigg", "explorer case")
 
-_MODEL_TOKEN = re.compile(r"\b[A-Za-z]*\d[\dA-Za-z-]*\b")
+_MODEL_TOKEN = re.compile(r"\b\d[\dA-Za-z-]*\b")
+# Spec-rating shapes that look like model numbers but aren't — never treat a
+# match as a competitor model number if it also matches one of these.
+_SPEC_SHAPES = (
+    re.compile(r"^IP\d+$", re.IGNORECASE),
+    re.compile(r"^\d+MM$", re.IGNORECASE),
+)
+_MIL_STD_TOKEN = re.compile(r"MIL-STD", re.IGNORECASE)
 
 
 def detect_competitor(case_evidence: str) -> str:
     """Deterministic brand detection, no LLM call. Returns "<Brand>" or
     "<Brand> <model>" (e.g. "Pelican 1520") when a model-number-shaped token
-    appears in the same short evidence string, "" if no known brand matches."""
+    appears in the same short evidence string, "" if no known brand matches.
+
+    Model tokens must start with a digit and must not be a spec-rating shape
+    (IP67, 5mm) or a MIL-STD reference — those are common in the same
+    sentence as a competitor case but are not the case's model number."""
     evidence = case_evidence or ""
     lowered = evidence.lower()
     for brand in _RUGGED_BRANDS:
@@ -29,7 +40,19 @@ def detect_competitor(case_evidence: str) -> str:
         if idx == -1:
             continue
         name = "Explorer Case" if brand == "explorer case" else brand.title()
-        model = _MODEL_TOKEN.search(evidence[idx + len(brand):])
+        remainder = evidence[idx + len(brand):]
+        model = None
+        for candidate in _MODEL_TOKEN.finditer(remainder):
+            token = candidate.group()
+            if any(shape.match(token) for shape in _SPEC_SHAPES):
+                continue
+            # A MIL-STD reference like "MIL-STD-810" trails a numeric token
+            # ("810") right after the "MIL-STD" text — skip it.
+            preceding = remainder[: candidate.start()]
+            if _MIL_STD_TOKEN.search(preceding[-10:]):
+                continue
+            model = candidate
+            break
         return f"{name} {model.group()}" if model else name
     return ""
 

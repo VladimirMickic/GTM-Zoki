@@ -214,7 +214,11 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
         if s:
             p.buying_signals = s.get("buying_signals", [])
             p.outreach_angle = s.get("outreach_angle", "")
-            p.competitor_weaknesses = s.get("competitor_weaknesses", [])
+            # Default to the prospect's existing value, not []: cmd_enrich prints the
+            # signal prompt and the displacement prompt as two separate blocks for the
+            # same company, so an entry that only answers the signal prompt omits this
+            # key entirely — that must not silently wipe ammo already merged/set.
+            p.competitor_weaknesses = s.get("competitor_weaknesses", p.competitor_weaknesses)
 
 
 def merge_drafts(prospects: list[Prospect], raw: dict) -> None:

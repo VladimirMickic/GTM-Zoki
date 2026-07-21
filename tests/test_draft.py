@@ -39,6 +39,22 @@ def test_build_draft_prompt_omits_persona_block_for_unknown_tier():
     assert "## This contact" not in prompt
 
 
+def test_build_draft_prompt_omits_persona_tailoring_reference_for_unknown_tier():
+    # The voice guide has no "unknown" tier doctrine — the prompt must not tell
+    # Claude to consult a "Persona tailoring" section that doesn't cover it.
+    p = Prospect(company="Teal", website="https://tealdrones.com")
+    prompt = build_draft_prompt("VOICE", p, "unknown")
+    assert "Persona tailoring" not in prompt
+    assert "unknown' persona tier" not in prompt
+
+
+def test_build_draft_prompt_keeps_persona_tailoring_reference_for_known_tier():
+    p = Prospect(company="Teal", website="https://tealdrones.com")
+    prompt = build_draft_prompt("VOICE", p, "c-suite")
+    assert "Persona tailoring" in prompt
+    assert "c-suite' persona tier" in prompt
+
+
 def test_build_draft_prompt_includes_competitor_ammo_when_present():
     p = Prospect(
         company="AeroVironment", website="https://avinc.com",
