@@ -30,6 +30,13 @@ No corporate filler: "circle back", "synergy", "game-changer", "solution" (as a 
 in for the product), "leverage" (as a verb), "touch base", "low-hanging fruit".
 No hedge-padding: "just wanted to", "I was wondering if maybe".
 
+## Specificity (no vague value-prop claims)
+Every value-prop claim must name a concrete mechanism or spec difference — a MIL-STD-810H
+drop-test rating, an exact dimension, a cited competitor weakness (`competitor_weaknesses`,
+from `gtm/displace.py`'s research step). Never a bare comparative with nothing behind it:
+banned — "protects better", "keeps your gear safe", "built for reliability" — unless
+immediately followed by the specific fact that backs it.
+
 ## Signature
 Every draft closes with:
 ```
@@ -62,7 +69,13 @@ Each closes with the signature above.
 
 ## Email structure (per email)
 1. **Opening line** — a real, specific fact about the prospect (a win, launch, or shipping gap), not a generic greeting.
-2. **Value prop** — a use case + social proof (a comparable, well-known customer) + the pain it removes. Example framing: "We saw companies similar to you have {xyz}."
+2. **Value prop** — a use case + social proof + the pain it removes. AeroVault Cases is a
+   demo company with no real customers: social proof must be **category-level only**
+   ("other defense sUAS makers ship in our cases") — never a named client or logo. Also
+   name a concrete mechanism or spec difference (a MIL-STD-810H drop-test spec, a cited
+   competitor weakness, an exact dimension) — never a bare comparative like "protects
+   better" with nothing backing it. Example framing: "Other {segment} drone makers run
+   into {xyz} — our {mechanism} fixes it."
 3. **Close** — one closed-ended (yes/no) call to action. Never stack asks. Prefer a low-pressure ask, e.g. a negative-CTA: "Do you think it'd be a bad idea to sit and chat for 15 min?" or a single real question: "Do you run into {problem}, and how do you handle it today?"
 
 ## Persona tailoring (pitch by seniority)
