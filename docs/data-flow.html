@@ -238,19 +238,56 @@
             <span class="chip chip--model">◆ claude</span>
             <span class="chip">▢ serper · company-research</span>
           </div>
-          <p><b>Passers only</b> — no credits wasted on rejects. Find the right person (name, title, LinkedIn — no email yet), then pull profile + recent news, plus a LinkedIn and Reddit signal.</p>
+          <p><b>Passers only</b> — no credits wasted on rejects. Find the right person (name, title, LinkedIn — no email yet), then pull profile + recent news, plus a LinkedIn and Reddit signal. Claude synthesizes it all into one outreach angle.</p>
           <p class="rec"><b>record</b> <span class="plus">+=</span> contact_name, contact_title, contact_linkedin, key_news, linkedin, community_signals, buying_signals, outreach_angle</p>
         </div>
       </li>
 
-      <li class="stage out">
+      <li class="stage">
         <div class="rail"><span class="node">06</span></div>
         <div class="card">
           <div class="card-top">
-            <h2>Output</h2>
-            <span class="chip">▢ gspread</span>
+            <h2>Segment</h2>
+            <span class="chip">▢ pure python</span>
           </div>
-          <p>The finished record lands as one row in your Google Sheet, top prospects first — ready for you to work, and to grade. Contacts land on their own <b>Contacts</b> tab, one row per person.</p>
+          <p>No model call — deterministic rule bucket into one of ICP.md's 4 angles (NDAA/defense beats generic-case-upgrade beats new-model-launch beats field-harsh-environment), so the draft prompt knows which hook to lean into.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> segment</p>
+        </div>
+      </li>
+
+      <li class="stage">
+        <div class="rail"><span class="node">07</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Draft &amp; QA</h2>
+            <span class="chip chip--model">◆ claude</span>
+            <span class="chip chip--model">◆ gpt-4.1-mini</span>
+          </div>
+          <p>Claude drafts a 2-email sequence (initial + follow-up, 2 versions each), tone locked to <code>voice-guide.md</code> and pitch-angle tailored to the contact's seniority (c-suite / manager / IC). Then the cheap model fact-checks every claim against the evidence — flags anything not backed by buying_signals/key_news/fit_reason.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> draft_initial, draft_followup, qa_flag</p>
+        </div>
+      </li>
+
+      <li class="stage">
+        <div class="rail"><span class="node">08</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Emails</h2>
+            <span class="chip">▢ prospeo · getprospect · hunter</span>
+          </div>
+          <p>Waterfall, cheap→expensive: pattern-guess tier first, then a finder/verifier provider chain, AI hunt last resort — every hit is verified before it's trusted.</p>
+          <p class="rec"><b>record</b> <span class="plus">+=</span> contact_emails <span class="plus">(verified / risky / unverified)</span></p>
+        </div>
+      </li>
+
+      <li class="stage out">
+        <div class="rail"><span class="node">09</span></div>
+        <div class="card">
+          <div class="card-top">
+            <h2>Output</h2>
+            <span class="chip">▢ gspread · hubspot</span>
+          </div>
+          <p>The finished record lands as one row in your Google Sheet, top prospects first — ready for you to work, and to grade. Contacts land on their own <b>Contacts</b> tab, one row per person. Passers also upsert to HubSpot (company + contact, domain-deduped) when a service key is set.</p>
           <div class="sheet-scroll">
             <div class="sheet">
               <div class="sheet-row head"><span>company</span><span>fit</span><span>best_case</span><span>status</span></div>
@@ -275,9 +312,9 @@
     </ol>
 
     <div class="foot">
-      <span><b>Demo scope</b> stages 01–06 → Sheet</span>
-      <span><b>Later</b> copy · QA · HubSpot/Bison · verified emails</span>
-      <span><b>Cost</b> gpt-4o-mini + Claude · no new keys</span>
+      <span><b>Demo scope</b> stages 01–09 → Sheet + HubSpot</span>
+      <span><b>Later</b> monitor (recurring watch) · Bison send</span>
+      <span><b>Cost</b> gpt-4o-mini + gpt-4.1-mini + Claude · no new keys</span>
     </div>
   </div>
 </main>
