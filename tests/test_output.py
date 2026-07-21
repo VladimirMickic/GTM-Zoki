@@ -10,7 +10,7 @@ from gtm.output import (
     write_contacts_csv,
     write_csv,
 )
-from gtm.schema import SHEET_COLUMNS, Prospect
+from gtm.schema import DraftSet, SHEET_COLUMNS, Prospect
 
 TEAL = Prospect(
     company="Teal Drones",
@@ -35,11 +35,24 @@ MULTI = Prospect(
     ),
     contact_emails="blake@tealdrones.com (verified); manoj@tealdrones.com (risky); -",
     outreach_angle="Teal's SRR win shows momentum in defense — AeroVault's NDAA case fits their next RFP cycle.",
-    draft_initial_subject="Case built for the Teal 2?",
-    draft_initial_body="{FIRST_NAME} — saw Teal's SRR win.",
-    draft_followup_subject="Following up",
-    draft_followup_body="Just circling back.",
-    qa_flag="passed",
+    drafts_by_tier={
+        # CEO + VP Engineering both classify c-suite (gtm/persona.py); Field
+        # Technician classifies ic — two distinct draft sets, not a shared one.
+        "c-suite": DraftSet(
+            initial_subject="Case built for the Teal 2?",
+            initial_body="{FIRST_NAME} — saw Teal's SRR win.",
+            followup_subject="Following up",
+            followup_body="Just circling back.",
+            qa_flag="passed",
+        ),
+        "ic": DraftSet(
+            initial_subject="Field kit for the Teal 2?",
+            initial_body="{FIRST_NAME} — Teal's SRR win means more units in the field.",
+            followup_subject="Quick follow-up",
+            followup_body="Still curious what you use today.",
+            qa_flag="passed",
+        ),
+    },
 )
 
 
@@ -168,29 +181,55 @@ def test_build_contact_rows_company_level_fields_repeat_on_every_row():
     assert [r["contact_title"] for r in rows] == ["CEO", "VP Engineering", "Field Technician"]
 
 
-def test_build_contact_rows_drafts_repeat_on_every_contact_row():
-    # one draft set per company, shared by all its contacts (same as outreach_angle);
-    # {FIRST_NAME} is merged to each contact's own first name (see merge test below).
+def test_build_contact_rows_picks_draft_matching_each_contacts_persona_tier():
+    # c-suite (Blake: CEO, Manoj: VP Engineering) gets the c-suite draft;
+    # ic (Steven: Field Technician) gets its own distinct draft — not the same
+    # email for every contact, per the persona-tiered drafts design.
     rows = build_contact_rows(MULTI)
-    for r in rows:
-        assert r["draft_initial_subject"] == "Case built for the Teal 2?"
-        assert r["draft_followup_subject"] == "Following up"
-        assert r["draft_followup_body"] == "Just circling back."
-        assert r["qa_flag"] == "passed"
+    assert rows[0]["draft_initial_subject"] == "Case built for the Teal 2?"  # Blake, CEO -> c-suite
+    assert rows[1]["draft_initial_subject"] == "Case built for the Teal 2?"  # Manoj, VP Eng -> c-suite
+    assert rows[2]["draft_initial_subject"] == "Field kit for the Teal 2?"   # Steven, Field Tech -> ic
+    assert rows[0]["qa_flag"] == "passed"
+    assert rows[2]["qa_flag"] == "passed"
+
+
+def test_build_contact_rows_falls_back_to_unknown_tier_draft_when_contacts_tier_has_no_draft():
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {"unknown": DraftSet(initial_subject="Generic subject", initial_body="Hi {FIRST_NAME}.")},
+    })
+    rows = build_contact_rows(p)
+    # none of CEO/VP Engineering/Field Technician classify as "unknown", but no
+    # tier-specific draft exists for them either — falls back to "unknown"
+    assert all(r["draft_initial_subject"] == "Generic subject" for r in rows)
+
+
+def test_build_contact_rows_blank_draft_when_no_matching_or_unknown_tier():
+    p = MULTI.model_copy(update={"drafts_by_tier": {}})
+    rows = build_contact_rows(p)
+    assert all(r["draft_initial_subject"] == "" for r in rows)
+    assert all(r["qa_flag"] == "" for r in rows)
 
 
 def test_build_contact_rows_merges_first_name_per_row():
     # 2026-07-21 (user): {FIRST_NAME} must never ship literal — merge each
-    # contact's own first name into their draft body.
+    # contact's own first name into their (tier-matched) draft body.
     rows = build_contact_rows(MULTI)
-    firsts = ["Blake", "Manoj", "Steven"]
-    for r, first in zip(rows, firsts):
-        assert r["draft_initial_body"] == f"{first} — saw Teal's SRR win."
+    assert rows[0]["draft_initial_body"] == "Blake — saw Teal's SRR win."
+    assert rows[1]["draft_initial_body"] == "Manoj — saw Teal's SRR win."
+    assert rows[2]["draft_initial_body"] == "Steven — Teal's SRR win means more units in the field."
+    for r in rows:
         assert "{FIRST_NAME}" not in r["draft_initial_body"]
 
 
 def test_build_contact_rows_merges_company_variable():
-    p = MULTI.model_copy(update={"draft_initial_body": "Hi {FIRST_NAME}, {COMPANY} ships tough."})
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {
+            **MULTI.drafts_by_tier,
+            "c-suite": MULTI.drafts_by_tier["c-suite"].model_copy(
+                update={"initial_body": "Hi {FIRST_NAME}, {COMPANY} ships tough."}
+            ),
+        }
+    })
     rows = build_contact_rows(p)
     assert rows[0]["draft_initial_body"] == "Hi Blake, Teal Drones ships tough."
 
@@ -221,7 +260,7 @@ def test_build_contact_rows_single_contact_carries_company_meta():
         contact_linkedin="https://linkedin.com/in/jane",
         contact_emails="jane@x.com (verified)",
         outreach_angle="angle text",
-        draft_initial_subject="Subject A",
+        drafts_by_tier={"c-suite": DraftSet(initial_subject="Subject A")},
     )
     rows = build_contact_rows(p)
     assert len(rows) == 1

@@ -14,7 +14,7 @@ import csv
 import os
 from pathlib import Path
 
-from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, Prospect, _trim
+from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, DraftSet, Prospect, _trim
 
 SERVICE_ACCOUNT_FILE = "credentials/service_account.json"
 
@@ -71,11 +71,14 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
     """Reconstructs one dict per tracked contact from the CONTACT_FIELD_SEP-joined
     parallel fields (contact_name/contact_title/contact_linkedin/contact_emails).
     Every index is kept, including email misses. Company-level fields
-    (company/outreach_angle/the four draft cells/date_processed) repeat on every
-    row so each contact row is self-contained; per-contact fields (name/title/
-    linkedin/email/email_status) vary by index. There is one draft set per
-    company (the v1 subject+body on the Prospect model) — it repeats on each of
-    that company's contact rows, same as outreach_angle."""
+    (company/outreach_angle/date_processed) repeat on every row so each contact
+    row is self-contained; per-contact fields (name/title/linkedin/email/
+    email_status) vary by index, and so does the draft — each contact's own
+    title is classified into a persona tier (gtm/persona.py::classify_persona)
+    and matched against prospect.drafts_by_tier, falling back to the "unknown"
+    tier's draft if that contact's classified tier has no draft of its own."""
+    from gtm.persona import classify_persona
+
     names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
     titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
     linkedins = (
@@ -88,9 +91,12 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
         email, status = _parse_email_entry(emails[i]) if i < len(emails) else ("", "miss")
         name = name.strip()
         first = name.split()[0] if name else ""
+        title = titles[i].strip() if i < len(titles) else ""
+        tier = classify_persona(title)
+        draft = prospect.drafts_by_tier.get(tier) or prospect.drafts_by_tier.get("unknown") or DraftSet()
 
         def merge(text: str) -> str:
-            # {FIRST_NAME}/{COMPANY} are drafted once per company; substitute this
+            # {FIRST_NAME}/{COMPANY} are drafted once per company, substitute this
             # contact's own first name so no placeholder ever ships literal.
             return text.replace("{FIRST_NAME}", first or "there").replace(
                 "{COMPANY}", prospect.company
@@ -99,16 +105,16 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
         rows.append({
             "company": prospect.company,
             "contact_name": name,
-            "contact_title": titles[i].strip() if i < len(titles) else "",
+            "contact_title": title,
             "contact_linkedin": linkedins[i].strip() if i < len(linkedins) else "",
             "contact_email": email,
             "email_status": status,
             "outreach_angle": _trim(prospect.outreach_angle, _OUTREACH_ANGLE_MAX_CHARS),
-            "draft_initial_subject": merge(prospect.draft_initial_subject),
-            "draft_initial_body": merge(prospect.draft_initial_body),
-            "draft_followup_subject": merge(prospect.draft_followup_subject),
-            "draft_followup_body": merge(prospect.draft_followup_body),
-            "qa_flag": prospect.qa_flag,
+            "draft_initial_subject": merge(draft.initial_subject),
+            "draft_initial_body": merge(draft.initial_body),
+            "draft_followup_subject": merge(draft.followup_subject),
+            "draft_followup_body": merge(draft.followup_body),
+            "qa_flag": draft.qa_flag,
             "date_processed": prospect.date_processed,
         })
     return rows
