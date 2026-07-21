@@ -53,6 +53,22 @@ def _trim(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n].rsplit(" ", 1)[0].rstrip() + "…"
 
 
+class DraftSet(BaseModel):
+    """One 2-email (initial + follow-up), 2-version cold-email draft, plus its
+    own fact-check flag. One of these per persona tier present at a company
+    (gtm/persona.py::distinct_tiers_present) — a CFO and a director never
+    share a draft."""
+    initial_subject: str = ""
+    initial_body: str = ""
+    initial_subject_alt: str = ""
+    initial_body_alt: str = ""
+    followup_subject: str = ""
+    followup_body: str = ""
+    followup_subject_alt: str = ""
+    followup_body_alt: str = ""
+    qa_flag: str = ""
+
+
 class Prospect(BaseModel):
     # stage 1 — input
     company: str
@@ -81,20 +97,17 @@ class Prospect(BaseModel):
     linkedin: str = ""
     community_signals: list[str] = []
     outreach_angle: str = ""
+    # stage "enrich" (displacement sub-step, gtm/displace.py) — state-only, feeds
+    # draft's value-prop ammo; "" / [] when no named competitor was detected.
+    competitor: str = ""
+    competitor_weaknesses: list[str] = []
     # stage "segment" — deterministic bucketing, feeds draft's angle choice; not a sheet column
     segment: str = ""
-    # stage "draft" — v1 (primary) variant, surfaced on the sheet
-    draft_initial_subject: str = ""
-    draft_initial_body: str = ""
-    draft_followup_subject: str = ""
-    draft_followup_body: str = ""
-    # stage "draft" — v2 (alternate) variant, state-only; open drafts.json for it
-    draft_initial_subject_alt: str = ""
-    draft_initial_body_alt: str = ""
-    draft_followup_subject_alt: str = ""
-    draft_followup_body_alt: str = ""
-    # stage "draft" (qa sub-step) — empty when clean, else a short unsupported-claim note
-    qa_flag: str = ""
+    # stage "draft" — one DraftSet per distinct persona tier present among this
+    # company's contacts (gtm/persona.py::distinct_tiers_present). Replaces the
+    # old single flat draft_*/qa_flag fields — gtm/output.py::build_contact_rows
+    # picks the matching-tier entry per contact row.
+    drafts_by_tier: dict[str, DraftSet] = {}
     # stage 6 — output / feedback
     date_processed: str = ""
     status: str = ""

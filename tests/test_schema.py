@@ -1,5 +1,5 @@
 """S0: Prospect schema — the contract every stage reads/writes."""
-from gtm.schema import Prospect, SHEET_COLUMNS
+from gtm.schema import DraftSet, Prospect, SHEET_COLUMNS
 
 
 def test_new_prospect_needs_only_company_and_website():
@@ -151,28 +151,48 @@ def test_segment_field_is_state_only_not_on_sheet():
 
 def test_outreach_drafts_qa_status_are_state_only_not_on_main_sheet():
     # 2026-07-21: main sheet = company…community_signals only. outreach_angle,
-    # the draft fields, qa_flag, source, date_processed, and status all live on
-    # the Contacts tab (gtm/output.py) or in local state, never on the main row.
+    # competitor/competitor_weaknesses, drafts_by_tier, source, date_processed,
+    # and status all live on the Contacts tab (gtm/output.py) or in local state,
+    # never on the main row.
     for col in (
-        "outreach_angle",
-        "draft_initial_subject", "draft_initial_body",
-        "draft_followup_subject", "draft_followup_body",
-        "draft_initial_subject_alt", "draft_initial_body_alt",
-        "draft_followup_subject_alt", "draft_followup_body_alt",
-        "qa_flag", "source", "date_processed", "status",
+        "outreach_angle", "competitor", "competitor_weaknesses",
+        "drafts_by_tier", "source", "date_processed", "status",
     ):
         assert col not in SHEET_COLUMNS
 
     p = Prospect(
         company="X", website="https://x.com",
         outreach_angle="the hook",
-        draft_initial_subject="Case built for the Teal 2?",
-        qa_flag="unsupported claim",
+        competitor="Pelican 1520",
+        competitor_weaknesses=["too heavy — reddit thread"],
+        drafts_by_tier={"c-suite": DraftSet(initial_subject="Case built for the Teal 2?", qa_flag="unsupported claim")},
         status="priority",
     )
     row = p.to_sheet_row()
     assert "Case built for the Teal 2?" not in row
+    assert "Pelican 1520" not in row
     # fields still exist on the model for draft.py / hubspot.py / the Contacts tab
-    assert p.draft_initial_subject == "Case built for the Teal 2?"
-    assert p.qa_flag == "unsupported claim"
+    assert p.drafts_by_tier["c-suite"].initial_subject == "Case built for the Teal 2?"
+    assert p.drafts_by_tier["c-suite"].qa_flag == "unsupported claim"
+    assert p.competitor == "Pelican 1520"
     assert p.status == "priority"
+
+
+def test_draft_set_defaults_all_blank():
+    d = DraftSet()
+    assert d.initial_subject == ""
+    assert d.qa_flag == ""
+
+
+def test_prospect_drafts_by_tier_defaults_empty_dict():
+    p = Prospect(company="X", website="https://x.com")
+    assert p.drafts_by_tier == {}
+
+
+def test_drafts_by_tier_roundtrips_through_json():
+    p = Prospect(
+        company="X", website="https://x.com",
+        drafts_by_tier={"director": DraftSet(initial_subject="Subj")},
+    )
+    again = Prospect.model_validate_json(p.model_dump_json())
+    assert again.drafts_by_tier["director"].initial_subject == "Subj"
