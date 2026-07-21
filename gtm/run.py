@@ -367,7 +367,13 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
     import os
 
     from gtm.hubspot import push_to_hubspot
-    from gtm.output import SERVICE_ACCOUNT_FILE, push_to_sheet, write_csv
+    from gtm.output import (
+        SERVICE_ACCOUNT_FILE,
+        push_contacts_to_sheet,
+        push_to_sheet,
+        write_contacts_csv,
+        write_csv,
+    )
 
     with _track_stage(run, "output"):
         prospects = load_state(run_dir(run))
@@ -376,11 +382,16 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
             p.date_processed = today
         save_state(prospects, run_dir(run))
         csv_path = run_dir(run) / "prospects.csv"
+        contacts_csv_path = run_dir(run) / "prospects_contacts.csv"
         n = write_csv(prospects, csv_path)
+        nc = write_contacts_csv(prospects, contacts_csv_path)
         print(f"wrote {n} prospects → {csv_path}")
+        print(f"wrote {nc} contacts → {contacts_csv_path}")
         if Path(SERVICE_ACCOUNT_FILE).exists() and writes_enabled(not dry_run):
             pushed = push_to_sheet(prospects)
+            pushed_contacts = push_contacts_to_sheet(prospects)
             print(f"pushed {pushed} rows to Google Sheet")
+            print(f"pushed {pushed_contacts} rows to Contacts tab")
         elif dry_run:
             print("--dry-run — skipped Sheet push (CSV is ready)")
         else:

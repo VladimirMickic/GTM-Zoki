@@ -323,9 +323,13 @@ def _setup_output_run(monkeypatch, tmp_path):
     fake_creds.write_text("{}")
     monkeypatch.setattr(output_mod, "SERVICE_ACCOUNT_FILE", str(fake_creds))
 
-    calls = {"push": 0}
+    calls = {"push": 0, "push_contacts": 0}
     monkeypatch.setattr(
         output_mod, "push_to_sheet", lambda *a, **k: calls.__setitem__("push", calls["push"] + 1)
+    )
+    monkeypatch.setattr(
+        output_mod, "push_contacts_to_sheet",
+        lambda *a, **k: calls.__setitem__("push_contacts", calls["push_contacts"] + 1),
     )
     return calls
 
@@ -336,7 +340,9 @@ def test_cmd_output_dry_run_skips_sheet_push_but_writes_csv(monkeypatch, tmp_pat
     cmd_output("ignored", dry_run=True)
 
     assert calls["push"] == 0
+    assert calls["push_contacts"] == 0
     assert (tmp_path / "prospects.csv").exists()
+    assert (tmp_path / "prospects_contacts.csv").exists()
 
 
 def test_cmd_output_live_still_pushes_to_sheet(monkeypatch, tmp_path):
@@ -345,7 +351,9 @@ def test_cmd_output_live_still_pushes_to_sheet(monkeypatch, tmp_path):
     cmd_output("ignored")
 
     assert calls["push"] == 1
+    assert calls["push_contacts"] == 1
     assert (tmp_path / "prospects.csv").exists()
+    assert (tmp_path / "prospects_contacts.csv").exists()
 
 
 def _setup_hubspot_run(monkeypatch, tmp_path):
