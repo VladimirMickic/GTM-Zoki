@@ -36,17 +36,21 @@ Later (out of demo scope): segment, copy (cold-email), QA, HubSpot/Bison, verifi
   log&skip → `data/errors.log`, cost log. Live E2E on Teal Drones: fit 85/priority (re-run 2026-07-18 after feedback round 1: split dims/weights, top-3 contacts, news snippets, line-per-point reasons). Commands in CLAUDE.md.
 
 ## Sheet columns
-Main tab ends at community_signals (company-level enrichment only):
+Main tab = full funnel, one row per company, ends at community_signals. Shows all
+three tiers (Tier 3/drops included, tagged in the `tier` column):
 company · website · description · drone_models · drone_dimensions · drone_weights · best_case_line · us_made/NDAA ·
-fit_score · fit_reason · buying_signals · key_news · linkedin · community_signals
+fit_score · **tier** · fit_reason · buying_signals · key_news · linkedin · community_signals
+`tier` (1/2/3) is derived from status by `Prospect.tier` (priority=1, keep=2, drop=3, error/unscored blank),
+never a stored field. Only Tier 1/2 get enrichment/contacts/drafts (enrich/segment/draft
+gate on `status in ("priority","keep")`); Tier 3 rows show fit only.
 
 Contacts get their own tab/CSV (one row per person, not packed into the company row):
-company · outreach_angle · contact_name · contact_title · contact_linkedin · contact_email · email_status ·
-source · date_processed · status(feedback)
-Company-level fields (company · outreach_angle · source · date_processed · status) repeat on
+company · contact_name · contact_title · contact_linkedin · contact_email · email_status ·
+outreach_angle · draft_initial_subject · draft_initial_body · draft_followup_subject · draft_followup_body · date_processed
+Company-level fields (company · outreach_angle · the four draft cells · date_processed) repeat on
 every contact row so each row is self-contained — see `gtm/output.py::build_contact_rows`.
-Drafts (draft_initial/followup subject+body) + qa_flag are state-only — they live in
-`drafts.json` / on the `Prospect` model (read by `gtm/draft.py`, `gtm/hubspot.py`), not on either Sheet tab.
+There is one draft set per company (v1 subject+body on the `Prospect` model); the v2/alt
+variant + qa_flag stay state-only in `drafts.json` / on the model (read by `gtm/draft.py`, `gtm/hubspot.py`).
 
 ## Credentials needed from user (asked per slice)
 - **S6**: Google Cloud **service-account JSON** + share target Sheet with its email.

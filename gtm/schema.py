@@ -14,6 +14,8 @@ CONTACT_FIELD_SEP = "; "
 # community_signals — everything downstream of it (outreach_angle, the draft
 # fields, qa_flag, source, date_processed, status) lives on the Contacts tab
 # (gtm/output.py::CONTACT_COLUMNS) or in local state, not on the company row.
+# `tier` (1/2/3) is derived from status by the Prospect.tier property, not a
+# stored field — it sits right after fit_score (the score's 1/2/3 band).
 SHEET_COLUMNS = [
     "company",
     "website",
@@ -24,12 +26,17 @@ SHEET_COLUMNS = [
     "best_case_line",
     "us_made_ndaa",
     "fit_score",
+    "tier",
     "fit_reason",
     "buying_signals",
     "key_news",
     "linkedin",
     "community_signals",
 ]
+
+# status → tier band (ICP.md): priority=Tier 1, keep=Tier 2, drop=Tier 3.
+# error/unscored companies have no tier (blank).
+_STATUS_TIER = {"priority": "1", "keep": "2", "drop": "3"}
 
 
 class Prospect(BaseModel):
@@ -77,6 +84,12 @@ class Prospect(BaseModel):
     # stage 6 — output / feedback
     date_processed: str = ""
     status: str = ""
+
+    @property
+    def tier(self) -> str:
+        """1/2/3 funnel band, derived from status so it never drifts from fit.
+        Read by SHEET_COLUMNS via getattr in to_sheet_row (not a stored field)."""
+        return _STATUS_TIER.get(self.status, "")
 
     def to_sheet_row(self) -> list[str]:
         """Render one sheet row in SHEET_COLUMNS order (lists joined, None blank)."""

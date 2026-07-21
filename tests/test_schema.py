@@ -15,6 +15,8 @@ def test_sheet_row_matches_locked_column_order():
     # 2026-07-21: main sheet ends at community_signals — outreach/drafts/qa/source/
     # date/status all moved to the Contacts tab (gtm/output.py::CONTACT_COLUMNS).
     assert SHEET_COLUMNS[-1] == "community_signals"
+    # tier sits right after fit_score (its band): score, then the 1/2/3 bucket
+    assert SHEET_COLUMNS[SHEET_COLUMNS.index("fit_score") + 1] == "tier"
     p = Prospect(
         company="Teal Drones",
         website="https://tealdrones.com",
@@ -28,6 +30,19 @@ def test_sheet_row_matches_locked_column_order():
     assert row[SHEET_COLUMNS.index("fit_score")] == "87/100"
     # lists are joined for the sheet, not dumped as python repr
     assert row[SHEET_COLUMNS.index("drone_models")] == "Black Widow; Hellcat"
+
+
+def test_tier_derives_from_status_and_renders_on_sheet():
+    # 2026-07-21: explicit tier column, derived from status so it never drifts.
+    # priority=Tier 1, keep=Tier 2, drop=Tier 3; error/unscored blank.
+    assert Prospect(company="X", website="https://x.com", status="priority").tier == "1"
+    assert Prospect(company="X", website="https://x.com", status="keep").tier == "2"
+    assert Prospect(company="X", website="https://x.com", status="drop").tier == "3"
+    assert Prospect(company="X", website="https://x.com", status="error").tier == ""
+    assert Prospect(company="X", website="https://x.com").tier == ""
+    p = Prospect(company="X", website="https://x.com", fit_score=45, status="keep")
+    row = p.to_sheet_row()
+    assert row[SHEET_COLUMNS.index("tier")] == "2"
 
 
 def test_unscored_fit_renders_blank_not_slash_100():

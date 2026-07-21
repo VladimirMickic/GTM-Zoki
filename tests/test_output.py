@@ -51,13 +51,18 @@ def test_write_csv_header_and_row(tmp_path):
     assert rows[1][SHEET_COLUMNS.index("fit_score")] == "87/100"
 
 
-def test_write_csv_drops_are_excluded_by_default(tmp_path):
-    dropped = TEAL.model_copy(update={"company": "BadCo", "status": "drop"})
+def test_write_csv_includes_all_tiers_including_drops(tmp_path):
+    # 2026-07-21 (user): main sheet is the full funnel — Tier 1/2/3. Dropped
+    # (Tier 3) companies now appear too, tagged tier "3" via the tier column.
+    dropped = TEAL.model_copy(update={"company": "BadCo", "status": "drop", "fit_score": 12})
     path = tmp_path / "out.csv"
     write_csv([TEAL, dropped], path)
+    rows = list(csv.reader(path.open()))
     body = path.read_text()
     assert "Teal Drones" in body
-    assert "BadCo" not in body
+    assert "BadCo" in body
+    badco = next(r for r in rows if r[SHEET_COLUMNS.index("company")] == "BadCo")
+    assert badco[SHEET_COLUMNS.index("tier")] == "3"
 
 
 class FakeWorksheet:
@@ -85,6 +90,15 @@ def test_push_to_sheet_writes_header_once_then_rows():
     assert ws2.appended[0][0] == "Teal Drones"  # no duplicate header
 
 
+def test_push_to_sheet_includes_dropped_tier3_rows():
+    ws = FakeWorksheet()
+    dropped = TEAL.model_copy(update={"company": "BadCo", "status": "drop", "fit_score": 12})
+    n = push_to_sheet([TEAL, dropped], worksheet=ws)
+    assert n == 2
+    pushed = [r[SHEET_COLUMNS.index("company")] for r in ws.appended[1:]]
+    assert "BadCo" in pushed
+
+
 def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
     # a brand-new Google Sheet can return a row of blank cells (not []) from
     # get_all_values() — must still be treated as "needs header", not "has header"
@@ -96,17 +110,22 @@ def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
 
 
 def test_contact_columns_locked_order():
+    # 2026-07-21 (user layout): drafts live on the Contacts tab again; source/status
+    # dropped. One row per contact; company-level cells (outreach_angle, drafts,
+    # date_processed) repeat on every contact row.
     assert CONTACT_COLUMNS == [
         "company",
-        "outreach_angle",
         "contact_name",
         "contact_title",
         "contact_linkedin",
         "contact_email",
         "email_status",
-        "source",
+        "outreach_angle",
+        "draft_initial_subject",
+        "draft_initial_body",
+        "draft_followup_subject",
+        "draft_followup_body",
         "date_processed",
-        "status",
     ]
 
 
@@ -123,28 +142,28 @@ def test_build_contact_rows_keeps_all_contacts_including_email_miss():
 
 
 def test_build_contact_rows_company_level_fields_repeat_on_every_row():
-    # 2026-07-21: drafts dropped from the Contacts tab; company-level fields
-    # (company, outreach_angle, source, date_processed, status) repeat on every
-    # contact row so each row is self-contained/filterable.
+    # 2026-07-21 (user layout): company-level fields (company, outreach_angle,
+    # the four draft cells, date_processed) repeat on every contact row so each
+    # row is self-contained. source/status are no longer on this tab.
     rows = build_contact_rows(MULTI)
     for r in rows:
         assert r["company"] == "Teal Drones"
         assert r["outreach_angle"] == MULTI.outreach_angle
-        assert r["source"] == "serper"
         assert r["date_processed"] == "2026-07-21"
-        assert r["status"] == "priority"
+        assert "source" not in r
+        assert "status" not in r
     # per-contact fields still differ row to row
     assert [r["contact_title"] for r in rows] == ["CEO", "VP Engineering", "Field Technician"]
 
 
-def test_build_contact_rows_no_draft_columns():
+def test_build_contact_rows_drafts_repeat_on_every_contact_row():
+    # one draft set per company, shared by all its contacts (same as outreach_angle)
     rows = build_contact_rows(MULTI)
-    for draft_col in (
-        "draft_initial_subject", "draft_initial_body",
-        "draft_followup_subject", "draft_followup_body",
-    ):
-        assert draft_col not in rows[0]
-        assert draft_col not in CONTACT_COLUMNS
+    for r in rows:
+        assert r["draft_initial_subject"] == "Case built for the Teal 2?"
+        assert r["draft_initial_body"] == "{FIRST_NAME} — saw Teal's SRR win."
+        assert r["draft_followup_subject"] == "Following up"
+        assert r["draft_followup_body"] == "Just circling back."
 
 
 def test_build_contact_rows_zero_contacts_returns_empty_list():
@@ -154,19 +173,20 @@ def test_build_contact_rows_zero_contacts_returns_empty_list():
 
 def test_build_contact_rows_single_contact_carries_company_meta():
     p = Prospect(
-        company="X", website="https://x.com", source="serper",
+        company="X", website="https://x.com",
         date_processed="2026-07-21", status="priority",
         contact_name="Jane Doe", contact_title="VP Ops",
         contact_linkedin="https://linkedin.com/in/jane",
         contact_emails="jane@x.com (verified)",
         outreach_angle="angle text",
+        draft_initial_subject="Subject A",
     )
     rows = build_contact_rows(p)
     assert len(rows) == 1
     assert rows[0]["contact_title"] == "VP Ops"
     assert rows[0]["outreach_angle"] == "angle text"
-    assert rows[0]["status"] == "priority"
-    assert rows[0]["source"] == "serper"
+    assert rows[0]["draft_initial_subject"] == "Subject A"
+    assert rows[0]["date_processed"] == "2026-07-21"
 
 
 def test_write_contacts_csv_header_and_rows(tmp_path):

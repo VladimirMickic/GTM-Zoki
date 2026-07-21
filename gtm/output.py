@@ -20,19 +20,24 @@ SERVICE_ACCOUNT_FILE = "credentials/service_account.json"
 
 CONTACT_COLUMNS = [
     "company",
-    "outreach_angle",
     "contact_name",
     "contact_title",
     "contact_linkedin",
     "contact_email",
     "email_status",
-    "source",
+    "outreach_angle",
+    "draft_initial_subject",
+    "draft_initial_body",
+    "draft_followup_subject",
+    "draft_followup_body",
     "date_processed",
-    "status",
 ]
 
 
-def write_csv(prospects: list[Prospect], path: str | Path, include_drops: bool = False) -> int:
+def write_csv(prospects: list[Prospect], path: str | Path, include_drops: bool = True) -> int:
+    # 2026-07-21: main sheet is the full funnel (Tier 1/2/3) — drops included by
+    # default, tagged tier "3" via the tier column. Pass include_drops=False to
+    # get only the qualified (Tier 1/2) rows.
     keep = [p for p in prospects if include_drops or p.status != "drop"]
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -61,10 +66,11 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
     """Reconstructs one dict per tracked contact from the CONTACT_FIELD_SEP-joined
     parallel fields (contact_name/contact_title/contact_linkedin/contact_emails).
     Every index is kept, including email misses. Company-level fields
-    (company/outreach_angle/source/date_processed/status) repeat on every row so
-    each contact row is self-contained; per-contact fields (name/title/linkedin/
-    email/email_status) vary by index. Drafts are NOT on this tab — they live in
-    drafts.json / on the Prospect model, read by gtm/draft.py and gtm/hubspot.py."""
+    (company/outreach_angle/the four draft cells/date_processed) repeat on every
+    row so each contact row is self-contained; per-contact fields (name/title/
+    linkedin/email/email_status) vary by index. There is one draft set per
+    company (the v1 subject+body on the Prospect model) — it repeats on each of
+    that company's contact rows, same as outreach_angle."""
     names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
     titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
     linkedins = (
@@ -77,15 +83,17 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
         email, status = _parse_email_entry(emails[i]) if i < len(emails) else ("", "miss")
         rows.append({
             "company": prospect.company,
-            "outreach_angle": prospect.outreach_angle,
             "contact_name": name.strip(),
             "contact_title": titles[i].strip() if i < len(titles) else "",
             "contact_linkedin": linkedins[i].strip() if i < len(linkedins) else "",
             "contact_email": email,
             "email_status": status,
-            "source": prospect.source,
+            "outreach_angle": prospect.outreach_angle,
+            "draft_initial_subject": prospect.draft_initial_subject,
+            "draft_initial_body": prospect.draft_initial_body,
+            "draft_followup_subject": prospect.draft_followup_subject,
+            "draft_followup_body": prospect.draft_followup_body,
             "date_processed": prospect.date_processed,
-            "status": prospect.status,
         })
     return rows
 
@@ -117,8 +125,9 @@ def _open_worksheet(name: str = "Sheet1"):
 
 
 def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
+    # main sheet = full funnel: every tier, drops included (tagged tier "3").
     ws = worksheet if worksheet is not None else _open_worksheet()
-    keep = [p for p in prospects if p.status != "drop"]
+    keep = list(prospects)
     rows = [p.to_sheet_row() for p in keep]
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)
