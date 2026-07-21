@@ -18,10 +18,13 @@ _SEP = re.compile(r"\s+[-–—]\s+")
 
 # who actually buys transport cases: ops/product/founders first
 _RANK_KEYWORDS = [
-    ("founder", 100), ("ceo", 95), ("chief", 90), ("vp", 85), ("vice president", 85),
+    ("founder", 100), ("chief", 90), ("vp", 85), ("vice president", 85),
     ("head of", 80), ("director", 75), ("operations", 70), ("product", 65),
     ("program", 60), ("logistics", 60), ("sales", 50), ("manager", 40),
 ]
+
+# not a target for outreach — excluded from find_contacts entirely, never a fallback.
+_EXCLUDE_KEYWORDS = ("ceo",)
 
 
 class Contact(BaseModel):
@@ -97,6 +100,11 @@ def find_contacts(company: str, *, search=serper_search) -> list[Contact]:
     contacts = []
     for r in results:
         c = parse_linkedin_result(r.get("title", ""), r.get("link", ""), company)
-        if c is not None:
+        if c is not None and not _is_excluded(c):
             contacts.append(c)
     return sorted(contacts, key=_rank, reverse=True)
+
+
+def _is_excluded(c: Contact) -> bool:
+    t = c.title.lower()
+    return any(re.search(rf"\b{re.escape(kw)}\b", t) for kw in _EXCLUDE_KEYWORDS)

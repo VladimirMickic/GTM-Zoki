@@ -70,6 +70,22 @@ def test_find_contacts_empty_serp():
     assert find_contacts("Ghost Co", search=lambda q, num=10: []) == []
 
 
+def test_find_contacts_excludes_ceo_titles():
+    # user: not targeting CEO for outreach — must never surface as a contact.
+    serp = [
+        {"title": "Alice Ames - CEO - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/alice"},
+        {"title": "Jane Smith – VP of Operations – Teal Drones | LinkedIn", "link": "https://linkedin.com/in/jane"},
+    ]
+    contacts = find_contacts("Teal Drones", search=lambda q, num=10: serp)
+    assert all(c.name != "Alice Ames" for c in contacts)
+    assert contacts[0].name == "Jane Smith"
+
+
+def test_find_contacts_returns_empty_when_only_ceo_found():
+    serp = [{"title": "Bob Lee - CEO - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/bob"}]
+    assert find_contacts("Teal Drones", search=lambda q, num=10: serp) == []
+
+
 def test_rank_uses_word_boundaries_not_substrings():
     # "Production Manager" must not match the "product" keyword (substring of "production")
     serp = [

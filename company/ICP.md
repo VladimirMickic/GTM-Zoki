@@ -48,6 +48,25 @@ inspection · Survey / mapping / GIS · Energy & utilities · Search & rescue.
 - **Software-only** / no hardware, or defunct company.
 - Pure reseller/distributor (doesn't manufacture).
 
+### Target titles for outreach
+Who we search for and rank (`gtm/contacts.py::_RANK_KEYWORDS`) — ops/product/founders buy
+transport cases, not generic sales/biz-dev, so they rank highest:
+
+| Rank | Titles | Why |
+|---|---|---|
+| 1 | Founder, any Chief (CTO/COO/CFO) | final budget authority |
+| 2 | VP / Vice President | division owner, signs off |
+| 3 | Head of..., Director | owns the field-gear/logistics program day to day |
+| 4 | Operations, Product, Program, Logistics (manager-level) | hands-on buyer, feels the pain directly |
+| 5 | Sales | fallback only — rarely the actual buyer |
+
+**Not targeted:** CEO — excluded entirely (`gtm/contacts.py::_EXCLUDE_KEYWORDS`), never
+surfaced as a contact even as a fallback when no other title is found.
+
+Draft tone is then tailored to whichever tier the top-ranked contact falls into
+(`gtm/persona.py::classify_persona` — finance / c-suite / director / manager / ic; doctrine
+per tier lives in `company/voice-guide.md`'s "Persona tailoring" section).
+
 ---
 
 ## Fit scoring (used by the pipeline)
