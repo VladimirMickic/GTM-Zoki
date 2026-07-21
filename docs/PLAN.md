@@ -36,16 +36,17 @@ Later (out of demo scope): segment, copy (cold-email), QA, HubSpot/Bison, verifi
   log&skip → `data/errors.log`, cost log. Live E2E on Teal Drones: fit 85/priority (re-run 2026-07-18 after feedback round 1: split dims/weights, top-3 contacts, news snippets, line-per-point reasons). Commands in CLAUDE.md.
 
 ## Sheet columns
+Main tab ends at community_signals (company-level enrichment only):
 company · website · description · drone_models · drone_dimensions · drone_weights · best_case_line · us_made/NDAA ·
-fit_score · fit_reason · buying_signals · key_news · linkedin · community_signals · outreach_angle ·
-draft_initial_subject · draft_initial_body · draft_followup_subject · draft_followup_body ·
-qa_flag · source · date_processed · status(feedback)
+fit_score · fit_reason · buying_signals · key_news · linkedin · community_signals
 
 Contacts get their own tab/CSV (one row per person, not packed into the company row):
-company · contact_name · contact_title · contact_linkedin · contact_email · email_status ·
-outreach_angle · draft_initial_subject · draft_initial_body · draft_followup_subject · draft_followup_body
-(outreach_angle + draft_* populated only on the top-ranked contact's row — see
-`gtm/output.py::build_contact_rows`).
+company · outreach_angle · contact_name · contact_title · contact_linkedin · contact_email · email_status ·
+source · date_processed · status(feedback)
+Company-level fields (company · outreach_angle · source · date_processed · status) repeat on
+every contact row so each row is self-contained — see `gtm/output.py::build_contact_rows`.
+Drafts (draft_initial/followup subject+body) + qa_flag are state-only — they live in
+`drafts.json` / on the `Prospect` model (read by `gtm/draft.py`, `gtm/hubspot.py`), not on either Sheet tab.
 
 ## Credentials needed from user (asked per slice)
 - **S6**: Google Cloud **service-account JSON** + share target Sheet with its email.

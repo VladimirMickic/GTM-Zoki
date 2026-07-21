@@ -12,7 +12,9 @@ def test_new_prospect_needs_only_company_and_website():
 
 def test_sheet_row_matches_locked_column_order():
     assert SHEET_COLUMNS[:3] == ["company", "website", "description"]
-    assert SHEET_COLUMNS[-1] == "status"
+    # 2026-07-21: main sheet ends at community_signals — outreach/drafts/qa/source/
+    # date/status all moved to the Contacts tab (gtm/output.py::CONTACT_COLUMNS).
+    assert SHEET_COLUMNS[-1] == "community_signals"
     p = Prospect(
         company="Teal Drones",
         website="https://tealdrones.com",
@@ -92,29 +94,30 @@ def test_segment_field_is_state_only_not_on_sheet():
     assert p.segment == "defense-ndaa-win"
 
 
-def test_draft_v1_fields_surface_on_sheet_v2_alt_fields_do_not():
-    for col in ("draft_initial_subject", "draft_initial_body", "draft_followup_subject", "draft_followup_body"):
-        assert col in SHEET_COLUMNS
-    for col in ("draft_initial_subject_alt", "draft_initial_body_alt", "draft_followup_subject_alt", "draft_followup_body_alt"):
+def test_outreach_drafts_qa_status_are_state_only_not_on_main_sheet():
+    # 2026-07-21: main sheet = company…community_signals only. outreach_angle,
+    # the draft fields, qa_flag, source, date_processed, and status all live on
+    # the Contacts tab (gtm/output.py) or in local state, never on the main row.
+    for col in (
+        "outreach_angle",
+        "draft_initial_subject", "draft_initial_body",
+        "draft_followup_subject", "draft_followup_body",
+        "draft_initial_subject_alt", "draft_initial_body_alt",
+        "draft_followup_subject_alt", "draft_followup_body_alt",
+        "qa_flag", "source", "date_processed", "status",
+    ):
         assert col not in SHEET_COLUMNS
-    i = SHEET_COLUMNS.index("outreach_angle")
-    assert SHEET_COLUMNS[i + 1] == "draft_initial_subject"
-    assert SHEET_COLUMNS[i + 5] == "qa_flag"
 
     p = Prospect(
         company="X", website="https://x.com",
+        outreach_angle="the hook",
         draft_initial_subject="Case built for the Teal 2?",
-        draft_initial_body="{FIRST_NAME} — saw Teal's SRR win.",
-        draft_initial_subject_alt="alt subject — not on sheet",
+        qa_flag="unsupported claim",
+        status="priority",
     )
     row = p.to_sheet_row()
-    assert row[SHEET_COLUMNS.index("draft_initial_subject")] == "Case built for the Teal 2?"
-    assert p.draft_initial_subject_alt == "alt subject — not on sheet"  # exists on model, just not in row
-
-
-def test_qa_flag_defaults_empty_and_is_on_sheet():
-    assert "qa_flag" in SHEET_COLUMNS
-    p = Prospect(company="X", website="https://x.com")
-    assert p.qa_flag == ""
-    row = p.to_sheet_row()
-    assert row[SHEET_COLUMNS.index("qa_flag")] == ""
+    assert "Case built for the Teal 2?" not in row
+    # fields still exist on the model for draft.py / hubspot.py / the Contacts tab
+    assert p.draft_initial_subject == "Case built for the Teal 2?"
+    assert p.qa_flag == "unsupported claim"
+    assert p.status == "priority"

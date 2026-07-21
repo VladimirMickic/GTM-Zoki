@@ -20,16 +20,15 @@ SERVICE_ACCOUNT_FILE = "credentials/service_account.json"
 
 CONTACT_COLUMNS = [
     "company",
+    "outreach_angle",
     "contact_name",
     "contact_title",
     "contact_linkedin",
     "contact_email",
     "email_status",
-    "outreach_angle",
-    "draft_initial_subject",
-    "draft_initial_body",
-    "draft_followup_subject",
-    "draft_followup_body",
+    "source",
+    "date_processed",
+    "status",
 ]
 
 
@@ -61,9 +60,11 @@ def _parse_email_entry(entry: str) -> tuple[str, str]:
 def build_contact_rows(prospect: Prospect) -> list[dict]:
     """Reconstructs one dict per tracked contact from the CONTACT_FIELD_SEP-joined
     parallel fields (contact_name/contact_title/contact_linkedin/contact_emails).
-    Every index is kept, including email misses. Only the top-ranked contact
-    (index 0 — the same person build_draft_prompt addresses) carries
-    outreach_angle and the draft fields; other rows leave those blank."""
+    Every index is kept, including email misses. Company-level fields
+    (company/outreach_angle/source/date_processed/status) repeat on every row so
+    each contact row is self-contained; per-contact fields (name/title/linkedin/
+    email/email_status) vary by index. Drafts are NOT on this tab — they live in
+    drafts.json / on the Prospect model, read by gtm/draft.py and gtm/hubspot.py."""
     names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
     titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
     linkedins = (
@@ -74,26 +75,18 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
     rows = []
     for i, name in enumerate(names):
         email, status = _parse_email_entry(emails[i]) if i < len(emails) else ("", "miss")
-        row = {
+        rows.append({
             "company": prospect.company,
+            "outreach_angle": prospect.outreach_angle,
             "contact_name": name.strip(),
             "contact_title": titles[i].strip() if i < len(titles) else "",
             "contact_linkedin": linkedins[i].strip() if i < len(linkedins) else "",
             "contact_email": email,
             "email_status": status,
-            "outreach_angle": "",
-            "draft_initial_subject": "",
-            "draft_initial_body": "",
-            "draft_followup_subject": "",
-            "draft_followup_body": "",
-        }
-        if i == 0:
-            row["outreach_angle"] = prospect.outreach_angle
-            row["draft_initial_subject"] = prospect.draft_initial_subject
-            row["draft_initial_body"] = prospect.draft_initial_body
-            row["draft_followup_subject"] = prospect.draft_followup_subject
-            row["draft_followup_body"] = prospect.draft_followup_body
-        rows.append(row)
+            "source": prospect.source,
+            "date_processed": prospect.date_processed,
+            "status": prospect.status,
+        })
     return rows
 
 

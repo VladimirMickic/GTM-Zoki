@@ -10,7 +10,10 @@ from pydantic import BaseModel
 # and gtm/output.py::build_contact_rows, the two places that split them back apart.
 CONTACT_FIELD_SEP = "; "
 
-# Locked column order for the Google Sheet (docs/PLAN.md).
+# Locked column order for the main Google Sheet tab (docs/PLAN.md). Ends at
+# community_signals — everything downstream of it (outreach_angle, the draft
+# fields, qa_flag, source, date_processed, status) lives on the Contacts tab
+# (gtm/output.py::CONTACT_COLUMNS) or in local state, not on the company row.
 SHEET_COLUMNS = [
     "company",
     "website",
@@ -26,15 +29,6 @@ SHEET_COLUMNS = [
     "key_news",
     "linkedin",
     "community_signals",
-    "outreach_angle",
-    "draft_initial_subject",
-    "draft_initial_body",
-    "draft_followup_subject",
-    "draft_followup_body",
-    "qa_flag",
-    "source",
-    "date_processed",
-    "status",
 ]
 
 

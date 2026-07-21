@@ -22,6 +22,8 @@ TEAL = Prospect(
 MULTI = Prospect(
     company="Teal Drones",
     website="https://tealdrones.com",
+    source="serper",
+    date_processed="2026-07-21",
     status="priority",
     contact_name="Blake Resnick; Manoj Mohan; Steven Butler",
     contact_title="CEO; VP Engineering; Field Technician",
@@ -93,6 +95,21 @@ def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
     assert ws.appended[1][0] == "Teal Drones"
 
 
+def test_contact_columns_locked_order():
+    assert CONTACT_COLUMNS == [
+        "company",
+        "outreach_angle",
+        "contact_name",
+        "contact_title",
+        "contact_linkedin",
+        "contact_email",
+        "email_status",
+        "source",
+        "date_processed",
+        "status",
+    ]
+
+
 def test_build_contact_rows_keeps_all_contacts_including_email_miss():
     rows = build_contact_rows(MULTI)
     assert len(rows) == 3
@@ -105,17 +122,29 @@ def test_build_contact_rows_keeps_all_contacts_including_email_miss():
     assert rows[2]["email_status"] == "miss"
 
 
-def test_build_contact_rows_drafts_only_on_top_contact():
+def test_build_contact_rows_company_level_fields_repeat_on_every_row():
+    # 2026-07-21: drafts dropped from the Contacts tab; company-level fields
+    # (company, outreach_angle, source, date_processed, status) repeat on every
+    # contact row so each row is self-contained/filterable.
     rows = build_contact_rows(MULTI)
-    assert rows[0]["outreach_angle"] == MULTI.outreach_angle
-    assert rows[0]["draft_initial_subject"] == "Case built for the Teal 2?"
-    assert rows[0]["draft_followup_body"] == "Just circling back."
-    for r in rows[1:]:
-        assert r["outreach_angle"] == ""
-        assert r["draft_initial_subject"] == ""
-        assert r["draft_initial_body"] == ""
-        assert r["draft_followup_subject"] == ""
-        assert r["draft_followup_body"] == ""
+    for r in rows:
+        assert r["company"] == "Teal Drones"
+        assert r["outreach_angle"] == MULTI.outreach_angle
+        assert r["source"] == "serper"
+        assert r["date_processed"] == "2026-07-21"
+        assert r["status"] == "priority"
+    # per-contact fields still differ row to row
+    assert [r["contact_title"] for r in rows] == ["CEO", "VP Engineering", "Field Technician"]
+
+
+def test_build_contact_rows_no_draft_columns():
+    rows = build_contact_rows(MULTI)
+    for draft_col in (
+        "draft_initial_subject", "draft_initial_body",
+        "draft_followup_subject", "draft_followup_body",
+    ):
+        assert draft_col not in rows[0]
+        assert draft_col not in CONTACT_COLUMNS
 
 
 def test_build_contact_rows_zero_contacts_returns_empty_list():
@@ -123,9 +152,10 @@ def test_build_contact_rows_zero_contacts_returns_empty_list():
     assert build_contact_rows(p) == []
 
 
-def test_build_contact_rows_single_contact_carries_drafts():
+def test_build_contact_rows_single_contact_carries_company_meta():
     p = Prospect(
-        company="X", website="https://x.com", status="priority",
+        company="X", website="https://x.com", source="serper",
+        date_processed="2026-07-21", status="priority",
         contact_name="Jane Doe", contact_title="VP Ops",
         contact_linkedin="https://linkedin.com/in/jane",
         contact_emails="jane@x.com (verified)",
@@ -135,6 +165,8 @@ def test_build_contact_rows_single_contact_carries_drafts():
     assert len(rows) == 1
     assert rows[0]["contact_title"] == "VP Ops"
     assert rows[0]["outreach_angle"] == "angle text"
+    assert rows[0]["status"] == "priority"
+    assert rows[0]["source"] == "serper"
 
 
 def test_write_contacts_csv_header_and_rows(tmp_path):

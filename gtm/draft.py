@@ -51,6 +51,13 @@ and format rules below are non-negotiable:
 - key_news: {p.key_news}
 - fit_reason: {p.fit_reason}
 {contact_block}
+## Structure (self-enforce — from the voice guide's "Email structure")
+1. Open with a real, specific fact about {p.company} (drawn from outreach_angle /
+   buying_signals / key_news) — never a generic greeting or banned opener.
+2. Value prop: a use case + social proof (a comparable, well-known customer) + the pain it removes.
+3. Close with ONE closed-ended (yes/no) ask or a low-pressure negative-CTA — never stack asks.
+Tailor the value prop to the contact's persona tier (see the voice guide's "Persona tailoring").
+
 ## Format (self-enforce — do not exceed)
 - Subject line: under 40 characters.
 - Body: capped at ~150 characters — one or two sentences, no more.
