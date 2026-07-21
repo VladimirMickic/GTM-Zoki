@@ -1,4 +1,5 @@
-from gtm.persona import classify_persona
+from gtm.persona import classify_persona, distinct_tiers_present
+from gtm.schema import CONTACT_FIELD_SEP
 
 
 def test_c_suite_titles():
@@ -32,3 +33,18 @@ def test_ic_titles():
 def test_unknown_when_empty():
     assert classify_persona("") == "unknown"
     assert classify_persona("   ") == "unknown"
+
+
+def test_distinct_tiers_present_dedupes_same_tier():
+    # real AeroVironment titles (2026-07-21 handoff) — both classify c-suite
+    titles = CONTACT_FIELD_SEP.join(["Vice President and Chief Technologist", "VP Logistics Operations"])
+    assert distinct_tiers_present(titles) == ["c-suite"]
+
+
+def test_distinct_tiers_present_keeps_distinct_tiers_in_order():
+    titles = CONTACT_FIELD_SEP.join(["Vice President and Chief Technologist", "Senior Director International Sales"])
+    assert distinct_tiers_present(titles) == ["c-suite", "director"]
+
+
+def test_distinct_tiers_present_blank_titles_default_to_unknown():
+    assert distinct_tiers_present("") == ["unknown"]
