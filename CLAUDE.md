@@ -67,7 +67,8 @@ the whole run. Example brief: `data/runs/teal-demo/brief.md`.
 
 ## Skills (local)
 company-research (enrichment) · prospect-research · reddit-find · cold-email (later) ·
-agent-browser (browser fallback) · youtube-transcript.
+agent-browser (browser fallback) · youtube-transcript · driven-pipeline (run the
+full pipeline end-to-end with only 2 human checkpoints).
 
 ## Structure
 - `gtm/` — pipeline code (module per stage, added per slice)
