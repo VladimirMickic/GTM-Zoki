@@ -43,9 +43,15 @@ one session. Two human checkpoints only:
    write copy per `company/voice-guide.md`, write `drafts.json`, run
    `python -m gtm.run draft <run> drafts.json`. QA-flagged tiers get redrafted
    by me in the same pass — no stop.
-6. **Checkpoint 2**: present the draft table. Wait for approval / redo
+6. **Fact-check pass** (before checkpoint 2, no stop): for each draft, grep
+   every named competitor/spec/dimension/number against that company's
+   `case_evidence` and `signals` research fields on the same prospect record.
+   Anything in the draft that doesn't trace back to source data gets flagged
+   and rewritten before it reaches the table. Deterministic string check, no
+   LLM call, no cost.
+7. **Checkpoint 2**: present the draft table. Wait for approval / redo
    requests. On redo, I rewrite just those tiers and re-show the table.
-7. On approval: `python -m gtm.run output <run>` → CSV + Sheet push.
+8. On approval: `python -m gtm.run output <run>` → CSV + Sheet push.
 
 ### Error handling
 
