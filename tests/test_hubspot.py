@@ -99,6 +99,7 @@ def test_push_to_hubspot_normal_push_creates_company_and_contact(monkeypatch, tm
     create_body = calls[1][2]
     assert create_body["properties"]["name"] == "Teal Drones"
     assert create_body["properties"]["domain"] == "tealdrones.com"
+    assert create_body["properties"]["industry"] == "AVIATION_AEROSPACE"
 
     # contact batch upsert body: split name, parsed bare email, idProperty email
     contact_body = calls[2][2]
@@ -307,3 +308,37 @@ def test_push_to_hubspot_splits_multiple_contacts_by_index(monkeypatch, tmp_path
     assoc_inputs = assoc_call[1]["inputs"]
     assert len(assoc_inputs) == 2
     assert {i["from"]["id"] for i in assoc_inputs} == {"contact-1", "contact-2"}
+
+
+def test_push_to_hubspot_sends_city_country_only_when_present(monkeypatch, tmp_path):
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "svc-key")
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append((url, json))
+        if url.endswith("/companies/search"):
+            return FakeResponse(200, {"results": []})
+        if url.endswith("/companies"):
+            return FakeResponse(201, {"id": "company-1"})
+        if url.endswith("/contacts/batch/upsert"):
+            return FakeResponse(200, {"results": [{"id": "contact-1"}]})
+        if url.endswith("/associations/contact/company/batch/create"):
+            return FakeResponse(201, {})
+        raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(hs.requests, "post", fake_post)
+    error_log = tmp_path / "errors.log"
+
+    with_hq = _prospect(hq_city="Salt Lake City", hq_country="United States")
+    hs.push_to_hubspot([with_hq], error_log=error_log)
+    create_body = next(c for c in calls if c[0].endswith("/companies"))[1]
+    assert create_body["properties"]["city"] == "Salt Lake City"
+    assert create_body["properties"]["country"] == "United States"
+    assert create_body["properties"]["industry"] == "AVIATION_AEROSPACE"
+
+    calls.clear()
+    without_hq = _prospect()
+    hs.push_to_hubspot([without_hq], error_log=error_log)
+    create_body = next(c for c in calls if c[0].endswith("/companies"))[1]
+    assert "city" not in create_body["properties"]
+    assert "country" not in create_body["properties"]

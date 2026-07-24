@@ -30,6 +30,12 @@ ERROR_LOG = Path("data") / "errors.log"
 
 _TIMEOUT = 20
 
+# HubSpot's `industry` company property is a fixed enum picklist (confirmed via
+# GET /crm/v3/properties/companies/industry, 2026-07-24) — not freeform text, so
+# it can't be derived per-prospect. Every prospect in this pipeline is a drone
+# manufacturer, so one constant internal value covers the whole ICP.
+_INDUSTRY = "AVIATION_AEROSPACE"
+
 
 def _log_error(error_log: Path, context: str, err: Exception | str) -> None:
     error_log.parent.mkdir(parents=True, exist_ok=True)
@@ -101,7 +107,13 @@ def _split_contacts(prospect: Prospect) -> list[dict]:
 
 
 def _upsert_company(
-    headers: dict[str, str], domain: str, name: str, error_log: Path
+    headers: dict[str, str],
+    domain: str,
+    name: str,
+    error_log: Path,
+    *,
+    city: str = "",
+    country: str = "",
 ) -> str | None:
     """Search-by-domain, then PATCH (found) or POST (not found) — the idempotent
     dedupe path documented in docs/tools/hubspot.md section 1, since companies
@@ -129,7 +141,11 @@ def _upsert_company(
         _log_error(error_log, "upsert_company:search", e)
         return None
 
-    properties = {"name": name, "domain": domain}
+    properties = {"name": name, "domain": domain, "industry": _INDUSTRY}
+    if city:
+        properties["city"] = city
+    if country:
+        properties["country"] = country
 
     if results:
         company_id = results[0]["id"]
@@ -265,7 +281,10 @@ def push_to_hubspot(prospects: list[Prospect], *, error_log: Path = ERROR_LOG) -
     count = 0
     for prospect in prospects:
         domain = _bare_domain(prospect.website)
-        company_id = _upsert_company(headers, domain, prospect.company, error_log)
+        company_id = _upsert_company(
+            headers, domain, prospect.company, error_log,
+            city=prospect.hq_city, country=prospect.hq_country,
+        )
         if company_id is None:
             continue
 

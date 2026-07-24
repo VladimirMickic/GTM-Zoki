@@ -55,6 +55,7 @@ python -m gtm.run start data/runs/<run>/brief.md   # discover/urls → scrape+ex
 python -m gtm.run fit <run> <fit.json>             # apply Claude's FitResults
 python -m gtm.run enrich <run>                     # passers: contacts + enrichment → signal prompts
 python -m gtm.run signals <run> <signals.json>     # apply Claude's buying_signals/outreach_angle
+python -m gtm.run emails <run>                     # email waterfall (pattern → provider chain → AI hunt)
 python -m gtm.run output <run>                     # CSV (+ Sheet push if credentials present)
 python -m gtm.run learn                            # show feedback for ICP/denylist proposals
 ```

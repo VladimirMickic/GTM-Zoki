@@ -27,7 +27,11 @@ Only state what the text supports — leave fields empty/null when unsure.
 - case_evidence: what the drone ships/packs in, verbatim-ish (e.g. "includes hard case",
   "soft backpack", a named case partner). Empty if the text never mentions it.
 - us_made_ndaa: true only if US-made / NDAA-compliant / Blue UAS is stated; false if
-  clearly foreign-made; null if not mentioned."""
+  clearly foreign-made; null if not mentioned.
+- hq_city: the company's headquarters city, only if explicitly stated (e.g. an "About" or
+  "Contact" page address). Empty if not stated.
+- hq_country: the company's headquarters country, only if explicitly stated or unambiguously
+  implied by a full address. Empty if not stated."""
 
 
 class ExtractError(Exception):
@@ -42,6 +46,8 @@ class DroneExtraction(BaseModel):
     drone_weights: list[str] = []
     case_evidence: str = ""
     us_made_ndaa: Optional[bool] = None
+    hq_city: str = ""
+    hq_country: str = ""
 
 
 def extract(markdown: str, *, client=None, costlog: CostLog | None = None) -> DroneExtraction:

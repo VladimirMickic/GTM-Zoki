@@ -1,6 +1,6 @@
 ---
 name: driven-pipeline
-description: Drive the full gtm.run pipeline (start → fit → enrich → signals → segment → draft → redraft → output) end-to-end via Bash, answering every judgment checkpoint directly instead of surfacing it to the user. Use when the user says "hey zoki, find me drone companies" (or similar) or otherwise asks to run/start a GTM pipeline. Reduces the human-facing checkpoints to exactly two: an up-front company-count question (only if unspecified) and a final draft-approval gate before the Sheet push.
+description: Drive the full gtm.run pipeline (start → fit → enrich → signals → segment → draft → redraft → emails → output) end-to-end via Bash, answering every judgment checkpoint directly instead of surfacing it to the user. Use when the user says "hey zoki, find me drone companies" (or similar) or otherwise asks to run/start a GTM pipeline. Reduces the human-facing checkpoints to exactly two: an up-front company-count question (only if unspecified) and a final draft-approval gate before the Sheet push.
 allowed-tools: Read, Write, Edit, Bash
 ---
 
@@ -42,13 +42,35 @@ angle. Offer full draft text for any row on request. Wait for the user to
 approve all or flag specific rows. On a flagged row, rewrite just that tier
 and redraft, then re-show the table (loop until approved).
 
+## Emails (before output — do not skip)
+
+After approval, before `output`: `python -m gtm.run emails <run>` — runs the
+pattern-tier → provider-chain → AI-hunt waterfall (`gtm/emails.py`) per
+contact and writes verified/risky/unverified results into
+`contact_emails`. Skipping this step is the single most common way a run
+ends up with zero emails — `output` never calls it itself. Prints its own
+`[<company>] <emails>` lines and a cost summary; relay both to the user, not
+just the final one (see Cost visibility below).
+
 ## Output
 
-Only after approval: `python -m gtm.run output <run>` (add `--dry-run` first
-if the user wants to inspect the CSV before a live Sheet push). Sheet tabs
-are append-only with no dedupe-by-company — remind the user to clear the
-`Companies`/`Contacts` tabs by hand first if this isn't the first run against
-that Sheet.
+Only after approval and the emails step above: `python -m gtm.run output <run>`
+(add `--dry-run` first if the user wants to inspect the CSV before a live
+Sheet push). Sheet tabs are append-only with no dedupe-by-company — remind
+the user to clear the `Companies`/`Contacts` tabs by hand first if this
+isn't the first run against that Sheet.
+
+## Cost visibility
+
+Every stage command (`start`, `enrich`, `signals`, `draft`/`redraft`,
+`emails`, `output`) prints its own `cost this run — provider:$x.xx ·
+provider:N credits` line (`gtm/costlog.py::CostLog.summary_line`) after it
+finishes — this already covers OpenAI $, Serper credits, and any configured
+email-provider (Prospeo/Hunter/GetProspect/Abstract) credits/$. Do not let
+this scroll past silently in Bash output: after each stage, surface that
+line to the user in your own reply (one line is enough), and give one final
+consolidated total right before or alongside the Checkpoint 2 table and
+again after `output` completes.
 
 ## Errors
 

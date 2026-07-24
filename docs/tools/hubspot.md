@@ -99,7 +99,17 @@ should default to the search-then-create/update path unless that's confirmed to 
 unnecessary.
 
 Company properties we map: `company` → `name`, `website` → `domain` (strip scheme/path,
-HubSpot expects a bare domain, e.g. `tealdrones.com` not `https://tealdrones.com`).
+HubSpot expects a bare domain, e.g. `tealdrones.com` not `https://tealdrones.com`),
+`hq_city`/`hq_country` → `city`/`country` (plain text properties, confirmed via
+`GET /crm/v3/properties/companies/{city,country}` on 2026-07-24 — sent only when the
+prospect has a value, since `gtm/extract.py` only fills them when the source markdown
+states an address). `industry` is a fixed constant, **`AVIATION_AEROSPACE`** — confirmed
+via `GET /crm/v3/properties/companies/industry` that `industry` is an enum picklist (148
+options, internal values like `AVIATION_AEROSPACE`/`DEFENSE_SPACE`), not freeform text, so
+it can't be derived per-prospect; every prospect in this pipeline is a drone manufacturer,
+so one constant value covers the whole ICP. Sending an unrecognized string to an enum
+property gets rejected by the API — never guess a value here without checking the
+property's `options` list first.
 
 Response: 200 (or 207 multi-status if a request had partial errors — **unverified**, the
 batch/upsert page's exact status-code table did not render for this fetch; treat any non-2xx

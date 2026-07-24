@@ -81,6 +81,8 @@ class Prospect(BaseModel):
     drone_weights: list[str] = []
     case_evidence: str = ""  # what they ship in today (state-only, feeds fit; not a sheet column)
     us_made_ndaa: Optional[bool] = None
+    hq_city: str = ""  # state-only; feeds gtm/hubspot.py company city/country properties
+    hq_country: str = ""
     # stage 4 — fit
     fit_score: Optional[int] = None
     fit_reason: str = ""

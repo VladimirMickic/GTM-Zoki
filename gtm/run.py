@@ -183,6 +183,8 @@ def process_company(
     p.drone_weights = ex.drone_weights
     p.case_evidence = ex.case_evidence
     p.us_made_ndaa = ex.us_made_ndaa
+    p.hq_city = ex.hq_city
+    p.hq_country = ex.hq_country
     if not p.drone_dimensions or not p.case_evidence:
         try:
             found = hunt_fn(p.company, p.drone_models, costlog=costlog)

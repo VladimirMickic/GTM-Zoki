@@ -59,6 +59,21 @@ def test_extract_returns_parsed_fields():
     assert client.completions.last_kwargs["model"] == "gpt-4o-mini"
 
 
+def test_extract_returns_hq_city_and_country():
+    salt_lake = DroneExtraction(hq_city="Salt Lake City", hq_country="United States")
+    client = FakeClient(salt_lake)
+    result = extract("# Teal Drones\nHQ: Salt Lake City, UT, USA", client=client)
+    assert result.hq_city == "Salt Lake City"
+    assert result.hq_country == "United States"
+
+
+def test_extract_hq_fields_default_empty():
+    client = FakeClient(TEAL)
+    result = extract("# Teal Drones", client=client)
+    assert result.hq_city == ""
+    assert result.hq_country == ""
+
+
 def test_markdown_is_trimmed_to_cap():
     client = FakeClient(TEAL)
     extract("x" * (MAX_MARKDOWN_CHARS + 5000), client=client)

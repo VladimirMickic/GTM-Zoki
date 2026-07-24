@@ -8,7 +8,7 @@ CLAUDE_SKILL = Path(".claude/skills/driven-pipeline/SKILL.md")
 CODEX_SKILL = Path(".agents/skills/driven-pipeline/SKILL.md")
 CLAUDE_MD = Path("CLAUDE.md")
 
-STAGES_IN_ORDER = ["start", "fit", "enrich", "signals", "segment", "draft", "redraft", "output"]
+STAGES_IN_ORDER = ["start", "fit", "enrich", "signals", "segment", "draft", "redraft", "emails", "output"]
 
 
 def test_skill_exists_in_both_claude_and_codex_locations():
