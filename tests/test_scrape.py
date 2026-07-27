@@ -108,6 +108,52 @@ def test_pick_product_links_rejects_team_media_and_download_pages():
     assert pick_product_links(hrefs, "https://www.neros.tech/") == []
 
 
+def test_pick_product_links_ranks_model_like_paths_above_bare_nouns():
+    """Live skyfront.com run took /magniphy (a payload) over /perimeter-8 (the drone)
+    purely on nav order. Model pages carry a digit or a hyphenated name; nav pages are
+    bare nouns."""
+    from gtm.scrape import pick_product_links
+
+    hrefs = [
+        "https://skyfront.com/accessories",
+        "https://skyfront.com/integration",
+        "https://skyfront.com/magniphy",
+        "https://skyfront.com/perimeter-8",
+        "https://skyfront.com/radios",
+    ]
+    picked = pick_product_links(hrefs, "https://skyfront.com/")
+    assert picked[0] == "https://skyfront.com/perimeter-8"
+
+
+def test_pick_product_links_ranking_is_stable_within_a_tier():
+    """Ranking only promotes model-like paths — ties keep nav order, which is still the
+    best relevance signal we have.
+
+    Known limit: a single-word model name (/hellcat) is indistinguishable from a nav
+    noun and gets demoted below hyphenated siblings. Only bites when 3+ candidates
+    compete for the 2 slots; both tiers are still real candidates, so the cost is
+    picking a different product page, never a junk one.
+    """
+    from gtm.scrape import pick_product_links
+
+    hrefs = [
+        "https://tealdrones.com/black-widow",
+        "https://tealdrones.com/hellcat",
+        "https://tealdrones.com/golden-eagle",
+    ]
+    picked = pick_product_links(hrefs, "https://tealdrones.com/")
+    assert picked == ["https://tealdrones.com/black-widow", "https://tealdrones.com/golden-eagle"]
+
+
+def test_pick_product_links_ranking_never_outranks_a_keyword_path():
+    """An explicit /products/ or /drones/ path beats a model-like guess every time."""
+    from gtm.scrape import pick_product_links
+
+    hrefs = ["https://t.com/perimeter-8", "https://t.com/products/hawk"]
+    picked = pick_product_links(hrefs, "https://t.com/")
+    assert picked == ["https://t.com/products/hawk"]
+
+
 def test_scrape_deep_skips_subpage_crawls_when_nothing_worth_fetching():
     from gtm.scrape import scrape_deep
 

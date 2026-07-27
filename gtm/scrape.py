@@ -122,6 +122,19 @@ def sitemap_urls(base_url: str, *, timeout: int = 10) -> list[str]:
     return [m.strip() for m in re.findall(r"<loc>\s*([^<]+?)\s*</loc>", response.text, re.I)]
 
 
+def _model_likeness(href: str) -> int:
+    """Sort key (0 = promote) for shallow candidates that matched no product keyword.
+
+    A model page is named after the aircraft — it carries a digit or a hyphenated name
+    (/perimeter-8, /black-widow). Nav pages are bare nouns (/learn, /magniphy, /radios).
+    The live skyfront.com run picked /magniphy over /perimeter-8 on nav order alone.
+    Only promotes; ties keep nav order, which is still the best signal we have (sorted()
+    is stable).
+    """
+    slug = urlparse(href).path.strip("/").rsplit("/", 1)[-1]
+    return 0 if (any(c.isdigit() for c in slug) or "-" in slug) else 1
+
+
 def pick_product_links(
     hrefs: list[str], base_url: str, limit: int = 2, *, keyword_only: bool = False
 ) -> list[str]:
@@ -147,7 +160,7 @@ def pick_product_links(
             shallow.append(h)
     if keyword_only:
         return keyword[:limit]
-    return (keyword or shallow)[:limit]
+    return (keyword or sorted(shallow, key=_model_likeness))[:limit]
 
 
 def scrape_deep(
