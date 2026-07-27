@@ -1,6 +1,14 @@
 import pytest
 
-from gtm.draft import QAError, QAResult, build_draft_prompt, build_redraft_prompt, is_thin_signal, qa_check
+from gtm.draft import (
+    QAError,
+    QAResult,
+    build_draft_prompt,
+    build_redraft_prompt,
+    check_reference_customer,
+    is_thin_signal,
+    qa_check,
+)
 from gtm.schema import DraftSet, Prospect
 
 VOICE_GUIDE_SAMPLE = "## Tone\nWarm, consultative.\n## Banned phrases\ncircle back"
@@ -24,8 +32,8 @@ def test_build_draft_prompt_embeds_voice_guide_and_prospect_fields():
     assert "Warm, consultative" in prompt  # voice guide content is embedded verbatim
     assert "circle back" in prompt
     assert "drafts.json" in prompt
-    assert "150" in prompt  # body cap stated
-    assert "40" in prompt  # subject cap stated
+    assert "~450-700 characters" in prompt  # body length stated (Tier 1 default)
+    assert "under 60 characters" in prompt  # subject cap stated
 
 
 def test_build_draft_prompt_injects_the_given_tier():
@@ -109,15 +117,61 @@ def test_build_draft_prompt_skips_email_draft_when_signal_thin():
     prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
     assert "SKIP" in prompt
     assert '"draft_initial": {}' in prompt
-    assert "150" not in prompt  # no email-format instructions when skipped
+    assert "under 60 characters" not in prompt  # no email-format instructions when skipped
 
 
 def test_build_draft_prompt_requests_draft_when_signal_rich():
     p = _rich_prospect()
     prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
     assert "SKIP" not in prompt
-    assert "150" in prompt
-    assert "40" in prompt
+    assert "~450-700 characters" in prompt
+    assert "under 60 characters" in prompt
+
+
+# 2026-07-27 (user's 8 worked examples): body length is tier-driven — a Tier 2
+# prospect has a thinner story, so the same length there reads as padding.
+def test_build_draft_prompt_length_follows_fit_tier():
+    priority = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(status="priority"), "c-suite")
+    assert "Tier 1 (priority)" in priority
+    assert "~450-700 characters" in priority
+    assert "all four blocks" in priority
+
+    keep = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(status="keep"), "c-suite")
+    assert "Tier 2 (keep)" in keep
+    assert "~250-350 characters" in keep
+    assert "~450-700 characters" not in keep
+
+
+def test_build_draft_prompt_defaults_to_tier_1_shape_when_status_unset():
+    # segment/draft run before output sets any status in some flows — never emit a
+    # prompt with no length instruction at all.
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(status=""), "c-suite")
+    assert "Tier 1 (priority)" in prompt
+    assert "~450-700 characters" in prompt
+
+
+def test_build_draft_prompt_demands_the_pain_block_and_bans_the_one_liner_skeleton():
+    # The ~150-char cap made block 3 structurally impossible — that, not model
+    # disobedience, is why every draft read as a template.
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(), "manager")
+    assert "**The pain**" in prompt
+    assert "BANNED SKELETON" in prompt
+    assert "Worth a quick\n  look?" in prompt  # the banned shape is quoted verbatim
+
+
+def test_build_draft_prompt_offers_airframe_and_case_line_sources():
+    p = _rich_prospect(drone_models=["Teal 2", "Black Widow"], best_case_line="AV-Field")
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "{{airframe_name}}" in prompt
+    assert "Teal 2" in prompt
+    assert "{{case_line}}" in prompt
+    assert "AV-Field" in prompt
+
+
+def test_build_draft_prompt_requires_the_reference_customer_token():
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(), "c-suite")
+    assert "{{reference_customer}}" in prompt
+    assert "NEVER a hardcoded company name" in prompt
 
 
 def test_build_draft_prompt_always_requests_pain_points_and_talking_points():
@@ -192,6 +246,53 @@ def test_qa_check_raises_qa_error_on_refusal():
     client = _FakeClient(None)
     with pytest.raises(QAError):
         qa_check(_prospect(), _draft(), client=client)
+
+
+# --- reference-customer guard (voice guide "Social proof" hard rule) -------------
+# The user's own worked examples name "Teal Drones" as a customer — and Teal Drones is
+# a priority prospect in this pipeline. An email to Teal citing Teal is the worst
+# possible send, so named social proof is a token filled at send time, never literal.
+
+def test_check_reference_customer_flags_a_run_mate_named_in_the_body():
+    p = Prospect(company="AeroVironment", website="https://avinc.com")
+    draft = DraftSet(
+        initial_subject="Puma transport",
+        initial_body="Teal Drones runs our AV-Field line across their tactical lineup.",
+    )
+    flag = check_reference_customer(p, draft, ["AeroVironment", "Teal Drones"])
+    assert "Teal Drones" in flag
+    assert "{{reference_customer}}" in flag
+
+
+def test_check_reference_customer_also_scans_the_v2_body():
+    p = Prospect(company="AeroVironment", website="https://avinc.com")
+    draft = DraftSet(
+        initial_subject="Puma transport",
+        initial_body="{{reference_customer}} is a customer.",
+        initial_body_alt="Defense makers (Teal Drones among them) use us.",
+    )
+    assert "Teal Drones" in check_reference_customer(p, draft, ["AeroVironment", "Teal Drones"])
+
+
+def test_check_reference_customer_passes_when_the_token_is_used():
+    p = Prospect(company="Teal Drones", website="https://tealdrones.com")
+    draft = DraftSet(
+        initial_subject="Teal 2 field kit",
+        initial_body="{{reference_customer}} runs our {{case_line}} line.",
+        initial_body_alt="Defense sUAS makers ({{reference_customer}} among them) use us.",
+    )
+    assert check_reference_customer(p, draft, ["Teal Drones", "AeroVironment"]) == ""
+
+
+def test_check_reference_customer_allows_naming_the_recipient_itself():
+    # {{company_name}} resolves to the recipient — their own name in the body is
+    # personalization, not a fabricated customer claim.
+    p = Prospect(company="Teal Drones", website="https://tealdrones.com")
+    draft = DraftSet(
+        initial_subject="Teal 2 field kit",
+        initial_body="Saw Teal Drones' SRR win — congrats.",
+    )
+    assert check_reference_customer(p, draft, ["Teal Drones", "AeroVironment"]) == ""
 
 
 def test_build_redraft_prompt_includes_qa_flag_reason_and_original_prompt():

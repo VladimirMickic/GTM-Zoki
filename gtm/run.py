@@ -28,7 +28,13 @@ from gtm.brief import freeze_brief, load_brief
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
 from gtm.discover import _domain, _name_matches_domain
-from gtm.draft import NO_DRAFT_FLAG, build_draft_prompt, build_redraft_prompt, qa_check
+from gtm.draft import (
+    NO_DRAFT_FLAG,
+    build_draft_prompt,
+    build_redraft_prompt,
+    check_reference_customer,
+    qa_check,
+)
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
 from gtm.schema import DraftSet, Prospect
@@ -399,6 +405,7 @@ def cmd_draft(run: str, drafts_json: str) -> None:
         save_state(prospects, run_dir(run))
 
         costlog = run_costlog(run)
+        others = [x.company for x in prospects]
         n, flagged, thin = 0, 0, 0
         for p in prospects:
             for tier, draft in p.drafts_by_tier.items():
@@ -408,7 +415,10 @@ def cmd_draft(run: str, drafts_json: str) -> None:
                     continue
                 n += 1
                 try:
-                    flag = qa_check(p, draft, costlog=costlog)
+                    # Deterministic guard runs first and short-circuits the paid
+                    # qa_check: a draft naming a run-mate as our customer is broken
+                    # regardless of whether every factual claim in it checks out.
+                    flag = check_reference_customer(p, draft, others) or qa_check(p, draft, costlog=costlog)
                     draft.qa_flag = flag or "passed"
                     if flag:
                         flagged += 1
@@ -448,6 +458,7 @@ def cmd_redraft(run: str, drafts_json: str) -> None:
         save_state(prospects, run_dir(run))
 
         costlog = run_costlog(run)
+        others = [x.company for x in prospects]
         n, still_flagged = 0, 0
         for p in prospects:
             for tier, draft in p.drafts_by_tier.items():
@@ -455,7 +466,7 @@ def cmd_redraft(run: str, drafts_json: str) -> None:
                     continue
                 n += 1
                 try:
-                    flag = qa_check(p, draft, costlog=costlog)
+                    flag = check_reference_customer(p, draft, others) or qa_check(p, draft, costlog=costlog)
                     draft.qa_flag = flag or "passed"
                     if flag:
                         still_flagged += 1
