@@ -171,6 +171,7 @@ def test_contact_columns_locked_order():
     # date_processed) repeat on every contact row.
     assert CONTACT_COLUMNS == [
         "company",
+        "website",
         "contact_name",
         "contact_title",
         "contact_linkedin",
@@ -228,6 +229,7 @@ def test_build_contact_rows_company_level_fields_repeat_on_every_row():
     rows = build_contact_rows(MULTI)
     for r in rows:
         assert r["company"] == "Teal Drones"
+        assert r["website"] == "https://tealdrones.com"
         assert r["outreach_angle"] == MULTI.outreach_angle
         assert r["date_processed"] == "2026-07-21"
         assert "source" not in r

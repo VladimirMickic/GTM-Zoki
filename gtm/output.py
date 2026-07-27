@@ -25,6 +25,7 @@ _OUTREACH_ANGLE_MAX_CHARS = 220
 
 CONTACT_COLUMNS = [
     "company",
+    "website",
     "contact_name",
     "contact_title",
     "contact_linkedin",
@@ -110,6 +111,7 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
 
         rows.append({
             "company": prospect.company,
+            "website": prospect.website,
             "contact_name": name,
             "contact_title": title,
             "contact_linkedin": linkedins[i].strip() if i < len(linkedins) else "",
