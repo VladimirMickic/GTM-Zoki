@@ -43,6 +43,8 @@ MULTI = Prospect(
             talking_points="MIL-STD-810H drop rating | US-made, matches Teal's own NDAA angle",
             initial_subject="Case built for the Teal 2?",
             initial_body="{FIRST_NAME} — saw Teal's SRR win.",
+            initial_subject_alt="Teal 2 field kit?",
+            initial_body_alt="{FIRST_NAME} — SRR win puts more Teal 2s in the field.",
             qa_flag="passed",
         ),
         "ic": DraftSet(
@@ -179,10 +181,23 @@ def test_contact_columns_locked_order():
         "talking_points",
         "draft_initial_subject",
         "draft_initial_body",
+        "draft_initial_subject_alt",
+        "draft_initial_body_alt",
         "needs_research",
         "qa_flag",
         "date_processed",
     ]
+
+
+def test_build_contact_rows_carries_both_email_versions():
+    """voice-guide.md locks the format at "one email, 2 versions" and DraftSet stores
+    both — but v2 had no column, so it never reached the sheet. The rep must be able
+    to A/B the two subject lines."""
+    rows = build_contact_rows(MULTI)
+    assert rows[0]["draft_initial_subject_alt"] == "Teal 2 field kit?"
+    assert rows[0]["draft_initial_body_alt"] == "Blake — SRR win puts more Teal 2s in the field."
+    # {FIRST_NAME} substitution applies to v2 exactly as it does to v1
+    assert "{FIRST_NAME}" not in rows[0]["draft_initial_body_alt"]
 
 
 def test_open_worksheet_default_name_is_companies():

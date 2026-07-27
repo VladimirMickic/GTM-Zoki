@@ -35,6 +35,10 @@ CONTACT_COLUMNS = [
     "talking_points",
     "draft_initial_subject",
     "draft_initial_body",
+    # voice-guide.md locks the format at "one email, 2 versions" — v2 was computed
+    # into DraftSet but had no column, so it never reached the sheet.
+    "draft_initial_subject_alt",
+    "draft_initial_body_alt",
     "needs_research",
     "qa_flag",
     "date_processed",
@@ -116,6 +120,8 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
             "talking_points": merge(draft.talking_points),
             "draft_initial_subject": merge(draft.initial_subject),
             "draft_initial_body": merge(draft.initial_body),
+            "draft_initial_subject_alt": merge(draft.initial_subject_alt),
+            "draft_initial_body_alt": merge(draft.initial_body_alt),
             "needs_research": "yes" if draft.needs_research else "no",
             "qa_flag": draft.qa_flag,
             "date_processed": prospect.date_processed,
