@@ -170,25 +170,42 @@ def test_merge_drafts_writes_v1_to_surfaced_fields_v2_to_alt_fields():
     raw = {
         "Teal Drones": {
             "c-suite": {
+                "pain_points": "damaged units eat into margin",
+                "talking_points": "MIL-STD-810H drop rating",
                 "draft_initial": {
                     "v1": {"subject": "Case built for the Teal 2?", "body": "hook v1"},
                     "v2": {"subject": "US-made case, Teal-sized", "body": "hook v2"},
-                },
-                "draft_followup": {
-                    "v1": {"subject": "Following up", "body": "follow v1"},
-                    "v2": {"subject": "One more try", "body": "follow v2"},
                 },
             }
         }
     }
     merge_drafts(prospects, raw)
     draft = prospects[0].drafts_by_tier["c-suite"]
+    assert draft.pain_points == "damaged units eat into margin"
+    assert draft.talking_points == "MIL-STD-810H drop rating"
     assert draft.initial_subject == "Case built for the Teal 2?"
     assert draft.initial_body == "hook v1"
     assert draft.initial_subject_alt == "US-made case, Teal-sized"
     assert draft.initial_body_alt == "hook v2"
-    assert draft.followup_subject == "Following up"
-    assert draft.followup_body_alt == "follow v2"
+    assert draft.needs_research is False
+
+
+def test_merge_drafts_flags_needs_research_when_no_draft_present():
+    # thin-signal tier: prompt was told SKIP, draft_initial comes back {}
+    prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
+    raw = {
+        "Teal Drones": {
+            "manager": {
+                "pain_points": "team fighting broken gear",
+                "talking_points": "smoother logistics",
+                "draft_initial": {},
+            }
+        }
+    }
+    merge_drafts(prospects, raw)
+    draft = prospects[0].drafts_by_tier["manager"]
+    assert draft.needs_research is True
+    assert draft.initial_subject == ""
 
 
 def test_merge_drafts_skips_companies_not_in_raw():
@@ -201,8 +218,8 @@ def test_merge_drafts_multiple_tiers_land_in_separate_draft_sets():
     prospects = [Prospect(company="AeroVironment", website="https://avinc.com", status="priority")]
     raw = {
         "AeroVironment": {
-            "c-suite": {"draft_initial": {"v1": {"subject": "C-suite subject", "body": "b"}}, "draft_followup": {}},
-            "director": {"draft_initial": {"v1": {"subject": "Director subject", "body": "b"}}, "draft_followup": {}},
+            "c-suite": {"draft_initial": {"v1": {"subject": "C-suite subject", "body": "b"}}},
+            "director": {"draft_initial": {"v1": {"subject": "Director subject", "body": "b"}}},
         }
     }
     merge_drafts(prospects, raw)
@@ -215,10 +232,10 @@ def test_merge_drafts_preserves_qa_flag_on_existing_tier_content_update():
     # NOT reset its qa_flag — cmd_redraft's "already checked" skip logic depends
     # on the flag surviving until its own QA loop overwrites it.
     prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
-    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Old", "body": "b"}}, "draft_followup": {}}}})
+    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Old", "body": "b"}}}}})
     prospects[0].drafts_by_tier["c-suite"].qa_flag = "unsupported claim"
 
-    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Fixed", "body": "b2"}}, "draft_followup": {}}}})
+    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Fixed", "body": "b2"}}}}})
 
     draft = prospects[0].drafts_by_tier["c-suite"]
     assert draft.initial_subject == "Fixed"
@@ -286,6 +303,30 @@ def test_emails_for_prospect_runs_waterfall_per_contact_parallel_order():
     }
     emails_for_prospect(p, waterfall_fn=lambda name, domain: results[name])
     assert p.contact_emails == "blake@brincdrones.com (verified); -"
+
+
+def test_emails_for_prospect_isolates_a_failing_contact_from_the_rest(tmp_path, monkeypatch):
+    """One contact's waterfall blowing up must not zero out the whole company's emails."""
+    import gtm.run as run_mod
+    from gtm.emails import EmailResult
+    from gtm.run import emails_for_prospect
+
+    log = tmp_path / "errors.log"  # keep the real data/errors.log clean
+    monkeypatch.setattr(run_mod, "ERROR_LOG", log)
+
+    p = Prospect(
+        company="BRINC", website="https://brincdrones.com/",
+        contact_name="Blake Resnick; Manoj Mohan", status="priority",
+    )
+
+    def flaky(name, domain):
+        if name == "Blake Resnick":
+            raise TimeoutError("provider timed out")
+        return EmailResult(email="manoj@brincdrones.com", tier="pattern", status="verified")
+
+    emails_for_prospect(p, waterfall_fn=flaky)
+    assert p.contact_emails == "-; manoj@brincdrones.com (verified)"
+    assert "emails/Blake Resnick" in log.read_text()  # skipped, but logged
 
 
 def test_cmd_start_freezes_brief_immune_to_later_edits(tmp_path, monkeypatch):
@@ -587,7 +628,6 @@ def test_cmd_draft_flags_unsupported_claim_and_raises_redraft_checkpoint(monkeyp
         "Teal Drones": {
             "c-suite": {
                 "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
-                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
             }
         }
     }))
@@ -625,7 +665,6 @@ def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
         "Teal Drones": {
             "c-suite": {
                 "draft_initial": {"v1": {"subject": "s", "body": "b"}, "v2": {"subject": "s2", "body": "b2"}},
-                "draft_followup": {"v1": {"subject": "s3", "body": "b3"}, "v2": {"subject": "s4", "body": "b4"}},
             }
         }
     }))
@@ -657,7 +696,6 @@ def test_cmd_redraft_merges_and_finalizes_qa_passed(monkeypatch, tmp_path):
         "Teal Drones": {
             "c-suite": {
                 "draft_initial": {"v1": {"subject": "Fixed subject", "body": "fixed hook"}, "v2": {"subject": "s2", "body": "b2"}},
-                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
             }
         }
     }))
@@ -685,7 +723,6 @@ def test_cmd_redraft_keeps_flag_text_if_still_failing_after_retry(monkeypatch, t
         "Teal Drones": {
             "c-suite": {
                 "draft_initial": {"v1": {"subject": "Still bad", "body": "still bad hook"}, "v2": {"subject": "s2", "body": "b2"}},
-                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
             }
         }
     }))
@@ -829,7 +866,6 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
         "Teal Drones": {
             "unknown": {
                 "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
-                "draft_followup": {"v1": {"subject": "Following up", "body": "f1"}, "v2": {"subject": "s4", "body": "b4"}},
             }
         }
     }))

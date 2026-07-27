@@ -9,6 +9,8 @@ any one vendor's calls. Live calls need that vendor's *_API_KEY set.
 from __future__ import annotations
 
 import re
+import time
+from pathlib import Path
 
 from pydantic import BaseModel
 
@@ -22,6 +24,7 @@ from gtm.email_providers import (
 )
 
 MAX_PATTERNS = 3
+ERROR_LOG = Path("data") / "errors.log"
 
 _hunter = HunterProvider()
 
@@ -96,9 +99,27 @@ def default_providers() -> list:
     ]
 
 
+def _log_error(error_log: Path, provider: str, context: str, err: Exception) -> None:
+    error_log.parent.mkdir(parents=True, exist_ok=True)
+    with error_log.open("a") as f:
+        f.write(f"{time.strftime('%Y-%m-%dT%H:%M:%S')} emails [{provider}/{context}] {err}\n")
+
+
+def _call(provider, method: str, context: str, *args) -> dict | None:
+    """One link of the chain. A vendor that raises (live timeouts and 5xx do happen —
+    seen from GetProspect) must behave exactly like one that returned None: log it,
+    defer, let the next provider answer. Without this, one flaky vendor mid-chain kills
+    the whole waterfall and the contact silently gets no email at all."""
+    try:
+        return getattr(provider, method)(*args)
+    except Exception as e:  # noqa: BLE001 — any vendor failure is just "can't answer"
+        _log_error(ERROR_LOG, type(provider).__name__, context, e)
+        return None
+
+
 def _verify_chain(providers: list, email: str) -> dict:
     for p in providers:
-        result = p.verify(email)
+        result = _call(p, "verify", "verify", email)
         if result is not None:
             return result
     return {}
@@ -110,7 +131,7 @@ def _find_chain(providers: list, first: str, last: str, domain: str) -> dict:
     # supplied finder= override still receives the raw first/last from waterfall().
     first, last = first.lower(), last.lower()
     for p in providers:
-        result = p.find(first, last, domain)
+        result = _call(p, "find", "find", first, last, domain)
         if result is not None:
             return result
     return {}

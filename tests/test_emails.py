@@ -3,6 +3,9 @@
 Course template (slides 23-26): stack cheap→expensive, later tiers only run on
 earlier misses, nothing hits the sheet unvalidated.
 """
+import pytest
+
+import gtm.emails as emails_mod
 from gtm.emails import (
     EmailResult,
     candidate_patterns,
@@ -116,3 +119,40 @@ def test_waterfall_find_chain_when_patterns_miss():
                       verify_map={"j.d@x.com": {"status": "valid", "score": 80}})
     r = waterfall("Jane Doe", "x.com", providers=[p1, p2])
     assert r.email == "j.d@x.com" and r.tier == "hunter"
+
+
+class RaisingProvider:
+    """Live failure mode: a provider call times out / errors instead of returning None."""
+    def __init__(self, name, exc=None):
+        self.name = name; self._exc = exc or TimeoutError("provider timed out")
+    def verify(self, email): raise self._exc
+    def find(self, first, last, domain): raise self._exc
+
+@pytest.fixture
+def error_log(tmp_path, monkeypatch):
+    """Keep provider failures out of the real data/errors.log the user reads."""
+    log = tmp_path / "errors.log"
+    monkeypatch.setattr(emails_mod, "ERROR_LOG", log)
+    return log
+
+def test_verify_chain_falls_through_when_provider_raises(error_log):
+    # a raising provider must behave like one that returned None: defer, don't kill the chain
+    flaky = RaisingProvider("getprospect")
+    good = FakeProvider("hunter", verify_map={"jane.doe@x.com": {"status": "valid", "score": 90}})
+    r = waterfall("Jane Doe", "x.com", providers=[flaky, good])
+    assert r.email == "jane.doe@x.com" and r.tier == "pattern" and r.status == "verified"
+    assert "provider timed out" in error_log.read_text()  # deferred, but not silently
+
+def test_find_chain_falls_through_when_provider_raises(error_log):
+    flaky = RaisingProvider("getprospect")
+    good = FakeProvider("hunter",
+                        find_map={("jane", "doe", "x.com"): {"email": "j.d@x.com", "score": 80}},
+                        verify_map={"j.d@x.com": {"status": "valid", "score": 80}})
+    r = waterfall("Jane Doe", "x.com", providers=[flaky, good])
+    assert r.email == "j.d@x.com" and r.tier == "hunter"
+
+def test_waterfall_every_provider_raising_returns_empty_not_exception(error_log):
+    flaky = RaisingProvider("getprospect")
+    r = waterfall("Jane Doe", "x.com", providers=[flaky, RaisingProvider("hunter")],
+                  search=lambda q, num=10: [])
+    assert r == EmailResult()

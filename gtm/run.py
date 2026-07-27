@@ -27,7 +27,7 @@ import gtm.github_state as github_state
 from gtm.brief import freeze_brief, load_brief
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
-from gtm.draft import build_draft_prompt, build_redraft_prompt, qa_check
+from gtm.draft import NO_DRAFT_FLAG, build_draft_prompt, build_redraft_prompt, qa_check
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
 from gtm.schema import DraftSet, Prospect
@@ -229,19 +229,18 @@ def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
         if not tiers:
             continue
         for tier, d in tiers.items():
-            initial, followup = d.get("draft_initial", {}), d.get("draft_followup", {})
+            initial = d.get("draft_initial", {})
             # setdefault + in-place attribute writes (not a fresh DraftSet) so an
             # existing tier's qa_flag survives a content-only re-merge — the
             # cmd_redraft round-trip depends on this (see Task 8's docstring note).
             draft = p.drafts_by_tier.setdefault(tier, DraftSet())
+            draft.pain_points = d.get("pain_points", draft.pain_points)
+            draft.talking_points = d.get("talking_points", draft.talking_points)
             draft.initial_subject = initial.get("v1", {}).get("subject", "")
             draft.initial_body = initial.get("v1", {}).get("body", "")
             draft.initial_subject_alt = initial.get("v2", {}).get("subject", "")
             draft.initial_body_alt = initial.get("v2", {}).get("body", "")
-            draft.followup_subject = followup.get("v1", {}).get("subject", "")
-            draft.followup_body = followup.get("v1", {}).get("body", "")
-            draft.followup_subject_alt = followup.get("v2", {}).get("subject", "")
-            draft.followup_body_alt = followup.get("v2", {}).get("body", "")
+            draft.needs_research = not draft.initial_subject
 
 
 # ---------------------------------------------------------------- CLI stages
@@ -387,10 +386,12 @@ def cmd_draft(run: str, drafts_json: str) -> None:
         save_state(prospects, run_dir(run))
 
         costlog = run_costlog(run)
-        n, flagged = 0, 0
+        n, flagged, thin = 0, 0, 0
         for p in prospects:
             for tier, draft in p.drafts_by_tier.items():
                 if not draft.initial_subject:
+                    draft.qa_flag = NO_DRAFT_FLAG
+                    thin += 1
                     continue
                 n += 1
                 try:
@@ -401,14 +402,14 @@ def cmd_draft(run: str, drafts_json: str) -> None:
                 except Exception as e:
                     _log_error(ERROR_LOG, p.company, "qa", e)
         save_state(prospects, run_dir(run))
-        print(f"{n} drafted, {flagged} flagged")
+        print(f"{n} drafted, {flagged} flagged, {thin} talking-points-only (signal too thin to draft)")
         _print_cost_summary(run)
 
         needs_redraft = [
             (p, tier, draft)
             for p in prospects
             for tier, draft in p.drafts_by_tier.items()
-            if draft.qa_flag and draft.qa_flag != "passed"
+            if draft.qa_flag and draft.qa_flag not in ("passed", NO_DRAFT_FLAG)
         ]
         if needs_redraft:
             voice_guide = VOICE_GUIDE.read_text()
@@ -437,7 +438,7 @@ def cmd_redraft(run: str, drafts_json: str) -> None:
         n, still_flagged = 0, 0
         for p in prospects:
             for tier, draft in p.drafts_by_tier.items():
-                if not draft.initial_subject or draft.qa_flag in ("", "passed"):
+                if not draft.initial_subject or draft.qa_flag in ("", "passed", NO_DRAFT_FLAG):
                     continue
                 n += 1
                 try:
@@ -499,13 +500,17 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
 
 
 def emails_for_prospect(p: Prospect, *, waterfall_fn=None) -> Prospect:
-    from gtm.emails import split_contact_names, waterfall
+    from gtm.emails import EmailResult, split_contact_names, waterfall
 
     fn = waterfall_fn or waterfall
     domain = _domain(p.website)
     cells = []
     for name in split_contact_names(p.contact_name):
-        r = fn(name, domain)
+        try:
+            r = fn(name, domain)
+        except Exception as e:  # one contact's failure must not zero out the others'
+            _log_error(ERROR_LOG, p.company, f"emails/{name}", e)
+            r = EmailResult()
         cells.append(f"{r.email} ({r.status})" if r.email else "-")
     p.contact_emails = "; ".join(cells)
     return p
