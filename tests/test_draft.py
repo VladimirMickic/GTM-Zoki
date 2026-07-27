@@ -85,16 +85,23 @@ def _rich_prospect(**overrides):
     return Prospect(**defaults)
 
 
-def test_is_thin_signal_true_when_any_of_the_three_is_missing():
-    # 2026-07-25 decision: strict gate — ANY missing source makes it thin
+def test_is_thin_signal_true_when_two_or_more_sources_missing():
+    # 2026-07-27 decision: 2-of-3 gate. The strict all-three gate skipped 100% of
+    # contacts on the us-drone-6 run — drone makers essentially never name their case
+    # vendor, so competitor_weaknesses is almost always empty and it alone blocked
+    # every draft. Two present is enough specific ammo to beat a generic email.
     assert is_thin_signal(Prospect(company="X", website="https://x.com")) is True
-    assert is_thin_signal(_rich_prospect(case_evidence="")) is True
-    assert is_thin_signal(_rich_prospect(competitor_weaknesses=[])) is True
-    assert is_thin_signal(_rich_prospect(buying_signals=[])) is True
+    assert is_thin_signal(_rich_prospect(case_evidence="", competitor_weaknesses=[])) is True
+    assert is_thin_signal(_rich_prospect(case_evidence="", buying_signals=[])) is True
+    assert is_thin_signal(_rich_prospect(competitor_weaknesses=[], buying_signals=[])) is True
 
 
-def test_is_thin_signal_false_when_all_three_present():
+def test_is_thin_signal_false_when_any_two_of_three_present():
     assert is_thin_signal(_rich_prospect()) is False
+    # the real us-drone-6 shape: case evidence + buying signals, no named competitor
+    assert is_thin_signal(_rich_prospect(competitor_weaknesses=[])) is False
+    assert is_thin_signal(_rich_prospect(case_evidence="")) is False
+    assert is_thin_signal(_rich_prospect(buying_signals=[])) is False
 
 
 def test_build_draft_prompt_skips_email_draft_when_signal_thin():

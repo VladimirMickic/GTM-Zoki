@@ -35,12 +35,18 @@ NO_DRAFT_FLAG = "n/a — talking-points only, signal too thin to draft a specifi
 
 
 def is_thin_signal(p: Prospect) -> bool:
-    """A tier's prospect lacks enough concrete ammo (a named competitor
-    weakness, direct case evidence, or an evidence-backed buying signal) to
-    write an email that isn't generic filler. Any one missing is enough —
-    strict, per 2026-07-25 decision: fewer risky generic drafts over fewer
-    talking-points-only fallbacks."""
-    return not p.competitor_weaknesses or not p.case_evidence or not p.buying_signals
+    """A tier's prospect lacks enough concrete ammo (a named competitor weakness,
+    direct case evidence, or an evidence-backed buying signal) to write an email that
+    isn't generic filler.
+
+    2-of-3, per the 2026-07-27 decision. The original all-three gate skipped 100% of
+    contacts on the us-drone-6 run: drone makers essentially never name the case vendor
+    they ship in (it's a commodity add-on, not a headline product), so
+    competitor_weaknesses is empty almost always and it alone blocked every draft. Two
+    concrete sources is still real ammo — the 2026-07-25 principle (never send a
+    "true but empty" email) holds, the threshold was just set where nothing passes.
+    """
+    return sum(bool(x) for x in (p.competitor_weaknesses, p.case_evidence, p.buying_signals)) < 2
 
 
 def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
@@ -76,8 +82,8 @@ def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
 
     if thin:
         draft_section = f"""## Email draft — SKIP
-Signal is too thin to draft a specific, non-generic email right now (at least one of
-competitor_weaknesses / case_evidence / buying_signals is empty for {p.company}). Do NOT
+Signal is too thin to draft a specific, non-generic email right now (fewer than two of
+competitor_weaknesses / case_evidence / buying_signals are present for {p.company}). Do NOT
 draft an email — a generic "true but empty" email is worse than none. Set "draft_initial"
 to {{}} in the reply JSON; pain_points/talking_points below are the deliverable for this tier."""
         reply_schema = f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", "draft_initial": {{}}}}}}}}'
