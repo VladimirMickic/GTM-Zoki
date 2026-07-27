@@ -58,3 +58,10 @@ Write a structured research brief:
 - [ ] Pain points use prospect's language, not marketing speak
 - [ ] Each finding links back to a specific subreddit/post
 - [ ] Content angles are specific and actionable, not generic
+
+## Self-improvement
+If, while running this skill, you get corrected on an assumption, a query pattern, an
+output format, or any other instruction here — edit this file to bake the correction in
+before you finish. A correction that isn't written back just recurs next time, including in
+sessions with no memory of this one (this skill is mirrored for both Claude Code and Codex
+via `.agents/skills`, neither of which shares the other's session memory).

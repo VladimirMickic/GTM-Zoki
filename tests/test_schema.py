@@ -126,6 +126,19 @@ def test_long_sheet_cells_are_trimmed():
     assert len(p.fit_reason) > 400
 
 
+def test_long_sheet_cell_trim_preserves_trailing_source_link():
+    # feedback 2026-07-24: community-signals cell trim was eating the trailing
+    # "(url)" — user saw signals as "vague with no sources".
+    long_title = "word " * 40  # long enough that a flat 180-char trim would cut the URL
+    p = Prospect(
+        company="X", website="https://x.com",
+        community_signals=[f"{long_title}— some snippet (https://reddit.com/r/drones/some/long/thread/path)"],
+    )
+    row = p.to_sheet_row()
+    cell = row[SHEET_COLUMNS.index("community_signals")]
+    assert cell.endswith("(https://reddit.com/r/drones/some/long/thread/path)")
+
+
 def test_contact_fields_are_state_only_not_on_sheet():
     # sub-project B (2026-07-21): contacts moved to their own Sheet tab/CSV
     # (gtm/output.py::build_contact_rows) — the packed fields stay on Prospect

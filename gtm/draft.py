@@ -27,6 +27,22 @@ class QAResult(BaseModel):
     flag: str = ""  # empty = every claim is supported; else a short note of what isn't
 
 
+# 2026-07-25 (user challenge): a drafted email with nothing specific to say is
+# worse than no email — QA only fact-checks claims, it never catches "true but
+# generic". Gate the draft itself on whether we actually have ammo; talking
+# points are still generated for every tier regardless.
+NO_DRAFT_FLAG = "n/a — talking-points only, signal too thin to draft a specific email"
+
+
+def is_thin_signal(p: Prospect) -> bool:
+    """A tier's prospect lacks enough concrete ammo (a named competitor
+    weakness, direct case evidence, or an evidence-backed buying signal) to
+    write an email that isn't generic filler. Any one missing is enough —
+    strict, per 2026-07-25 decision: fewer risky generic drafts over fewer
+    talking-points-only fallbacks."""
+    return not p.competitor_weaknesses or not p.case_evidence or not p.buying_signals
+
+
 def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
     contact_block = ""
     if tier != "unknown":
@@ -56,9 +72,42 @@ def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
             f"{weaknesses}\n"
         )
 
-    return f"""Draft a 2-email cold sequence (initial + follow-up), 2 versions each, for
-{p.company}. Follow company/voice-guide.md exactly — its tone, banned phrases, signature,
-and format rules below are non-negotiable:
+    thin = is_thin_signal(p)
+
+    if thin:
+        draft_section = f"""## Email draft — SKIP
+Signal is too thin to draft a specific, non-generic email right now (at least one of
+competitor_weaknesses / case_evidence / buying_signals is empty for {p.company}). Do NOT
+draft an email — a generic "true but empty" email is worse than none. Set "draft_initial"
+to {{}} in the reply JSON; pain_points/talking_points below are the deliverable for this tier."""
+        reply_schema = f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", "draft_initial": {{}}}}}}}}'
+    else:
+        draft_section = f"""## Email draft (self-enforce — from the voice guide's "Email structure")
+Draft ONE email (no follow-up), 2 versions.
+1. Open with a real, specific fact about {p.company} (drawn from outreach_angle /
+   buying_signals / key_news) — never a generic greeting or banned opener.
+2. Value prop: a use case + social proof (category-level only — AeroVault has no named
+   customers to cite) + the pain it removes.
+3. Close with ONE closed-ended (yes/no) ask or a low-pressure negative-CTA — never stack asks.
+
+### Format (self-enforce — do not exceed)
+- Subject line: under 40 characters, TRIGGER-FIRST — lead with the prospect's own
+  event or pain (from outreach_angle / buying_signals / key_news), never with our
+  product-line names (AV-Field, AV-Micro, AV-Ops, AV-Convoy) — the prospect has never
+  heard them. Good: "Switchblade 400 field kit?". Bad: "AV-Field case for X?".
+- Body: capped at ~150 characters — one or two sentences, no more.
+- Personalization variables: {{FIRST_NAME}}, {{COMPANY}}.
+- No links in the body. No banned phrases (see voice guide). Close with the signature block
+  from the voice guide."""
+        reply_schema = (
+            f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", '
+            f'"draft_initial": {{"v1": {{"subject": "...", "body": "..."}}, '
+            f'"v2": {{"subject": "...", "body": "..."}}}}}}}}}}'
+        )
+
+    return f"""For {p.company}, produce pain points + talking points (always), and an email
+draft when the signal supports one. Follow company/voice-guide.md exactly — its tone, banned
+phrases, signature, and format rules below are non-negotiable:
 
 ## Voice guide
 {voice_guide}
@@ -69,28 +118,21 @@ and format rules below are non-negotiable:
 - buying_signals: {p.buying_signals}
 - key_news: {p.key_news}
 - fit_reason: {p.fit_reason}
+- competitor / competitor_weaknesses: {p.competitor} / {p.competitor_weaknesses}
+- case_evidence: {p.case_evidence}
 {contact_block}{competitor_block}
-## Structure (self-enforce — from the voice guide's "Email structure")
-1. Open with a real, specific fact about {p.company} (drawn from outreach_angle /
-   buying_signals / key_news) — never a generic greeting or banned opener.
-2. Value prop: a use case + social proof (category-level only — AeroVault has no named
-   customers to cite) + the pain it removes.
-3. Close with ONE closed-ended (yes/no) ask or a low-pressure negative-CTA — never stack asks.
-{tailoring_line}
+## Pain points & talking points (always produce — the primary deliverable)
+- pain_points: 1-3 concrete pains THIS tier ({tier}) at {p.company} likely has, grounded in
+  outreach_angle / buying_signals / case_evidence — not generic industry pains. Plain string,
+  short lines separated by " | ".
+- talking_points: 2-4 specific things a rep should raise on a call with this tier — concrete
+  mechanisms/specs/evidence, never a bare comparative. Plain string, short lines separated by
+  " | ". {tailoring_line}
 
-## Format (self-enforce — do not exceed)
-- Subject line: under 40 characters, TRIGGER-FIRST — lead with the prospect's own
-  event or pain (from outreach_angle / buying_signals / key_news), never with our
-  product-line names (AV-Field, AV-Micro, AV-Ops, AV-Convoy) — the prospect has never
-  heard them. Good: "Switchblade 400 field kit?". Bad: "AV-Field case for X?".
-- Body: capped at ~150 characters — one or two sentences, no more.
-- Personalization variables: {{FIRST_NAME}}, {{COMPANY}}.
-- No links in the body. No banned phrases (see voice guide). Close with the signature block
-  from the voice guide.
+{draft_section}
 
 Reply with ONLY this JSON (no prose), keyed by company name then persona tier:
-{{"{p.company}": {{"{tier}": {{"draft_initial": {{"v1": {{"subject": "...", "body": "..."}}, "v2": {{"subject": "...", "body": "..."}}}},
-"draft_followup": {{"v1": {{"subject": "...", "body": "..."}}, "v2": {{"subject": "...", "body": "..."}}}}}}}}}}
+{reply_schema}
 
 Save the answer to drafts.json."""
 
@@ -119,22 +161,19 @@ def qa_check(p: Prospect, draft: DraftSet, *, client=None, costlog: CostLog | No
         f"buying_signals: {p.buying_signals}\nkey_news: {p.key_news}\nfit_reason: {p.fit_reason}"
     )
     initial = f"Subject: {draft.initial_subject}\n{draft.initial_body}"
-    followup = f"Subject: {draft.followup_subject}\n{draft.followup_body}"
     completion = client.chat.completions.parse(
         model=MODEL,
         messages=[
             {
                 "role": "system",
                 "content": (
-                    "You fact-check a cold email sequence (initial + follow-up) against the "
-                    "evidence used to write them. Flag ONLY if either email references a "
-                    "specific stat, contract, certification, or event that is NOT supported by "
-                    "the evidence. Do not flag tone, length, or phrasing. If you flag something, "
-                    'say which email ("initial" or "follow-up") it came from. Reply with '
-                    'flag="" if every claim in both emails is supported.'
+                    "You fact-check a cold email against the evidence used to write it. Flag "
+                    "ONLY if it references a specific stat, contract, certification, or event "
+                    "that is NOT supported by the evidence. Do not flag tone, length, or "
+                    'phrasing. Reply with flag="" if every claim is supported.'
                 ),
             },
-            {"role": "user", "content": f"Evidence:\n{evidence}\n\nInitial Email:\n{initial}\n\nFollow-up Email:\n{followup}"},
+            {"role": "user", "content": f"Evidence:\n{evidence}\n\nEmail:\n{initial}"},
         ],
         response_format=QAResult,
     )

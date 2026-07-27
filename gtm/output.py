@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import os
+import re
 from pathlib import Path
 
 from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, DraftSet, Prospect, _trim
@@ -30,10 +31,11 @@ CONTACT_COLUMNS = [
     "contact_email",
     "email_status",
     "outreach_angle",
+    "pain_points",
+    "talking_points",
     "draft_initial_subject",
     "draft_initial_body",
-    "draft_followup_subject",
-    "draft_followup_body",
+    "needs_research",
     "qa_flag",
     "date_processed",
 ]
@@ -110,10 +112,11 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
             "contact_email": email,
             "email_status": status,
             "outreach_angle": _trim(prospect.outreach_angle, _OUTREACH_ANGLE_MAX_CHARS),
+            "pain_points": merge(draft.pain_points),
+            "talking_points": merge(draft.talking_points),
             "draft_initial_subject": merge(draft.initial_subject),
             "draft_initial_body": merge(draft.initial_body),
-            "draft_followup_subject": merge(draft.followup_subject),
-            "draft_followup_body": merge(draft.followup_body),
+            "needs_research": "yes" if draft.needs_research else "no",
             "qa_flag": draft.qa_flag,
             "date_processed": prospect.date_processed,
         })
@@ -135,6 +138,25 @@ def write_contacts_csv(prospects: list[Prospect], path: str | Path) -> int:
     return n
 
 
+def _normalize_domain(website: str) -> str:
+    """"https://Teal-Drones.com/" and "tealdrones.com" must dedupe as the same
+    row — strip scheme/www/trailing slash/case."""
+    d = website.strip().lower()
+    d = re.sub(r"^https?://", "", d)
+    d = re.sub(r"^www\.", "", d)
+    return d.rstrip("/")
+
+
+def _contact_dedupe_key(row: dict) -> str:
+    """Email is the most reliable identity; LinkedIn next; name+company last
+    resort when a contact has neither (still better than always appending)."""
+    if row["contact_email"]:
+        return f"email:{row['contact_email'].lower()}"
+    if row["contact_linkedin"]:
+        return f"li:{row['contact_linkedin'].lower()}"
+    return f"name:{row['company'].lower()}|{row['contact_name'].lower()}"
+
+
 def _open_worksheet(name: str = "Companies"):
     import gspread
 
@@ -148,11 +170,20 @@ def _open_worksheet(name: str = "Companies"):
 
 def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
     # main sheet = full funnel: every tier, drops included (tagged tier "3").
+    # Append-only, no manual-clear ritual: skip any prospect whose domain is
+    # already a row on the sheet (2026-07-24 feedback).
     ws = worksheet if worksheet is not None else _open_worksheet()
-    keep = list(prospects)
-    rows = [p.to_sheet_row() for p in keep]
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)
+    website_idx = SHEET_COLUMNS.index("website")
+    data_rows = existing[1:] if has_content else []
+    existing_domains = {
+        _normalize_domain(row[website_idx]) for row in data_rows if len(row) > website_idx
+    }
+    keep = [p for p in prospects if _normalize_domain(p.website) not in existing_domains]
+    rows = [p.to_sheet_row() for p in keep]
+    if not rows:
+        return 0
     if not has_content:
         rows.insert(0, list(SHEET_COLUMNS))
     ws.append_rows(rows, value_input_option="RAW")
@@ -162,15 +193,38 @@ def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
 def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
     ws = worksheet if worksheet is not None else _open_worksheet("Contacts")
     keep = [p for p in prospects if p.status != "drop"]
-    rows = [
-        [row[col] for col in CONTACT_COLUMNS]
-        for p in keep
-        for row in build_contact_rows(p)
-    ]
-    n = len(rows)
+    candidate_rows = [row for p in keep for row in build_contact_rows(p)]
+
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)
+    data_rows = existing[1:] if has_content else []
+    email_idx = CONTACT_COLUMNS.index("contact_email")
+    linkedin_idx = CONTACT_COLUMNS.index("contact_linkedin")
+    company_idx = CONTACT_COLUMNS.index("company")
+    name_idx = CONTACT_COLUMNS.index("contact_name")
+    existing_keys = set()
+    for row in data_rows:
+        if len(row) <= max(email_idx, linkedin_idx, company_idx, name_idx):
+            continue
+        existing_keys.add(_contact_dedupe_key({
+            "contact_email": row[email_idx],
+            "contact_linkedin": row[linkedin_idx],
+            "company": row[company_idx],
+            "contact_name": row[name_idx],
+        }))
+
+    new_rows, seen = [], set()
+    for row in candidate_rows:
+        key = _contact_dedupe_key(row)
+        if key in existing_keys or key in seen:
+            continue
+        seen.add(key)
+        new_rows.append([row[col] for col in CONTACT_COLUMNS])
+
+    n = len(new_rows)
+    if n == 0:
+        return 0
     if not has_content:
-        rows.insert(0, list(CONTACT_COLUMNS))
-    ws.append_rows(rows, value_input_option="RAW")
+        new_rows.insert(0, list(CONTACT_COLUMNS))
+    ws.append_rows(new_rows, value_input_option="RAW")
     return n

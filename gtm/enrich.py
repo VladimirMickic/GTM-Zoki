@@ -51,10 +51,39 @@ def find_news(company: str, *, search=serper_search) -> list[str]:
 MAX_COMMUNITY_SIGNALS = 5
 
 
+_MIN_HANDLE_OVERLAP = 6  # chars; below this, a short handle (e.g. "teal") false-matches too easily
+
+
+def _is_own_post(company: str, r: dict) -> bool:
+    """A "{company}" X/Twitter/Reddit search surfaces the company's own account
+    posting about itself (2026-07-24: "Inspired Flight Technologies" returned
+    three near-duplicate lines all from @InspiredFlight1's own feed) — that's
+    marketing, not a third-party community signal. Drop any result whose link
+    or title carries a handle that's a (digit-stripped) prefix match against
+    the company name."""
+    company_norm = _normalize(company)
+    link, title = r.get("link", "").lower(), r.get("title", "").lower()
+    handles = []
+    m = re.search(r"(?:x|twitter)\.com/@?([a-z0-9_]+)", link)
+    if m:
+        handles.append(m.group(1))
+    m = re.search(r"@([a-z0-9_]+)", title)
+    if m:
+        handles.append(m.group(1))
+    for h in handles:
+        h_norm = re.sub(r"\d+$", "", _normalize(h))  # strip trailing version digits, e.g. "1"
+        if len(h_norm) >= _MIN_HANDLE_OVERLAP and (
+            company_norm.startswith(h_norm) or h_norm.startswith(company_norm)
+        ):
+            return True
+    return False
+
+
 def find_community_signals(company: str, *, search=serper_search) -> list[str]:
     q = f'"{company}" drone (site:reddit.com OR site:x.com OR site:twitter.com OR site:rcgroups.com)'
     results = search(q, num=10)
-    return [_news_line(r) for r in results[:MAX_COMMUNITY_SIGNALS]]
+    third_party = [r for r in results if not _is_own_post(company, r)]
+    return [_news_line(r) for r in third_party[:MAX_COMMUNITY_SIGNALS]]
 
 
 def enrich(p: Prospect, *, search=serper_search) -> Prospect:

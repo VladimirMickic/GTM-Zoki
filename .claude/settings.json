@@ -3,6 +3,13 @@
     "deny": [
       "Read(./.env)",
       "Read(./credentials/**)"
+    ],
+    "allow": [
+      "Bash(apify info*)",
+      "Bash(python -m gtm.run*)",
+      "Bash(.venv/bin/python -m gtm.run*)",
+      "Bash(python -m pytest*)",
+      "Bash(.venv/bin/python -m pytest*)"
     ]
   },
   "hooks": {

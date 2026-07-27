@@ -1,6 +1,6 @@
 import pytest
 
-from gtm.draft import QAError, QAResult, build_draft_prompt, build_redraft_prompt, qa_check
+from gtm.draft import QAError, QAResult, build_draft_prompt, build_redraft_prompt, is_thin_signal, qa_check
 from gtm.schema import DraftSet, Prospect
 
 VOICE_GUIDE_SAMPLE = "## Tone\nWarm, consultative.\n## Banned phrases\ncircle back"
@@ -13,6 +13,8 @@ def test_build_draft_prompt_embeds_voice_guide_and_prospect_fields():
         buying_signals=["SRR win — US Army contract (source, 2026-05-01)"],
         key_news=["Teal wins SRR — ..."],
         fit_reason="NDAA/defense 15/15 — US Army SRR program",
+        case_evidence="ships in a soft duffel bag today",
+        competitor="Pelican 1520", competitor_weaknesses=["too heavy for field carry"],
     )
     prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
     assert "Teal Drones" in prompt
@@ -72,6 +74,62 @@ def test_build_draft_prompt_omits_competitor_block_when_no_weaknesses():
     assert "Displacement ammo" not in prompt
 
 
+def _rich_prospect(**overrides):
+    defaults = dict(
+        company="Teal Drones", website="https://tealdrones.com",
+        buying_signals=["SRR win — US Army contract"],
+        case_evidence="ships in a soft duffel bag today",
+        competitor="Pelican 1520", competitor_weaknesses=["too heavy for field carry"],
+    )
+    defaults.update(overrides)
+    return Prospect(**defaults)
+
+
+def test_is_thin_signal_true_when_any_of_the_three_is_missing():
+    # 2026-07-25 decision: strict gate — ANY missing source makes it thin
+    assert is_thin_signal(Prospect(company="X", website="https://x.com")) is True
+    assert is_thin_signal(_rich_prospect(case_evidence="")) is True
+    assert is_thin_signal(_rich_prospect(competitor_weaknesses=[])) is True
+    assert is_thin_signal(_rich_prospect(buying_signals=[])) is True
+
+
+def test_is_thin_signal_false_when_all_three_present():
+    assert is_thin_signal(_rich_prospect()) is False
+
+
+def test_build_draft_prompt_skips_email_draft_when_signal_thin():
+    p = Prospect(company="Ghost Drones", website="https://ghost.com")
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "SKIP" in prompt
+    assert '"draft_initial": {}' in prompt
+    assert "150" not in prompt  # no email-format instructions when skipped
+
+
+def test_build_draft_prompt_requests_draft_when_signal_rich():
+    p = _rich_prospect()
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "SKIP" not in prompt
+    assert "150" in prompt
+    assert "40" in prompt
+
+
+def test_build_draft_prompt_always_requests_pain_points_and_talking_points():
+    # primary deliverable regardless of thin/rich — position-specific either way
+    thin_prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, Prospect(company="X", website="https://x.com"), "manager")
+    rich_prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(), "manager")
+    for prompt in (thin_prompt, rich_prompt):
+        assert '"pain_points"' in prompt
+        assert '"talking_points"' in prompt
+        assert "manager" in prompt
+
+
+def test_build_draft_prompt_no_longer_asks_for_a_followup():
+    p = _rich_prospect()
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "draft_followup" not in prompt
+    assert "no follow-up" in prompt.lower()
+
+
 def test_build_draft_prompt_reply_json_keys_by_company_then_tier():
     p = Prospect(company="Teal Drones", website="https://tealdrones.com")
     prompt = build_draft_prompt("VOICE", p, "director")
@@ -127,25 +185,6 @@ def test_qa_check_raises_qa_error_on_refusal():
     client = _FakeClient(None)
     with pytest.raises(QAError):
         qa_check(_prospect(), _draft(), client=client)
-
-
-def test_qa_check_flags_unsupported_claim_in_followup_email():
-    draft = DraftSet(
-        initial_subject="Case built for the Teal 2?",
-        initial_body="{FIRST_NAME} — saw Teal's SRR win. Worth 10 min?",
-        followup_subject="Following up on SRR opportunity",
-        followup_body="Just checking if you saw our $5M contract offer — sounds like a fit?",
-    )
-    flag_text = "follow-up: references a $5M contract not in evidence"
-    client = _FakeClient(QAResult(flag=flag_text))
-    result = qa_check(_prospect(), draft, client=client)
-
-    assert result == flag_text
-
-    user_message = next((m["content"] for m in client.last_messages if m["role"] == "user"), None)
-    assert user_message is not None
-    assert "{FIRST_NAME} — saw Teal's SRR win. Worth 10 min?" in user_message
-    assert "Just checking if you saw our $5M contract offer — sounds like a fit?" in user_message
 
 
 def test_build_redraft_prompt_includes_qa_flag_reason_and_original_prompt():

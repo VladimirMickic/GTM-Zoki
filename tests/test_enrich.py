@@ -122,6 +122,29 @@ def test_signal_prompt_expands_outreach_angle_instruction():
     assert "community signal" in prompt.lower()
 
 
+def test_community_signals_excludes_own_handle_posts():
+    # feedback 2026-07-24: "Inspired Flight Technologies" search returned three
+    # near-duplicate lines all posted by @InspiredFlight1 — the company's own
+    # account, not third-party chatter.
+    def search(query, num=10):
+        return [
+            {"title": "Inspired Flight Technologies (@InspiredFlight1) / Posts / X", "link": "https://x.com/InspiredFlight1", "snippet": "Building the next generation..."},
+            {"title": "Showcasing the IF800's payload capacity", "link": "https://x.com/InspiredFlight1/status/1", "snippet": "..."},
+            {"title": "IF800 field review : r/drones", "link": "https://reddit.com/r/drones/xyz", "snippet": "flew great in high wind"},
+        ]
+    sigs = find_community_signals("Inspired Flight Technologies", search=search)
+    assert len(sigs) == 1
+    assert "IF800 field review" in sigs[0]
+
+
+def test_community_signals_keeps_third_party_only_returns_empty_when_all_self():
+    def search(query, num=10):
+        return [
+            {"title": "Teal Drones (@TealDrones) / Posts / X", "link": "https://x.com/TealDrones", "snippet": "our latest"},
+        ]
+    assert find_community_signals("Teal Drones", search=search) == []
+
+
 def test_news_and_community_signals_queries_carry_drone_disambiguator():
     # discover-3 2026-07-18: "Paladin" news returned lenders, awards, r/Fantasy
     captured = []

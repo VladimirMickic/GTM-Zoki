@@ -8,7 +8,7 @@ allowed-tools: WebSearch, WebFetch
 
 Nine step-by-step research processes, each validated to 90%+ accuracy by running 200+ search patterns against 11 real companies (from $400B+ enterprises to bootstrapped startups). Each process is a fixed sequence of searches with exact queries, what to extract from each, early-stop conditions, a kill list of searches that waste time, and an output template.
 
-Source: [LeadGrowGTM/research-process-builder](https://github.com/LeadGrowGTM/research-process-builder). This skill carries over only the validated, general-purpose processes — not the repo's internal Python/FireCrawl/Supabase pipeline (that's for their own scheduled monitors and isn't needed here; Claude Code's own `WebSearch`/`WebFetch` tools run these processes directly).
+Source: [LeadGrowGTM/research-process-builder](https://github.com/LeadGrowGTM/research-process-builder). This skill carries over only the validated, general-purpose processes — not the repo's internal Python/FireCrawl/Supabase pipeline (that's for their own scheduled monitors and isn't needed here; Codex's own `WebSearch`/`WebFetch` tools run these processes directly).
 
 ## Processes
 
@@ -41,7 +41,7 @@ Trigger phrases: "research [company]", "prep me for the call with [company]", "f
 
 ## Notes
 
-- These processes assume a live web search tool (Claude Code's `WebSearch`/`WebFetch`). They do not require FireCrawl, SerperDev, or any API key — that infra exists in the source repo for their own automated pipeline, not for this skill.
+- These processes assume a live web search tool (Codex's `WebSearch`/`WebFetch`). They do not require FireCrawl, SerperDev, or any API key — that infra exists in the source repo for their own automated pipeline, not for this skill.
 - Every process file hardcodes `{{current_year}}`-style placeholders rather than a literal year — always substitute the actual current year when building queries, per the search-tips guidance on year modifiers.
 - If a research need doesn't match any of the 9 processes here (e.g. pricing intelligence, market sizing, tech-stack detection), don't improvise from scratch — the source repo's `SKILL.md` documents the 6-phase methodology used to build these processes, in case a new one is worth building properly and validating rather than one-off searching.
 

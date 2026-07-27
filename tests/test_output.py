@@ -39,17 +39,17 @@ MULTI = Prospect(
         # CEO + VP Engineering both classify c-suite (gtm/persona.py); Field
         # Technician classifies ic — two distinct draft sets, not a shared one.
         "c-suite": DraftSet(
+            pain_points="Damaged units eat into margin | slow RFP turnaround",
+            talking_points="MIL-STD-810H drop rating | US-made, matches Teal's own NDAA angle",
             initial_subject="Case built for the Teal 2?",
             initial_body="{FIRST_NAME} — saw Teal's SRR win.",
-            followup_subject="Following up",
-            followup_body="Just circling back.",
             qa_flag="passed",
         ),
         "ic": DraftSet(
+            pain_points="Field gear takes a beating",
+            talking_points="Foam insert sized to the Teal 2 | faster swap in the field",
             initial_subject="Field kit for the Teal 2?",
             initial_body="{FIRST_NAME} — Teal's SRR win means more units in the field.",
-            followup_subject="Quick follow-up",
-            followup_body="Still curious what you use today.",
             qa_flag="passed",
         ),
     },
@@ -124,6 +124,45 @@ def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
     assert ws.appended[1][0] == "Teal Drones"
 
 
+def test_push_to_sheet_skips_rows_whose_domain_already_present():
+    # feedback 2026-07-24: append-only sheet + manual clear ritual is error-prone
+    ws = FakeWorksheet()
+    ws.values = [SHEET_COLUMNS, ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)]
+    n = push_to_sheet([TEAL], worksheet=ws)
+    assert n == 0
+    assert ws.appended == []
+
+
+def test_push_to_sheet_domain_dedupe_ignores_scheme_www_and_trailing_slash():
+    ws = FakeWorksheet()
+    ws.values = [SHEET_COLUMNS, ["Teal Drones", "www.tealdrones.com/"] + [""] * (len(SHEET_COLUMNS) - 2)]
+    n = push_to_sheet([TEAL], worksheet=ws)
+    assert n == 0
+
+
+def test_push_to_sheet_still_pushes_new_domains_alongside_existing():
+    ws = FakeWorksheet()
+    ws.values = [SHEET_COLUMNS, ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)]
+    fresh = TEAL.model_copy(update={"company": "NewCo", "website": "https://newco.com"})
+    n = push_to_sheet([TEAL, fresh], worksheet=ws)
+    assert n == 1
+    assert ws.appended[0][SHEET_COLUMNS.index("company")] == "NewCo"
+
+
+def test_push_contacts_to_sheet_skips_rows_with_existing_email():
+    ws = FakeWorksheet()
+    existing_row = [""] * len(CONTACT_COLUMNS)
+    existing_row[CONTACT_COLUMNS.index("company")] = "Teal Drones"
+    existing_row[CONTACT_COLUMNS.index("contact_email")] = "blake@tealdrones.com"
+    ws.values = [CONTACT_COLUMNS, existing_row]
+    n = push_contacts_to_sheet([MULTI], worksheet=ws)
+    # Blake (email match) skipped; Manoj + Steven (no prior email match) still pushed
+    assert n == 2
+    pushed_names = [r[CONTACT_COLUMNS.index("contact_name")] for r in ws.appended]
+    assert "Blake Resnick" not in pushed_names
+    assert "Manoj Mohan" in pushed_names
+
+
 def test_contact_columns_locked_order():
     # 2026-07-21 (user layout): drafts live on the Contacts tab again; source/status
     # dropped. One row per contact; company-level cells (outreach_angle, drafts,
@@ -136,10 +175,11 @@ def test_contact_columns_locked_order():
         "contact_email",
         "email_status",
         "outreach_angle",
+        "pain_points",
+        "talking_points",
         "draft_initial_subject",
         "draft_initial_body",
-        "draft_followup_subject",
-        "draft_followup_body",
+        "needs_research",
         "qa_flag",
         "date_processed",
     ]
@@ -191,6 +231,30 @@ def test_build_contact_rows_picks_draft_matching_each_contacts_persona_tier():
     assert rows[2]["draft_initial_subject"] == "Field kit for the Teal 2?"   # Steven, Field Tech -> ic
     assert rows[0]["qa_flag"] == "passed"
     assert rows[2]["qa_flag"] == "passed"
+
+
+def test_build_contact_rows_carries_pain_points_talking_points_and_needs_research():
+    # 2026-07-25: pain_points/talking_points are the primary deliverable, and
+    # the fact-check result (qa_flag) must be visible on the Contacts tab —
+    # never dropped silently.
+    rows = build_contact_rows(MULTI)
+    assert rows[0]["pain_points"] == "Damaged units eat into margin | slow RFP turnaround"
+    assert rows[0]["talking_points"] == "MIL-STD-810H drop rating | US-made, matches Teal's own NDAA angle"
+    assert rows[0]["needs_research"] == "no"
+    assert rows[0]["qa_flag"] == "passed"
+
+
+def test_build_contact_rows_needs_research_yes_when_tier_has_no_draft():
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {
+            "c-suite": DraftSet(pain_points="thin signal pain", talking_points="thin signal talk", needs_research=True, qa_flag="n/a — talking-points only, signal too thin to draft a specific email"),
+            "ic": MULTI.drafts_by_tier["ic"],
+        }
+    })
+    rows = build_contact_rows(p)
+    assert rows[0]["needs_research"] == "yes"
+    assert rows[0]["draft_initial_subject"] == ""
+    assert "talking-points only" in rows[0]["qa_flag"]
 
 
 def test_build_contact_rows_falls_back_to_unknown_tier_draft_when_contacts_tier_has_no_draft():

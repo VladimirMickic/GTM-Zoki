@@ -34,6 +34,16 @@ class ScrapeError(Exception):
     pass
 
 
+def _crawl4ai_markdown(result) -> str:
+    """installed crawl4ai (0.4.247) puts the MarkdownGenerationResult object (with
+    .fit_markdown) on result.markdown_v2 — result.markdown is a plain str there for
+    back-compat. Handle both shapes so a version bump either way still works."""
+    md = getattr(result, "markdown_v2", None) or result.markdown
+    if hasattr(md, "fit_markdown"):
+        return md.fit_markdown or md.raw_markdown or ""
+    return getattr(result, "fit_markdown", None) or md or ""
+
+
 def scrape_crawl4ai(url: str) -> str:
     import asyncio
 
@@ -50,7 +60,7 @@ def scrape_crawl4ai(url: str) -> str:
             result = await crawler.arun(url=url, config=config)
             if not result.success:
                 raise ScrapeError(f"crawl4ai failed: {result.error_message}")
-            return result.markdown.fit_markdown or result.markdown.raw_markdown or ""
+            return _crawl4ai_markdown(result)
 
     return asyncio.run(_run())
 
@@ -72,7 +82,7 @@ def scrape_with_links(url: str) -> tuple[str, list[str]]:
             result = await crawler.arun(url=url, config=CrawlerRunConfig(markdown_generator=md_generator))
             if not result.success:
                 raise ScrapeError(f"crawl4ai failed: {result.error_message}")
-            md = result.markdown.fit_markdown or result.markdown.raw_markdown or ""
+            md = _crawl4ai_markdown(result)
             hrefs = [l.get("href", "") for l in (result.links or {}).get("internal", []) if l.get("href")]
             return md, hrefs
 

@@ -53,19 +53,34 @@ def _trim(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n].rsplit(" ", 1)[0].rstrip() + "…"
 
 
+def _trim_keep_source(s: str, n: int) -> str:
+    """Like _trim, but for "<text> (<url>)" entries (gtm/enrich.py::_news_line):
+    trims the text, never the trailing "(url)" — a cut source link is why the
+    2026-07-24 community-signals feedback read as "no sources" (the sheet cell
+    was silently eating the parenthetical)."""
+    s = s.strip()
+    if s.endswith(")") and " (" in s:
+        text, _, source = s[:-1].rpartition(" (")
+        source = f" ({source})"
+        budget = max(n - len(source), 0)
+        return (text if len(text) <= budget else text[:budget].rsplit(" ", 1)[0].rstrip() + "…") + source
+    return _trim(s, n)
+
+
 class DraftSet(BaseModel):
-    """One 2-email (initial + follow-up), 2-version cold-email draft, plus its
-    own fact-check flag. One of these per persona tier present at a company
-    (gtm/persona.py::distinct_tiers_present) — a CFO and a director never
-    share a draft."""
+    """One tier's outreach package: pain_points/talking_points (always
+    produced — the primary, position-specific deliverable) plus a single
+    2-version cold-email draft (no follow-up) when the signal is strong
+    enough to write one — see gtm/draft.py::is_thin_signal. One of these per
+    persona tier present at a company (gtm/persona.py::distinct_tiers_present)
+    — a CFO and a director never share a draft or the same talking points."""
+    pain_points: str = ""
+    talking_points: str = ""
+    needs_research: bool = False  # True when signal was too thin to draft a real email
     initial_subject: str = ""
     initial_body: str = ""
     initial_subject_alt: str = ""
     initial_body_alt: str = ""
-    followup_subject: str = ""
-    followup_body: str = ""
-    followup_subject_alt: str = ""
-    followup_body_alt: str = ""
     qa_flag: str = ""
 
 
@@ -155,7 +170,7 @@ class Prospect(BaseModel):
             elif isinstance(v, list):
                 if col in _LONG_LIST_COLS:
                     # long-form cells: top-N entries, each trimmed, one per line
-                    items = [_trim(str(x), _ENTRY_MAX_CHARS) for x in v[:_LIST_MAX_ITEMS]]
+                    items = [_trim_keep_source(str(x), _ENTRY_MAX_CHARS) for x in v[:_LIST_MAX_ITEMS]]
                     row.append("\n".join(items))
                 else:
                     row.append("; ".join(str(x) for x in v))  # short specs stay inline

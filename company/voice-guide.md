@@ -10,8 +10,9 @@ prop. Bold and charismatic, but never pushy — one real question or concrete of
 not a stacked pitch.
 
 ## Format (locked, enforced by `draft`/QA)
-- 2-email sequence: initial + one follow-up.
-- 2 versions of each (4 drafts per prospect total).
+- One email, no follow-up — 2 versions (v1/v2).
+- A draft is only written when the signal supports one (gtm/draft.py::is_thin_signal); when
+  it doesn't, pain_points/talking_points are the deliverable instead of a generic email.
 - Subject line: under 40 characters, **trigger-first** — lead with the prospect's own
   event or pain (their contract win, launch, shipping gap), never with our product-line
   names (`AV-Field`, `AV-Micro`, `AV-Ops`, `AV-Convoy` — the prospect has never heard them)
@@ -56,14 +57,6 @@ fill in — every real draft should read this specific, using that prospect's ow
 **Initial, v2** — *"Congrats on SRR — quick Q"*
 > {FIRST_NAME}, congrats on SRR. Curious what Teal 2 units ship in today — we build
 > MIL-STD-810H cases sized to it. Quick call?
-
-**Follow-up, v1** — *"Following up — Teal 2 transport"*
-> {FIRST_NAME}, still curious what you're using for Teal 2 transport. Happy to send our
-> spec sheet if useful, no pressure.
-
-**Follow-up, v2** — *"One more try — worth 10 min?"*
-> {FIRST_NAME}, know outbound gets ignored — one real question: does Teal's shipping case
-> survive field drops as well as the drone does?
 
 Each closes with the signature above.
 

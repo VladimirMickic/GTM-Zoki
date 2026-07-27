@@ -23,12 +23,13 @@ me to find?" Do not ask again mid-run.
 1. `python -m gtm.run start data/runs/<run>/brief.md` — discover/scrape/extract, raises a `CheckpointPending` fit prompt.
 2. Answer the fit prompt yourself: score each company vs `company/ICP.md`, write the JSON to `data/runs/<run>/fit.json`, then `python -m gtm.run fit <run> fit.json`.
 3. `python -m gtm.run enrich <run>` — prints a signal prompt and, for any prospect with a detected `competitor`, a separate displacement research prompt, one block per company. Research both using the `company-research` and `reddit-find` skills where real data is needed. Write one merged entry per company to `data/runs/<run>/signals.json` — always include `competitor_weaknesses` explicitly for any company that has one, even though an omitted key preserves the prior value rather than resetting it. Then `python -m gtm.run signals <run> signals.json`.
-4. `python -m gtm.run segment <run>` — assigns a segment bucket per company and prints one draft prompt per (company, tier) pair for every tier present. Write copy per `company/voice-guide.md` (category-only social proof, every value-prop claim backed by a concrete mechanism/spec — no bare comparatives) to `data/runs/<run>/drafts.json`, then `python -m gtm.run draft <run> drafts.json`.
-5. Any tier QA-flags: re-answer just those tiers in a new JSON, `python -m gtm.run redraft <run> drafts.json`. Repeat until no `qa_flag` remains. No stop.
+4. `python -m gtm.run segment <run>` — assigns a segment bucket per company and prints one draft prompt per (company, tier) pair for every tier present. Every tier always gets `pain_points` + `talking_points` tailored to that tier's position (`company/voice-guide.md`'s "Persona tailoring" — a CFO and a director never get the same angle). A single email draft (no follow-up, 2 versions) is only requested when the prompt says the signal supports one (`gtm/draft.py::is_thin_signal` — needs a competitor weakness, case evidence, AND a buying signal); otherwise the prompt says SKIP and pain_points/talking_points are that tier's whole deliverable — do not invent a draft when told to skip. Write per `company/voice-guide.md` (category-only social proof, every value-prop claim backed by a concrete mechanism/spec — no bare comparatives) to `data/runs/<run>/drafts.json`, then `python -m gtm.run draft <run> drafts.json`.
+5. Any tier QA-flags (an actual drafted email with an unsupported claim — tiers skipped for thin signal are auto-marked `n/a` and never flagged): re-answer just those tiers in a new JSON, `python -m gtm.run redraft <run> drafts.json`. Repeat until no real `qa_flag` remains. No stop.
 
 ## Fact-check pass (before Checkpoint 2)
 
-For every drafted tier, pull that prospect's `case_evidence` and
+For every tier that has a draft (skip tiers with no `draft_initial` — they
+were intentionally not drafted), pull that prospect's `case_evidence` and
 `competitor`/`competitor_weaknesses` fields (in `data/runs/<run>/prospects.json`)
 and check the draft's `initial_body`/`initial_body_alt` for every named
 competitor, spec rating, or dimension. Anything in the draft text that
@@ -37,10 +38,14 @@ it reaches the table below. Deterministic string check — no LLM call.
 
 ## Checkpoint 2: draft approval
 
-Present one compact table: company, contact, tier, subject line, one-line
-angle. Offer full draft text for any row on request. Wait for the user to
-approve all or flag specific rows. On a flagged row, rewrite just that tier
-and redraft, then re-show the table (loop until approved).
+Present one compact table: company, contact, tier, subject line (or "—
+talking points only" if `needs_research`), one-line angle, **fact-check
+result** (the `qa_flag` value verbatim — `passed`, the flagged claim text, or
+the `n/a — talking-points only...` marker — never omit this column, it's
+the whole point of the QA step). Offer full draft text, pain_points, and
+talking_points for any row on request. Wait for the user to approve all or
+flag specific rows. On a flagged row, rewrite just that tier and redraft,
+then re-show the table (loop until approved).
 
 ## Emails (before output — do not skip)
 
@@ -56,9 +61,9 @@ just the final one (see Cost visibility below).
 
 Only after approval and the emails step above: `python -m gtm.run output <run>`
 (add `--dry-run` first if the user wants to inspect the CSV before a live
-Sheet push). Sheet tabs are append-only with no dedupe-by-company — remind
-the user to clear the `Companies`/`Contacts` tabs by hand first if this
-isn't the first run against that Sheet.
+Sheet push). Sheet push dedupes automatically — Companies by domain,
+Contacts by email (falling back to LinkedIn, then name) — so re-running
+against the same Sheet is safe and never needs a manual clear.
 
 ## Cost visibility
 

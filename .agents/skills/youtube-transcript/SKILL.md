@@ -44,3 +44,10 @@ Write a structured brief in the format the user needs:
 - [ ] Timestamps referenced where available
 - [ ] Quotes are exact, not paraphrased
 - [ ] Output format matches what user asked for
+
+## Self-improvement
+If, while running this skill, you get corrected on an assumption or any other instruction
+here — edit this file to bake the correction in before you finish. A correction that isn't
+written back just recurs next time, including in sessions with no memory of this one (this
+skill is mirrored for both Claude Code and Codex via `.agents/skills`, neither of which
+shares the other's session memory).
