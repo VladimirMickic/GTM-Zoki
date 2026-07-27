@@ -1,4 +1,7 @@
 {
+  "autoMode": {
+    "allow": ["$defaults", "Bash(python -m gtm.run output *)"]
+  },
   "permissions": {
     "deny": [
       "Read(./.env)",
