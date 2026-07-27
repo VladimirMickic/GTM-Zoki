@@ -91,6 +91,99 @@ def test_pick_product_links_falls_back_to_shallow_non_boilerplate_paths():
     assert picked == ["https://tealdrones.com/black-widow", "https://tealdrones.com/hellcat"]
 
 
+def test_pick_product_links_rejects_team_media_and_download_pages():
+    from gtm.scrape import pick_product_links
+
+    # real neros.tech shape: no product page exists at all, specs are gated behind
+    # /protected-downloads. Every candidate here is boilerplate — picking any of them
+    # burns a crawl and pads the extraction prompt with junk.
+    hrefs = [
+        "https://www.neros.tech/media",
+        "https://www.neros.tech/teams",
+        "https://www.neros.tech/news",
+        "https://www.neros.tech/protected-downloads",
+        "https://www.neros.tech/legal/privacy-policy",
+        "https://www.neros.tech/articles/neros-launches-uk-subsidiary-with-investment",
+    ]
+    assert pick_product_links(hrefs, "https://www.neros.tech/") == []
+
+
+def test_scrape_deep_skips_subpage_crawls_when_nothing_worth_fetching():
+    from gtm.scrape import scrape_deep
+
+    fetched = []
+
+    def fake_fetch(url):
+        fetched.append(url)
+        return "HOME " * 60, ["https://n.tech/teams", "https://n.tech/media"]
+
+    md = scrape_deep("https://n.tech/", fetch=fake_fetch, sitemap_fn=lambda u: [])
+    assert fetched == ["https://n.tech/"]  # homepage only, no wasted crawls
+    assert "HOME" in md
+
+
+def test_scrape_deep_prefers_sitemap_product_pages_over_homepage_links():
+    from gtm.scrape import scrape_deep
+
+    def fake_fetch(url):
+        if url == "https://t.com/":
+            return "HOME " * 60, ["https://t.com/about-us-story"]
+        return f"PAGE:{url} " * 40, []
+
+    md = scrape_deep(
+        "https://t.com/",
+        fetch=fake_fetch,
+        sitemap_fn=lambda u: ["https://t.com/blog/x", "https://t.com/products/hawk"],
+    )
+    assert "PAGE:https://t.com/products/hawk" in md
+
+
+def test_scrape_deep_ignores_sitemap_without_product_paths():
+    """A sitemap in site-map order (not nav order) is a worse ranking signal than the
+    homepage's own links — only its explicit product-path hits are trusted."""
+    from gtm.scrape import scrape_deep
+
+    def fake_fetch(url):
+        if url == "https://t.com/":
+            return "HOME " * 60, ["https://t.com/perimeter-8"]
+        return f"PAGE:{url} " * 40, []
+
+    md = scrape_deep(
+        "https://t.com/",
+        fetch=fake_fetch,
+        sitemap_fn=lambda u: ["https://t.com/learn", "https://t.com/image-license"],
+    )
+    assert "PAGE:https://t.com/perimeter-8" in md
+    assert "learn" not in md
+
+
+def test_sitemap_urls_parses_loc_entries(monkeypatch):
+    import gtm.scrape as scrape_mod
+    from gtm.scrape import sitemap_urls
+
+    class Resp:
+        ok = True
+        text = (
+            '<?xml version="1.0"?><urlset><url><loc>https://s.com/perimeter-8</loc></url>'
+            "<url><loc>https://s.com/payloads</loc></url></urlset>"
+        )
+
+    monkeypatch.setattr(scrape_mod.requests, "get", lambda *a, **k: Resp())
+    assert sitemap_urls("https://s.com/") == ["https://s.com/perimeter-8", "https://s.com/payloads"]
+
+
+def test_sitemap_urls_returns_empty_when_missing(monkeypatch):
+    """neros.tech has no sitemap.xml — a 404 or a network error is normal, never fatal."""
+    import gtm.scrape as scrape_mod
+    from gtm.scrape import sitemap_urls
+
+    def boom(*a, **k):
+        raise scrape_mod.requests.RequestException("no route")
+
+    monkeypatch.setattr(scrape_mod.requests, "get", boom)
+    assert sitemap_urls("https://www.neros.tech/") == []
+
+
 def test_scrape_deep_appends_product_pages():
     from gtm.scrape import scrape_deep
 

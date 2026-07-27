@@ -90,15 +90,41 @@ def scrape_with_links(url: str) -> tuple[str, list[str]]:
 
 
 PRODUCT_PATH = re.compile(r"/(products?|drones?|uas|systems?|hardware|fleet|aircraft)(/|$)", re.I)
-# nav/footer boilerplate that never holds product specs
+# nav/footer boilerplate that never holds product specs. `team|media|downloads` were the
+# expensive omission: neros.tech publishes no product page at all, so the shallow fallback
+# spent both crawl slots on /teams and /media and padded the extraction prompt with staff
+# bios. Gated spec vaults (/protected-downloads) are boilerplate too — the PDF behind them
+# is not reachable as markdown.
 BOILERPLATE_PATH = re.compile(
-    r"/(about|company|contact|press|news|blog|events|careers|support|privacy|terms|legal"
+    r"/(about|company|contact|press|news|media|blog|articles?|insights|newsroom"
+    r"|events|careers|support|privacy|terms|legal"
+    r"|team|teams|mission|story|investors|partners|downloads?|protected-downloads"
     r"|login|cart|account|use-cases|resources|faq)([-_/]|$)",
     re.I,
 )
 
 
-def pick_product_links(hrefs: list[str], base_url: str, limit: int = 2) -> list[str]:
+def sitemap_urls(base_url: str, *, timeout: int = 10) -> list[str]:
+    """`/sitemap.xml` <loc> entries, or [] if the site has none (neros.tech doesn't).
+
+    This is the free version of a Firecrawl `/map` call — one unauthenticated GET, no
+    credits. Never fatal: a missing sitemap just means we fall back to homepage links.
+    """
+    parsed = urlparse(base_url)
+    url = f"{parsed.scheme or 'https'}://{parsed.netloc}/sitemap.xml"
+    try:
+        response = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
+    except requests.RequestException as e:
+        log.debug("no sitemap at %s: %s", url, e)
+        return []
+    if not response.ok:
+        return []
+    return [m.strip() for m in re.findall(r"<loc>\s*([^<]+?)\s*</loc>", response.text, re.I)]
+
+
+def pick_product_links(
+    hrefs: list[str], base_url: str, limit: int = 2, *, keyword_only: bool = False
+) -> list[str]:
     base = urlparse(base_url).netloc.removeprefix("www.")
 
     def internal(h: str) -> bool:
@@ -119,18 +145,35 @@ def pick_product_links(hrefs: list[str], base_url: str, limit: int = 2) -> list[
             and h not in shallow
         ):
             shallow.append(h)
+    if keyword_only:
+        return keyword[:limit]
     return (keyword or shallow)[:limit]
 
 
-def scrape_deep(url: str, preferred: str = "crawl4ai", *, fetch=scrape_with_links, fallback=None) -> str:
-    """Homepage + up to 2 product pages, concatenated. Falls back to plain scrape()."""
+def scrape_deep(
+    url: str,
+    preferred: str = "crawl4ai",
+    *,
+    fetch=scrape_with_links,
+    fallback=None,
+    sitemap_fn=sitemap_urls,
+) -> str:
+    """Homepage + up to 2 product pages, concatenated. Falls back to plain scrape().
+
+    Page discovery is sitemap-first but only for explicit product paths: a sitemap lists
+    URLs in site-map order, which ranks nothing, whereas homepage links come in nav order
+    — a real relevance signal. So the sitemap can only *add* a confident product hit, never
+    outvote the homepage with a shallow guess. When neither source yields a candidate the
+    homepage is scraped alone, no wasted crawls.
+    """
     fallback = fallback if fallback is not None else scrape
     try:
         md, hrefs = fetch(url)
     except ScrapeError:
         return fallback(url, preferred=preferred)
+    links = pick_product_links(sitemap_fn(url), url, keyword_only=True) or pick_product_links(hrefs, url)
     parts = [md]
-    for link in pick_product_links(hrefs, url):
+    for link in links:
         try:
             parts.append(fetch(link)[0])
         except ScrapeError as e:
