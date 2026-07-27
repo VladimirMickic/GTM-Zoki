@@ -27,6 +27,7 @@ import gtm.github_state as github_state
 from gtm.brief import freeze_brief, load_brief
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
+from gtm.discover import _domain, _name_matches_domain
 from gtm.draft import NO_DRAFT_FLAG, build_draft_prompt, build_redraft_prompt, qa_check
 from gtm.extract import DroneExtraction, extract
 from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
@@ -173,6 +174,18 @@ def process_company(
         ex: DroneExtraction = extract_fn(md, costlog=costlog)
     except Exception as e:
         _log_error(error_log, p.company, "scrape/extract", e)
+        p.status = "error"
+        return p
+    if ex.company_name and not _name_matches_domain(ex.company_name, _domain(p.website)):
+        # scraped page is real (a manufacturer's own domain, per discover()'s guard) but
+        # extraction pulled a DIFFERENT company's name out of the page body — e.g. a
+        # listicle/aggregator post about other makers, hosted on the site owner's own
+        # domain. The extracted fields describe that other company, not the site's
+        # owner, so none of them are trustworthy here.
+        _log_error(
+            error_log, p.company, "scrape/extract",
+            ValueError(f"extracted company {ex.company_name!r} doesn't match {p.website} — likely an aggregator/listicle page"),
+        )
         p.status = "error"
         return p
     if ex.company_name:

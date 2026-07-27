@@ -58,6 +58,29 @@ def test_process_company_fixes_url_derived_name():
     assert p.company == "Teal Drones"
 
 
+def test_process_company_rejects_extracted_name_off_site_domain(tmp_path):
+    """A listicle/aggregator page hosted on a real manufacturer's own domain (e.g. a
+    ModalAI blog post listing other makers) can pass discover()'s manufacturer filter
+    on ModalAI's name, then extract() reads a DIFFERENT company's name ("Teal Drones")
+    out of the page body. Trusting that blindly assigns Teal Drones' name to ModalAI's
+    URL — wrong website on the sheet, and the email waterfall then guesses patterns
+    against the wrong domain. Same class of guard discover.py already applies to
+    candidates, applied here to what extraction actually found on the page."""
+    errlog = tmp_path / "errors.log"
+    ex = DroneExtraction(company_name="Teal Drones", company_description="sUAS maker", drone_models=["Black Widow"])
+    p = process_company(
+        Prospect(company="ModalAI", website="https://www.modalai.com/pages/2026-us-drone-manufacturers-list"),
+        scrape_fn=lambda u, preferred="crawl4ai": "md " * 100,
+        extract_fn=lambda md, **kw: ex,
+        error_log=errlog,
+    )
+    assert p.status == "error"
+    assert p.company == "ModalAI"  # not overwritten with the mismatched name
+    assert p.drone_models == []  # extracted fields discarded, they describe the wrong company
+    assert "ModalAI" in errlog.read_text()
+    assert "Teal Drones" in errlog.read_text()
+
+
 def test_process_company_scrape_failure_logs_and_skips(tmp_path):
     errlog = tmp_path / "errors.log"
 
