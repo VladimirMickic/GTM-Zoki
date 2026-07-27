@@ -86,6 +86,23 @@ def build_broad_query(company: str) -> str:
     return f'site:linkedin.com/in "{company}" drone'
 
 
+def _strip_trailing_employer(job: str, company: str) -> str:
+    """Drop a trailing "at/@ <our company>" — the SERP's own suffix, not part of the title.
+
+    Matched as a PREFIX of the company name, because Serper truncates: "@ Neros ..." is
+    all that survives of "@ Neros Technologies", and an exact match never fires. A
+    trailing "at <someone else>" is real information (they work elsewhere) and is kept,
+    so the prefix must be a whole leading word of the company, not any substring.
+    """
+    m = re.search(r"\s*(?:at|@)\s+(.+)$", job, flags=re.I)
+    if m is None:
+        return job
+    tail = m.group(1).strip().rstrip(",")
+    words = company.split()
+    prefixes = {" ".join(words[:i]).lower() for i in range(1, len(words) + 1)}
+    return job[: m.start()].rstrip() if tail.lower() in prefixes else job
+
+
 def parse_linkedin_result(title: str, link: str, company: str = "") -> Contact | None:
     if "/in/" not in link:
         return None  # company page or other non-profile result
@@ -94,8 +111,12 @@ def parse_linkedin_result(title: str, link: str, company: str = "") -> Contact |
     if len(parts) < 2:
         return None
     job = parts[1].strip()
+    # Serper truncates long SERP titles with a trailing ellipsis ("... " or "…"), which
+    # broke the $-anchored company strip below — us-drone-6 shipped
+    # "Head of Mission Success @ Neros ..." straight into the sheet. Strip it first.
+    job = re.sub(r"\s*(?:\.{3}|…)\s*$", "", job)
     if company:
-        job = re.sub(rf"\s*(?:at|@)\s+{re.escape(company)}\s*$", "", job, flags=re.I)
+        job = _strip_trailing_employer(job, company)
     return Contact(name=parts[0].strip(), title=job, linkedin=link)
 
 

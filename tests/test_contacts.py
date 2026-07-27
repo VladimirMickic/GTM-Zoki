@@ -49,6 +49,59 @@ def test_parse_hyphen_and_endash_variants():
     assert c2.title == "VP of Operations"
 
 
+def test_parse_strips_serper_snippet_truncation_and_trailing_company():
+    """Real us-drone-6 output: title shipped to the sheet as
+    "Head of Mission Success @ Neros ..." — Serper truncates long SERP titles with an
+    ellipsis, which broke the $-anchored "at|@ <company>" strip, so BOTH the company
+    and the literal "..." survived into the contact_title cell."""
+    c = parse_linkedin_result(
+        "Clayton Calk - Head of Mission Success @ Neros ... | LinkedIn",
+        "https://www.linkedin.com/in/claytoncalk",
+        "Neros",
+    )
+    assert c.title == "Head of Mission Success"
+    # unicode ellipsis is the other form Serper emits
+    c2 = parse_linkedin_result(
+        "Jane Doe - Director of Supply Chain at Skyfront…",
+        "https://www.linkedin.com/in/janedoe",
+        "Skyfront",
+    )
+    assert c2.title == "Director of Supply Chain"
+
+
+def test_parse_strips_a_company_name_the_serp_itself_truncated():
+    """Serper cut "@ Neros Technologies" down to "@ Neros ..." — once the ellipsis is
+    gone what's left is a PREFIX of our company name, which an exact-match strip misses.
+    This is the actual us-drone-6 row: company is "Neros Technologies", SERP said "Neros"."""
+    c = parse_linkedin_result(
+        "Clayton Calk - Head of Mission Success @ Neros ... | LinkedIn",
+        "https://www.linkedin.com/in/claytoncalk",
+        "Neros Technologies",
+    )
+    assert c.title == "Head of Mission Success"
+
+
+def test_parse_keeps_a_trailing_at_clause_for_a_different_employer():
+    """"at <not our company>" is real information (they work elsewhere) — never strip it."""
+    c = parse_linkedin_result(
+        "Pat Lee - Supply Chain Manager at Anduril",
+        "https://www.linkedin.com/in/patlee",
+        "Neros Technologies",
+    )
+    assert c.title == "Supply Chain Manager at Anduril"
+
+
+def test_parse_keeps_a_title_that_merely_mentions_another_company():
+    """Only a TRAILING "at <our company>" is the SERP's own suffix — a company name
+    anywhere else is part of the real title and must survive."""
+    c = parse_linkedin_result(
+        "Sam Reed - Neros Program Lead for Archer",
+        "https://www.linkedin.com/in/samreed",
+        "Neros",
+    )
+    assert c.title == "Neros Program Lead for Archer"
+
+
 def test_company_pages_skipped():
     assert parse_linkedin_result(FIXTURE_RESULTS[2]["title"], FIXTURE_RESULTS[2]["link"]) is None
 
