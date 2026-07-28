@@ -1151,3 +1151,84 @@ def test_cmd_enrich_never_derives_competitor_from_community_signals(monkeypatch,
 
     out = capsys.readouterr().out
     assert "displacement" not in out
+
+
+_FABRICATED_BODY = (
+    "{{first_name}},\n\nSaw {{company_name}}'s launch — congrats.\n\n"
+    "{{airframe_name}} travels in a tough portable box today — which surfaces later as a "
+    "cracked arm or a gimbal out of true.\n\n{{sender_name}}"
+)
+
+
+def test_cmd_draft_flags_fabricated_pain_before_paying_for_qa(monkeypatch, tmp_path, capsys):
+    # The guard is free and qa_check is not, so a fabricated-pain draft must never reach the
+    # paid call. cold-0727/Arcsky shipped qa_flag="passed" because nothing checked this.
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="Arcsky", website="https://arcsky.com", status="priority",
+        buying_signals=["Launched the Xplorer"],
+        case_evidence="packs nicely into one tough portable box",
+        community_signals=[], competitor_weaknesses=[],
+    )]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Arcsky": {
+            "c-suite": {
+                "draft_initial": {
+                    "v1": {"subject": "transport for the new Xplorer", "body": _FABRICATED_BODY},
+                    "v2": {"subject": "s2", "body": "b2"},
+                },
+            }
+        }
+    }))
+
+    called = []
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, draft, **kw: called.append(1) or "")
+
+    with pytest.raises(CheckpointPending):
+        cmd_draft("arcsky-pain-1", str(drafts_path))
+
+    saved = load_state(tmp_path)
+    assert "asserts a consequence" in saved[0].drafts_by_tier["c-suite"].qa_flag
+    assert called == []  # short-circuited before the paid qa_check
+
+    assert "REDRAFT" in capsys.readouterr().out
+
+
+def test_cmd_redraft_rechecks_pain_grounding(monkeypatch, tmp_path):
+    # Same guard chain in the retry path — a redraft that reintroduces the claim is caught.
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="Arcsky", website="https://arcsky.com", status="priority",
+        buying_signals=["Launched the Xplorer"],
+        case_evidence="packs nicely into one tough portable box",
+        community_signals=[], competitor_weaknesses=[],
+        drafts_by_tier={"c-suite": DraftSet(
+            initial_subject="old subject", qa_flag="asserts a consequence (cracked)",
+        )},
+    )]
+    save_state(prospects, tmp_path)
+
+    drafts_path = tmp_path / "drafts.json"
+    drafts_path.write_text(json.dumps({
+        "Arcsky": {
+            "c-suite": {
+                "draft_initial": {
+                    "v1": {"subject": "transport for the new Xplorer", "body": _FABRICATED_BODY},
+                    "v2": {"subject": "s2", "body": "b2"},
+                },
+            }
+        }
+    }))
+    monkeypatch.setattr(run_mod, "qa_check", lambda p, draft, **kw: "")
+
+    cmd_redraft("arcsky-pain-2", str(drafts_path))  # must NOT raise
+
+    saved = load_state(tmp_path)
+    assert "asserts a consequence" in saved[0].drafts_by_tier["c-suite"].qa_flag
