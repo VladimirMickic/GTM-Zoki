@@ -129,6 +129,19 @@ def test_signal_prompt_expands_outreach_angle_instruction():
     assert "community signal" in prompt.lower()
 
 
+def test_signal_prompt_asks_claude_to_rejudge_community_signal_candidates():
+    # 2026-07-28: gpt-4o-mini's pain-vs-satisfied call (Gate 2) leaked false
+    # positives live even after prompt/structural hardening — the candidates
+    # it emits are shown to Claude as unconfirmed, not fact, and Claude's
+    # verdict (not gpt-4o-mini's) is what the signals.json reply must return.
+    p = Prospect(company="X", website="https://x.com",
+                 community_signals=['"unfiltered candidate quote" (reddit.com)'])
+    prompt = build_signal_prompt(p)
+    assert "candidate" in prompt.lower()
+    assert "satisfied" in prompt.lower()  # re-state the reject criterion, not just show the list
+    assert '"community_signals": ["..."]' in prompt
+
+
 # ---- community signals (2026-07-27 pain-focused redesign) ----
 
 PAIN_HIT = {"title": "Black Widow frame cracked after two flights, case was too flimsy", "link": "https://reddit.com/r/UAVmapping/abc", "snippet": "shipped in the stock soft case and it cracked in transit"}

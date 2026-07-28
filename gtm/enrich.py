@@ -280,8 +280,12 @@ def _relevance_filter(results: list[dict], *, client=None, costlog=None) -> list
 def find_community_signals(p: Prospect, *, search=serper_search, client=None, costlog=None) -> list[str]:
     """Pain-focused, not mention-focused (2026-07-27 redesign): airframe-specific
     and ICP-category queries, pooled and deduped, then a cheap gpt-4o-mini pass
-    keeps only genuine pain quotes and rewrites each as '"<quote>" (<source>)' —
-    ammo for gtm/draft.py's pain block, not raw SERP noise."""
+    narrows to candidate pain quotes, rewritten as '"<quote>" (<source>)'.
+    NOT a verdict (2026-07-28): live testing showed gpt-4o-mini can't reliably
+    tell genuine pain from a satisfied setup described in the same vocabulary.
+    These candidates get shown to Claude in build_signal_prompt, whose reply
+    (merged via gtm/run.py::merge_signals) is what actually lands in
+    p.community_signals — ammo for gtm/draft.py's pain block, not raw SERP noise."""
     pooled, seen_links = [], set()
     for q in _pain_queries(p):
         for r in search(q, num=10):
@@ -405,12 +409,20 @@ def build_signal_prompt(p: Prospect) -> str:
   (2) why it's the strongest fit for THIS prospect specifically, (3) which piece of
   evidence (news / community signal / fit reason) backs it. Still a single string, no
   line breaks.
+- community_signals: the candidates below are gpt-4o-mini's first pass, NOT a verdict —
+  live testing (2026-07-27/28) showed it keeps satisfied/neutral quotes that merely use
+  the right vocabulary (e.g. a working setup described in detail reads as "relevant" even
+  though nothing went wrong). Re-judge each candidate yourself: keep it only if a real
+  person describes something actually going wrong or costing them (damage, failure,
+  a workaround they were forced into) — drop anything that's a satisfied description, a
+  neutral mention, or off-topic. Return the survivors verbatim (same quote/source format);
+  an empty list is a correct answer if none hold up.
 
 ## Evidence
 news: {p.key_news}
-community signals: {p.community_signals}
+community signal candidates (unconfirmed — see community_signals above): {p.community_signals}
 linkedin: {p.linkedin}
 description: {p.description}
 
 Reply with ONLY this JSON (no prose):
-{{"buying_signals": ["..."], "outreach_angle": "..."}}"""
+{{"buying_signals": ["..."], "outreach_angle": "...", "community_signals": ["..."]}}"""

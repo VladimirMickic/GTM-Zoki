@@ -31,8 +31,12 @@ email waterfall (`gtm/emails.py`, `gtm/email_providers.py`), HubSpot push (`gtm/
 - **S2 – Extract**: gpt-4o-mini markdown → `{models, folded_dims, weight, us_made, ...}`.
 - **S3 – Fit**: Claude scores vs ICP; disqualifier checks; per-signal breakdown.
 - **S4 – Contacts**: Serper `site:linkedin.com/in` + team-page scrape → contact rows.
-- **S5 – Enrich**: passers only; company LinkedIn · community-signal pain (2 queries, LLM
-  relevance filter) · headcount · news. See `gtm/enrich.py` for the per-query credit budget.
+- **S5 – Enrich**: passers only; company LinkedIn · community-signal pain (2 queries, gpt-4o-mini
+  narrows to candidates) · headcount · news. See `gtm/enrich.py` for the per-query credit budget.
+  Candidates are provisional, not final: gpt-4o-mini couldn't reliably separate genuine pain
+  from a satisfied setup in the same vocabulary (measured live 2026-07-27/28), so Claude
+  re-judges them in the `signals` step (`build_signal_prompt`/`merge_signals`) — matches the
+  model-routing rule below (extraction = gpt-4o-mini, judgment = Claude).
 - **S6 – Output**: CSV writer + Google Sheet push (service account).
 - **S7 – Orchestrate** (done): `gtm/run.py` CLI — `start`/`fit`/`enrich`/`signals`/`emails`/`output`/`learn`,
   Claude judges between steps via printed prompts + JSON answer files. State = `data/runs/<run>/prospects.json`,

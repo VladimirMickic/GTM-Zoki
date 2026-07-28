@@ -240,6 +240,11 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
             # same company, so an entry that only answers the signal prompt omits this
             # key entirely — that must not silently wipe ammo already merged/set.
             p.competitor_weaknesses = s.get("competitor_weaknesses", p.competitor_weaknesses)
+            # cmd_enrich seeds this with gpt-4o-mini's candidates (Gate 0/1 only —
+            # topical, not pain-judged); Claude re-judges pain-vs-satisfied here and
+            # this overwrites the candidate list. Missing key = not yet reviewed,
+            # keep the candidates rather than wiping them (see gtm/enrich.py).
+            p.community_signals = s.get("community_signals", p.community_signals)
 
 
 def merge_drafts(prospects: list[Prospect], raw: dict) -> None:

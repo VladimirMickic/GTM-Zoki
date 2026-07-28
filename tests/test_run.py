@@ -153,6 +153,26 @@ def test_merge_signals_explicit_new_competitor_weaknesses_overrides_existing():
     assert ps[0].competitor_weaknesses == ["cracks in cold weather"]
 
 
+def test_merge_signals_applies_claudes_reviewed_community_signals():
+    # gpt-4o-mini's pain/satisfied judgment (Gate 2) proved unreliable live
+    # (2026-07-27/28) — Claude now re-judges the candidates in the same
+    # signals.json round trip and the result overwrites the candidate list.
+    ps = [Prospect(company="A", website="https://a.com",
+                    community_signals=['"unfiltered candidate quote" (reddit.com)'])]
+    merge_signals(ps, {"A": {"community_signals": ['"genuine pain quote" (reddit.com)']}})
+    assert ps[0].community_signals == ['"genuine pain quote" (reddit.com)']
+
+
+def test_merge_signals_omitting_community_signals_preserves_candidates():
+    # Same missing-key-must-not-wipe-ammo rule as competitor_weaknesses above:
+    # an entry that only answers buying_signals/outreach_angle must not erase
+    # candidates cmd_enrich already wrote pending Claude's review.
+    ps = [Prospect(company="A", website="https://a.com",
+                    community_signals=['"unfiltered candidate quote" (reddit.com)'])]
+    merge_signals(ps, {"A": {"buying_signals": ["won contract"]}})
+    assert ps[0].community_signals == ['"unfiltered candidate quote" (reddit.com)']
+
+
 def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
     # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row
     from gtm.run import known_domains, save_state
