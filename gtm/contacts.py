@@ -147,13 +147,25 @@ def top_contact_fields(contacts: list[Contact], n: int = 3) -> tuple[str, str, s
     )
 
 
+def _works_elsewhere(c: Contact) -> bool:
+    """A trailing "at/@ <company>" clause only survives parse_linkedin_result's
+    _strip_trailing_employer when the employer does NOT match our target company
+    (a match gets stripped) — so its mere presence on the parsed Contact is proof
+    the person's current employer is someone else. Live cold-0727 follow-up
+    (2026-07-27): Skyfront's SERP surfaced "Daniel Williams - Co-Founder at
+    oltrashoes" and "Joseph Segura-Conn - Director of Sales at Doodle Labs" — real
+    profiles that mention "Skyfront"/"drone" somewhere, not people who work there."""
+    return re.search(r"\s+(?:at|@)\s+\S", c.title, flags=re.I) is not None
+
+
 def _collect(query: str, company: str, search) -> list[Contact]:
     """Parse one SERP into ranked buyer contacts: drop non-profiles, excluded
-    titles (ceo/engineer/student/...), and rank-0 unrecognized titles."""
+    titles (ceo/engineer/student/...), contacts who work somewhere else, and
+    rank-0 unrecognized titles."""
     out = []
     for r in search(query, num=10):
         c = parse_linkedin_result(r.get("title", ""), r.get("link", ""), company)
-        if c is not None and not _is_excluded(c) and _rank(c) > 0:
+        if c is not None and not _is_excluded(c) and not _works_elsewhere(c) and _rank(c) > 0:
             out.append(c)
     return out
 

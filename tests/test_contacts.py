@@ -230,6 +230,32 @@ def test_founder_carve_out_does_not_rescue_other_excluded_titles():
     assert find_contacts("Teal Drones", search=lambda q, num=10: serp) == []
 
 
+def test_find_contacts_drops_a_different_current_employer():
+    """Live cold-0727 follow-up (2026-07-27): find_contacts("Skyfront") returned
+    "Daniel Williams - Co-Founder at oltrashoes" and "Joseph Segura-Conn - Director
+    of Sales at Doodle Labs" — real people whose LinkedIn profile happens to mention
+    "Skyfront" and "drone" somewhere, but who do not work at Skyfront. Their titles
+    say so explicitly: a trailing "at <company>" clause that survives
+    _strip_trailing_employer only when the employer does NOT match the target
+    (test_parse_keeps_a_trailing_at_clause_for_a_different_employer already locks
+    that the *parser* must not touch it — this is a separate, later filter that
+    drops the contact from find_contacts' results once that mismatch is visible)."""
+    serp = [
+        {"title": "Daniel Williams - Co-Founder at oltrashoes - Skyfront | LinkedIn", "link": "https://linkedin.com/in/dw"},
+        {"title": "Val Vee - VP of Operations - Skyfront | LinkedIn", "link": "https://linkedin.com/in/vv"},
+    ]
+    names = [c.name for c in find_contacts("Skyfront", search=lambda q, num=10: serp)]
+    assert names == ["Val Vee"]
+
+
+def test_find_contacts_keeps_a_title_that_only_mentions_another_company():
+    """A different-employer clause must be a TRAILING "at/@ <company>", not any
+    mention — "Neros Program Lead for Archer" names no other employer at all."""
+    serp = [{"title": "Sam Reed - Neros Program Lead for Archer - Neros | LinkedIn", "link": "https://linkedin.com/in/sr"}]
+    names = [c.name for c in find_contacts("Neros", search=lambda q, num=10: serp)]
+    assert names == ["Sam Reed"]
+
+
 def test_rank_uses_word_boundaries_not_substrings():
     # "Production Manager" must not match the "product" keyword (substring of "production")
     serp = [
