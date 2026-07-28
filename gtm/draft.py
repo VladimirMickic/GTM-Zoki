@@ -189,6 +189,64 @@ def has_pain_source(p: Prospect) -> bool:
     return bool(p.community_signals or p.competitor_weaknesses)
 
 
+# Validated 2026-07-28 against every stored data/runs/*/prospects.json: these flag both
+# cold-0727/Arcsky tiers and nothing else. The attribution list is not optional — Arcsky's
+# c-suite draft contains no consequence word at all and fabricates purely by attributing a
+# claim ("the surveying buyers ... in the mapping groups are asking").
+_CONSEQUENCE_WORDS = (
+    "cracked", "crack", "snapped", "broken", "breaks", "damaged", "damage", "dented",
+    "bent", "shattered", "scratched", "warranty", "rma", "downtime", "grounded",
+    "out of true", "failure", "fails", "replacement cost", "insurance claim",
+)
+_ATTRIBUTION_PATTERNS = (
+    r"operators? (say|report|complain)",
+    r"buyers?[^.]{0,40}(are )?asking",
+    r"customers? (say|report)",
+    r"crews? (say|report)",
+    r"we hear",
+    r"on reddit",
+    r"in the [a-z ]{0,20}(groups|forums|threads|subreddit)",
+)
+
+
+def check_pain_grounding(p: Prospect, draft: DraftSet) -> str:
+    """Deterministic guard for the voice guide's Block 3 grounding rule: a draft may not
+    assert a pain the prospect has no researched evidence for.
+
+    qa_check cannot catch this — its flag scope is stats, contracts, certifications, and
+    events, and a fabricated consequence is none of those. The failure this exists to catch
+    (cold-0727/Arcsky, 2026-07-28): both tiers shipped qa_flag="passed" while
+    community_signals and competitor_weaknesses were empty, one asserting "a cracked arm or
+    a gimbal out of true" and the other attributing a claim to "buyers ... in the mapping
+    groups". A prior hand-rewrite reworded both rather than removing them.
+
+    Armed ONLY when no pain evidence exists, which keeps the blast radius small: four of the
+    seven stored drafts that do have evidence use "damage" legitimately in the value line.
+    A false positive costs one pass through the existing redraft loop.
+
+    Returns "" when clean, else the flag text (same contract as check_reference_customer).
+    """
+    if has_pain_source(p):
+        return ""
+    body = f"{draft.initial_body}\n{draft.initial_body_alt}".lower()
+    hits = sorted({w for w in _CONSEQUENCE_WORDS if w in body})
+    if hits:
+        return (
+            f"asserts a consequence ({', '.join(hits[:3])}) with no pain evidence — "
+            f"community_signals and competitor_weaknesses are both empty for {p.company}, "
+            f"so nothing supports it; drop the claim"
+        )
+    for pat in _ATTRIBUTION_PATTERNS:
+        m = re.search(pat, body)
+        if m:
+            return (
+                f'attributes a claim to third parties ("{m.group(0)}") with no pain '
+                f"evidence — community_signals is empty for {p.company}, so no operator or "
+                f"buyer complaint was ever researched; drop the claim"
+            )
+    return ""
+
+
 def build_draft_prompt(
     voice_guide: str, p: Prospect, tier: str, sibling_tiers: list[str] | None = None
 ) -> str:

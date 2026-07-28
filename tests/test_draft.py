@@ -5,6 +5,7 @@ from gtm.draft import (
     QAResult,
     build_draft_prompt,
     build_redraft_prompt,
+    check_pain_grounding,
     check_reference_customer,
     check_tier_distinctness,
     has_pain_source,
@@ -496,3 +497,96 @@ def test_build_redraft_prompt_includes_qa_flag_reason_and_original_prompt():
     assert "Teal Drones" in prompt
     assert "references a $1M contract not in evidence" in prompt
     assert "drafts.json" in prompt
+
+
+# --- fabricated-pain guard ------------------------------------------------------
+# Both bodies below are the real cold-0727/Arcsky drafts, which shipped qa_flag="passed".
+
+_ARCSKY_CONSEQUENCE_BODY = (
+    "{{first_name}},\n\n"
+    "Saw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+    "We build cases with foam cut to one airframe. IP67 and MIL-STD-810H rated.\n\n"
+    "{{airframe_name}} travels in a tough portable box today. That protects the outside of "
+    "the load, but it lets the aircraft move against its own accessories on every drive to a "
+    "site — which surfaces later as a cracked arm or a gimbal out of true.\n\n"
+    "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+)
+
+_ARCSKY_ATTRIBUTION_BODY = (
+    "{{first_name}},\n\n"
+    "Saw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+    "We cut foam to one airframe, IP67 and MIL-STD-810H rated, US-made.\n\n"
+    "A launch is the one moment the transport standard is still open. Your site says the "
+    "aircraft packs into one tough portable box today, and the surveying buyers comparing "
+    "NDAA packages in the mapping groups are asking what comes in the box before they "
+    "commit.\n\n"
+    "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+)
+
+
+def _no_pain_prospect(**overrides):
+    defaults = dict(
+        company="Arcsky", website="https://arcsky.com",
+        buying_signals=["Launched the Xplorer, a new compact rugged UAV"],
+        case_evidence="packs nicely into one tough portable box",
+        community_signals=[], competitor_weaknesses=[],
+    )
+    defaults.update(overrides)
+    return Prospect(**defaults)
+
+
+def test_check_pain_grounding_flags_an_asserted_consequence():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=_ARCSKY_CONSEQUENCE_BODY,
+    )
+    flag = check_pain_grounding(_no_pain_prospect(), draft)
+    assert "cracked" in flag
+    assert "Arcsky" in flag
+
+
+def test_check_pain_grounding_flags_a_fabricated_attribution():
+    # This body contains no consequence word at all — attribution is the only signal.
+    draft = DraftSet(
+        initial_subject="the Xplorer's case is still unspecified",
+        initial_body=_ARCSKY_ATTRIBUTION_BODY,
+    )
+    flag = check_pain_grounding(_no_pain_prospect(), draft)
+    assert flag != ""
+    assert "third parties" in flag
+
+
+def test_check_pain_grounding_passes_a_clean_no_pain_body():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=(
+            "{{first_name}},\n\n"
+            "Saw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "We cut foam to one airframe: aircraft, controller, batteries and payload each "
+            "seated in their own cavity, IP67 and MIL-STD-810H rated, US-made. "
+            "{{reference_customer}} ships that way.\n\n"
+            "Would it be a bad idea to spend 15 minutes on what a {{case_line}} build looks "
+            "like for {{airframe_name}}?\n\n{{sender_name}}"
+        ),
+    )
+    assert check_pain_grounding(_no_pain_prospect(), draft) == ""
+
+
+def test_check_pain_grounding_is_disarmed_when_pain_evidence_exists():
+    # Four of the seven stored drafts that DO have pain evidence say "damage" legitimately.
+    # Without this disarm the guard is a false-positive machine.
+    p = _no_pain_prospect(community_signals=["operators report arms cracking in transit"])
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=_ARCSKY_CONSEQUENCE_BODY,
+    )
+    assert check_pain_grounding(p, draft) == ""
+
+
+def test_check_pain_grounding_scans_the_v2_body():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body="{{first_name}},\n\nClean body, no claims.\n\n{{sender_name}}",
+        initial_body_alt=_ARCSKY_CONSEQUENCE_BODY,
+    )
+    assert check_pain_grounding(_no_pain_prospect(), draft) != ""
