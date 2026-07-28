@@ -35,6 +35,7 @@ thinner story, so a long email there reads as padding.
 | Fit tier | status | Blocks | Body length |
 |---|---|---|---|
 | Tier 1 | `priority` | all 4 (trigger · what we build · pain · close) | ~450–700 characters |
+| Tier 1, no pain source | `priority` | 3 (trigger · what we build · close) — Block 3 omitted, nothing researched to ground it | ~250–400 characters |
 | Tier 2 | `keep` | 3 (trigger/opener · what we build · close) — pain block folds into the value line | ~250–350 characters |
 
 Tier 3 (`drop`) is never drafted.
@@ -50,9 +51,11 @@ controller + batteries + payload seated together), IP67 / MIL-STD-810H, made in 
 Name a mechanism or spec, never a bare comparative. Social proof goes here (see below).
 
 **Block 3 — the pain (Tier 1 only).** The consequence *they* feel, tailored to the contact's
-persona tier — see "Persona tailoring". Ground it in `community_signals` /
-`competitor_weaknesses` / `case_evidence` where real evidence exists. This block is what
-makes the email land; without it the email is a product description.
+persona tier — see "Persona tailoring". Ground it in `community_signals` or `competitor_weaknesses` — those are the only two fields
+that record an actual complaint. Other fields (current shipping, trigger events) are not
+evidence that anything hurts, and never license a pain claim. When neither pain source exists,
+omit Block 3 entirely: never assert a consequence they experience, and never attribute a
+claim to operators, buyers, customers, forums, or groups.
 
 **Block 4 — close.** One low-pressure, closed-ended ask. Default to the negative-CTA form:
 *"Would it be a bad idea for us to grab 15 minutes and see if the math works for
