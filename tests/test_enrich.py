@@ -424,6 +424,88 @@ def test_enrich_fills_headcount_from_llm_band():
     assert p.community_signals == []
 
 
+# ---- cold-run bugs (cold-0727, Arcsky, 2026-07-27) ----
+
+
+def test_airframe_query_pins_the_model_name_to_drones():
+    """Cold live run on Arcsky surfaced a cross-category collision: the bare model
+    token "X55" returned 10/10 junk — a PowKiddy handheld game console, a 7.5x55
+    Swiss rifle cartridge, and a TP-Link X55 router — and zero drone results. A
+    short alphanumeric model name is meaningless without a category word."""
+    captured = []
+
+    def spy(q, num=10):
+        captured.append(q)
+        return []
+
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drone_models=["X55"])
+    find_community_signals(p, search=spy, client=FakeClient(EMPTY))
+    assert '"X55"' in captured[0]
+    assert "drone" in captured[0].lower()
+
+
+def test_relevance_prompt_rejects_pain_about_non_drone_hardware():
+    """Same cold run: the filter KEPT "Ordered an X55 from the AliExpress store only
+    to discover it had been damaged in transit" — a real person, real transport
+    damage, so both existing gates passed. The hardware was a games console. No gate
+    checked that the damaged thing was a drone; distinct root cause from the
+    Perimeter-8 sentence-meaning collision, so it gets its own gate and guard."""
+    from gtm.enrich import _RELEVANCE_PROMPT
+
+    low = _RELEVANCE_PROMPT.lower()
+    assert "console" in low  # names the actual collision class
+    assert "aircraft" in low or "uav" in low
+
+
+def test_headcount_prompt_rejects_a_similarly_named_different_company():
+    """Cold live run on Arcsky (arcskytech.com, drone maker, Austin TX) returned
+    "11-50" — which belonged to ARC at arcsky.com, an AIRLINE ("Industry: Airlines
+    and Aviation"). Grounding was fine and LinkedIn preference was fine; the result
+    was simply a different company. The disambiguating text ("Website:
+    http://www.arcsky.com") was right there in the snippet, so the model had the
+    evidence and lacked the rule."""
+    from gtm.enrich import _HEADCOUNT_PROMPT
+
+    low = _HEADCOUNT_PROMPT.lower()
+    assert "same company" in low or "different company" in low
+    assert "website" in low or "domain" in low
+
+
+def test_headcount_gives_the_model_the_company_domain_to_match_on():
+    """The rule above is unusable without the domain: "Arcsky" alone cannot
+    distinguish arcskytech.com from arcsky.com."""
+    seen = {}
+
+    class SpyClient(FakeClient):
+        def parse(self, **kwargs):
+            seen["text"] = kwargs["messages"][1]["content"]
+            return super().parse(**kwargs)
+
+    find_headcount(
+        "Arcsky",
+        website="https://www.arcskytech.com/",
+        search=lambda q, num=10: HEADCOUNT_SERPS,
+        client=SpyClient(HEADCOUNT_UNKNOWN),
+    )
+    assert "arcskytech.com" in seen["text"]
+
+
+def test_enrich_passes_the_website_through_to_headcount():
+    seen = {}
+
+    class SpyClient(FakeClient):
+        def parse(self, **kwargs):
+            seen["text"] = kwargs["messages"][1]["content"]
+            return super().parse(**kwargs)
+
+    def search(q, num=10):
+        return HEADCOUNT_SERPS if "employees" in q else []
+
+    p = Prospect(company="Arcsky", website="https://www.arcskytech.com/", status="priority")
+    enrich(p, search=search, client=SpyClient(HEADCOUNT_UNKNOWN))
+    assert "arcskytech.com" in seen["text"]
+
+
 def test_news_queries_carry_drone_disambiguator():
     # discover-3 2026-07-18: "Paladin" news returned lenders, awards, r/Fantasy
     captured = []

@@ -127,7 +127,11 @@ def _pain_queries(p: Prospect) -> list[str]:
     queries = []
     if p.drone_models:
         model = p.drone_models[0]  # flagship/first-listed only — bounds Serper cost
-        queries.append(f'"{model}" {_PAIN_TERMS} {_PAIN_SITES}')
+        # "drone" is load-bearing, not decoration: cold run 2026-07-27 searched the
+        # bare token "X55" (Arcsky's airframe) and got 10/10 non-drone hits — a
+        # PowKiddy handheld console, a 7.5x55 rifle cartridge, a TP-Link router.
+        # Short alphanumeric model names collide across whole product categories.
+        queries.append(f'"{model}" drone {_PAIN_TERMS} {_PAIN_SITES}')
     queries.append(f"{_infer_category(p)} {_PAIN_TERMS} {_PAIN_SITES}")
     return queries
 
@@ -142,7 +146,14 @@ class _SignalList(BaseModel):
 
 
 _RELEVANCE_PROMPT = """You are filtering search results for a B2B pipeline that sells rugged
-transport cases to drone manufacturers. Keep a result ONLY if it passes BOTH gates.
+transport cases to drone manufacturers. Keep a result ONLY if it passes ALL THREE gates.
+
+Gate 0 — it must be about a drone. The hardware being carried, stored, or damaged has to be
+a drone, UAV, quadcopter, airframe, or its flight gear (controller, batteries, payload,
+propellers, gimbal). Short model names collide across unrelated product categories: "X55" is
+also a handheld games console and a router, "Perimeter 8" is also a phrase about hardware
+fasteners. If the text does not show the thing is an aircraft, REJECT it — no matter how
+perfectly it describes transport damage. A console damaged in shipping is not our signal.
 
 Gate 1 — subject matter. The text must be about transporting, storing, shipping, or
 protecting hardware: a case, hard case, bag, backpack, pelican-style box, foam insert,
@@ -158,7 +169,9 @@ Neutral mentions, marketing copy, product listings, and satisfied reviews REJECT
 
 Also REJECT: a result that matched only because the words of a drone's model name appear in
 an unrelated sentence (e.g. "Perimeter 8" matching "there are some snaps in the perimeter, 8
-of them"). Judge the sentence's actual meaning, not the keyword overlap.
+of them"). Judge the sentence's actual meaning, not the keyword overlap. In both this case
+and Gate 0, the failure looks the same from the outside — the keywords line up and the
+sentence reads well — so check what the words actually refer to before keeping anything.
 
 Never invent or paraphrase into a quote — use only what the title/snippet actually says. A
 category-level result naming no company is fine; do not claim or imply it is about any
@@ -231,6 +244,14 @@ facts about well-known companies from training, but ignore all of that here; if 
 knowledge disagrees with the results, or the results say nothing, still go only by the
 results, and return an empty band rather than filling in what you already know.
 
+FIRST, check the result is the same company, not a different one with a similar name. A
+count only counts if the result is that company's own page. Match on the website/domain
+given above the results, and sanity-check the industry and location: a company called
+"Arcsky" at arcskytech.com that makes drones in Austin is NOT the airline "ARC" at
+arcsky.com, even though both are aviation and the names look identical. When a result's
+domain, industry, or location contradicts the company you were given, discard that result
+entirely — do not fall back to it because it's the only number you can see.
+
 Report the headcount EXACTLY as a source states it — a range ("51-200") or an exact
 count ("171") are both fine, but never convert one into the other: don't turn "51 total employees"
 into a range like "1-50" or "51-200", and don't turn "51-200 employees" into a single number.
@@ -247,7 +268,16 @@ empty band. Reply with only the count/band string (e.g. "51-200" or "171"), not 
 "employees"."""
 
 
-def _parse_headcount(company: str, results: list[dict], *, client=None, costlog=None) -> str:
+def _domain(website: str) -> str:
+    """Bare domain for entity-matching in the headcount prompt — the rule "is this
+    the same company?" is unusable without it (arcskytech.com vs arcsky.com)."""
+    d = re.sub(r"^https?://", "", website.strip().lower())
+    return d.split("/")[0].removeprefix("www.")
+
+
+def _parse_headcount(
+    company: str, website: str, results: list[dict], *, client=None, costlog=None
+) -> str:
     if not results:
         return ""
     if client is None:
@@ -257,7 +287,11 @@ def _parse_headcount(company: str, results: list[dict], *, client=None, costlog=
         load_dotenv()
         client = OpenAI()
 
-    serp_text = f"Company: {company}\n" + "\n".join(
+    header = f"Company: {company}\n"
+    domain = _domain(website)
+    if domain:
+        header += f"Company website: {domain}\n"
+    serp_text = header + "\n".join(
         f"- {r.get('title', '')} | {r.get('snippet', '')} | {r.get('link', '')}" for r in results
     )
     completion = client.chat.completions.parse(
@@ -278,18 +312,25 @@ def _parse_headcount(company: str, results: list[dict], *, client=None, costlog=
     return parsed.band if parsed is not None else ""
 
 
-def find_headcount(company: str, *, search=serper_search, client=None, costlog=None) -> str:
+def find_headcount(
+    company: str, *, website: str = "", search=serper_search, client=None, costlog=None
+) -> str:
     """1 Serper credit + 1 gpt-4o-mini call. Reads only LinkedIn/Craft/PitchBook
-    company-size listings, never guesses a number — "" when no source states one."""
+    company-size listings, never guesses a number — "" when no source states one.
+    `website` is the disambiguator, not decoration: a `"{company}" employees` search
+    happily returns a same-named company in the same industry (2026-07-27: Arcsky
+    the Austin drone maker returned the headcount of ARC, an airline)."""
     q = f'"{company}" employees (site:linkedin.com/company OR site:craft.co OR site:pitchbook.com)'
     results = search(q, num=10)
-    return _parse_headcount(company, results, client=client, costlog=costlog)
+    return _parse_headcount(company, website, results, client=client, costlog=costlog)
 
 
 def enrich(p: Prospect, *, search=serper_search, client=None, costlog=None) -> Prospect:
     p.linkedin = find_company_linkedin(p.company, search=search)
     p.community_signals = find_community_signals(p, search=search, client=client, costlog=costlog)
-    p.headcount = find_headcount(p.company, search=search, client=client, costlog=costlog)
+    p.headcount = find_headcount(
+        p.company, website=p.website, search=search, client=client, costlog=costlog
+    )
     p.key_news = find_news(p.company, search=search)
     return p
 
