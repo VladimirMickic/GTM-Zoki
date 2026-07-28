@@ -417,7 +417,9 @@ def qa_check(p: Prospect, draft: DraftSet, *, client=None, costlog: CostLog | No
         client = OpenAI()
 
     evidence = (
-        f"buying_signals: {p.buying_signals}\nkey_news: {p.key_news}\nfit_reason: {p.fit_reason}"
+        f"buying_signals: {p.buying_signals}\nkey_news: {p.key_news}\n"
+        f"fit_reason: {p.fit_reason}\ncommunity_signals: {p.community_signals}\n"
+        f"competitor_weaknesses: {p.competitor_weaknesses}\ncase_evidence: {p.case_evidence}"
     )
     initial = f"Subject: {draft.initial_subject}\n{draft.initial_body}"
     completion = client.chat.completions.parse(

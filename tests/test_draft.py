@@ -590,3 +590,31 @@ def test_check_pain_grounding_scans_the_v2_body():
         initial_body_alt=_ARCSKY_CONSEQUENCE_BODY,
     )
     assert check_pain_grounding(_no_pain_prospect(), draft) != ""
+
+
+def test_qa_check_passes_the_grounding_fields_to_the_model():
+    # The fact-checker was asked to verify claims against evidence it never received:
+    # community_signals / competitor_weaknesses / case_evidence were absent from the
+    # evidence block entirely, so no pain claim was ever checkable (2026-07-28).
+    p = Prospect(
+        company="Arcsky", website="https://arcsky.com",
+        buying_signals=["Launched the Xplorer"],
+        community_signals=["operators report arms cracking"],
+        competitor_weaknesses=["too heavy for field carry"],
+        case_evidence="packs nicely into one tough portable box",
+    )
+    client = _FakeClient(QAResult(flag=""))
+    qa_check(p, _draft(), client=client)
+    evidence = client.last_messages[1]["content"]
+    assert "operators report arms cracking" in evidence
+    assert "too heavy for field carry" in evidence
+    assert "packs nicely into one tough portable box" in evidence
+
+
+def test_qa_check_system_prompt_scope_is_not_widened():
+    # Deliberate: "is this pain fabricated" is a judgment call kept off gpt-4.1-mini —
+    # the same pattern leaked twice this month. check_pain_grounding owns it instead.
+    client = _FakeClient(QAResult(flag=""))
+    qa_check(_prospect(), _draft(), client=client)
+    system = client.last_messages[0]["content"]
+    assert "stat, contract, certification, or event" in system
