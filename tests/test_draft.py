@@ -466,6 +466,40 @@ def test_check_tier_distinctness_skips_tiers_with_no_draft_written():
     assert check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"]) == ""
 
 
+_NO_PAIN_OPENER = "Saw {{company_name}}'s {{trigger_event}} — congrats."
+_NO_PAIN_CLOSE = "Would it be a bad idea to spend 15 minutes on what a {{case_line}} build looks like?"
+
+
+def _no_pain_shape_body(middle):
+    return (
+        "{{first_name}},\n\n"
+        f"{_NO_PAIN_OPENER}\n\n"
+        f"{middle}\n\n"
+        f"{_NO_PAIN_CLOSE}\n\n"
+        "{{sender_name}}"
+    )
+
+
+def test_check_tier_distinctness_does_not_flag_shared_default_opener_and_close_alone():
+    # 2026-07-28: the plan's 3-paragraph no-pain shape means a shared default opener +
+    # shared default close alone crosses the 0.5 ratio (2 of 3 paragraphs) even when the
+    # middle "what we build" paragraph is completely different between tiers. The existing
+    # code comment already reasons this is compliance with the mandated shape, not
+    # duplication — this proves the guard actually implements that for the 3-block shape,
+    # not just the 4-block one.
+    unknown_body = _no_pain_shape_body(
+        "We cut foam to one airframe, IP67 and MIL-STD-810H rated, US-made."
+    )
+    csuite_body = _no_pain_shape_body(
+        "Every unit ships with a lifetime warranty on the shell and a US-based repair line."
+    )
+    p = Prospect(company="Arcsky", website="https://arcsky.com", drafts_by_tier={
+        "unknown": _tiered("how {{airframe_name}} ships today", unknown_body),
+        "c-suite": _tiered("transport for the new Xplorer", csuite_body),
+    })
+    assert check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"]) == ""
+
+
 def test_draft_prompt_names_sibling_tiers_that_must_not_match():
     # Detection alone (check_tier_distinctness) costs a redraft round trip. Each
     # tier is prompted separately, so unless the prompt says who else is being
@@ -477,6 +511,32 @@ def test_draft_prompt_names_sibling_tiers_that_must_not_match():
                                 sibling_tiers=["c-suite", "director", "unknown"])
     assert "director" in prompt and "unknown" in prompt
     assert "c-suite" in prompt
+
+
+def test_draft_prompt_sibling_block_warns_against_default_reuse_when_no_pain_source():
+    # There IS no pain block for a no-pain prospect — telling the model to differ tiers
+    # "in the pain block" gives it no real lever, which is the upstream cause of two
+    # no-pain tiers sharing the voice guide's literal default opener AND default close
+    # (cold-0727-style duplication one level up).
+    p = _rich_prospect(
+        status="priority", community_signals=[], competitor_weaknesses=[],
+        case_evidence="packs nicely into one tough portable box",
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite",
+                                sibling_tiers=["c-suite", "director"])
+    idx = prompt.index("OTHER TIERS AT THIS COMPANY")
+    sibling_sentence = prompt[idx:idx + 600]
+    assert "pain block" not in sibling_sentence
+    assert "default opener" in sibling_sentence
+    assert "default clos" in sibling_sentence  # "default close"/"default closing" — either wording
+
+
+def test_draft_prompt_sibling_block_still_names_pain_block_when_pain_source_present():
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(status="priority"), "c-suite",
+                                sibling_tiers=["c-suite", "director"])
+    idx = prompt.index("OTHER TIERS AT THIS COMPANY")
+    sibling_sentence = prompt[idx:idx + 600]
+    assert "pain block" in sibling_sentence
 
 
 def test_draft_prompt_omits_sibling_warning_when_this_is_the_only_tier():
@@ -590,6 +650,120 @@ def test_check_pain_grounding_scans_the_v2_body():
         initial_body_alt=_ARCSKY_CONSEQUENCE_BODY,
     )
     assert check_pain_grounding(_no_pain_prospect(), draft) != ""
+
+
+# --- word-boundary matching (substring containment false positives) -------------
+# Substring-containment on _CONSEQUENCE_WORDS matches "rma" and "fails" inside
+# unrelated words — confirmed against real copy the voice guide would plausibly
+# produce for a no-pain prospect.
+
+def test_check_pain_grounding_does_not_flag_rma_substring_in_performance():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "IP67 performance in the field, US-made.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    assert check_pain_grounding(_no_pain_prospect(), draft) == ""
+
+
+def test_check_pain_grounding_does_not_flag_rma_substring_in_information():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "Happy to send more information on the build.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    assert check_pain_grounding(_no_pain_prospect(), draft) == ""
+
+
+def test_check_pain_grounding_does_not_flag_rma_substring_in_thermally():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "Our foam is thermally stable across the MIL-STD range.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    assert check_pain_grounding(_no_pain_prospect(), draft) == ""
+
+
+def test_check_pain_grounding_does_not_flag_fails_substring_in_failsafe():
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "A failsafe return-to-home feature is standard on the {{airframe_name}}.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    assert check_pain_grounding(_no_pain_prospect(), draft) == ""
+
+
+def test_check_pain_grounding_still_flags_a_real_consequence_word():
+    # Regression: the word-boundary fix must not over-correct into never matching.
+    draft = DraftSet(
+        initial_subject="transport for the new Xplorer",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "A drop in transit which cracked the housing on the last shipment.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    flag = check_pain_grounding(_no_pain_prospect(), draft)
+    assert "cracked" in flag
+
+
+# --- subject-line scanning (Fix 2: subjects were never scanned) ------------------
+
+def test_check_pain_grounding_scans_the_subject_line():
+    # check_pain_grounding only ever scanned initial_body / initial_body_alt — a
+    # consequence word planted in the subject line slipped through entirely.
+    draft = DraftSet(
+        initial_subject="a warranty-free way to ship the Xplorer",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "We cut foam to one airframe, IP67 and MIL-STD-810H rated, US-made.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    flag = check_pain_grounding(_no_pain_prospect(), draft)
+    assert "warranty" in flag
+
+
+def test_check_pain_grounding_scans_the_alt_subject_line():
+    draft = DraftSet(
+        initial_subject="clean subject",
+        initial_subject_alt="operators report issues with the Xplorer's case",
+        initial_body=(
+            "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+            "We cut foam to one airframe, IP67 and MIL-STD-810H rated, US-made.\n\n"
+            "Would it be a bad idea to spend 15 minutes on it?\n\n{{sender_name}}"
+        ),
+    )
+    flag = check_pain_grounding(_no_pain_prospect(), draft)
+    assert flag != ""
+    assert "third parties" in flag
+
+
+def test_build_draft_prompt_subject_instruction_offers_pain_lead_when_pain_source_present():
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(status="priority"), "c-suite")
+    assert "or pain" in prompt
+
+
+def test_build_draft_prompt_subject_instruction_drops_pain_lead_when_no_pain_source():
+    p = _rich_prospect(
+        status="priority", community_signals=[], competitor_weaknesses=[],
+        case_evidence="packs nicely into one tough portable box",
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "or pain" not in prompt
+    assert "TRIGGER-FIRST or AIRFRAME-FIRST" in prompt
 
 
 def test_qa_check_passes_the_grounding_fields_to_the_model():

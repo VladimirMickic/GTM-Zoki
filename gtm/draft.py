@@ -107,7 +107,10 @@ _SKELETON_WORDS = 5      # a paragraph's "shape" = how it opens
 # the guide itself supplies a default opener ("Saw {{company_name}}'s
 # {{trigger_event}} — congrats.") and a default close ("Would it be a bad idea..."),
 # so two tiers sharing exactly those two is compliance, not duplication. It takes a
-# shared *body* block on top of them to cross this line.
+# shared *interior* (non-first, non-last) paragraph on top of them to cross this line —
+# see check_tier_distinctness's edge-vs-interior split below, which is what actually
+# enforces this for shapes shorter than four paragraphs (the no-pain 3-block shape
+# shares 2 of 3 = 0.667 on the mandated opener+close alone).
 _SKELETON_LIMIT = 0.5
 
 
@@ -136,6 +139,11 @@ def check_tier_distinctness(p: Prospect, tier: str, draft: DraftSet) -> str:
     "transport for the new Xplorer" and four paragraphs that differed only in
     wording, and both were marked qa_flag="passed".
 
+    A shared first paragraph and/or shared last paragraph ALONE never flags — that's
+    just both tiers using the guide's mandated default opener/close, not duplication
+    (see _SKELETON_LIMIT). It takes a shared paragraph that ISN'T solely explained by
+    that edge alignment (i.e. some interior overlap) before the ratio check even runs.
+
     Returns "" when clean, else the flag text (same contract as check_reference_customer).
     """
     if not draft.initial_subject:
@@ -152,10 +160,23 @@ def check_tier_distinctness(p: Prospect, tier: str, draft: DraftSet) -> str:
         theirs = _paragraph_skeletons(other.initial_body)
         if not mine or not theirs:
             continue
-        shared = len(set(mine) & set(theirs))
-        if shared / min(len(mine), len(theirs)) > _SKELETON_LIMIT:
+        shared = set(mine) & set(theirs)
+        if not shared:
+            continue
+        # Aligned edge matches (first-matches-first, last-matches-last) are the
+        # mandated default opener/close, not duplication. Only a shared skeleton that
+        # survives removing those two possible matches proves an interior overlap.
+        edge_only = set()
+        if mine[0] == theirs[0]:
+            edge_only.add(mine[0])
+        if mine[-1] == theirs[-1]:
+            edge_only.add(mine[-1])
+        if not (shared - edge_only):
+            continue
+        ratio = len(shared) / min(len(mine), len(theirs))
+        if ratio > _SKELETON_LIMIT:
             return (
-                f"reuses the {other_tier} tier's sentence skeleton ({shared} of "
+                f"reuses the {other_tier} tier's sentence skeleton ({len(shared)} of "
                 f"{min(len(mine), len(theirs))} paragraphs open identically) — the two tiers must "
                 f"differ in structure, not just wording"
             )
@@ -198,6 +219,14 @@ _CONSEQUENCE_WORDS = (
     "bent", "shattered", "scratched", "warranty", "rma", "downtime", "grounded",
     "out of true", "failure", "fails", "replacement cost", "insurance claim",
 )
+# Word-boundary, not substring: a plain `w in body` check matched "rma" inside
+# "perfoRMAnce" / "infoRMAtion" / "theRMAlly", and "fails" inside "failsafe" — all false
+# positives on routine copy for a no-pain prospect (2026-07-28 review). \b still anchors correctly
+# on the multi-word phrases ("out of true", "replacement cost", "insurance claim")
+# since \b only cares about the boundary at each end of the whole alternated phrase.
+_CONSEQUENCE_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(w) for w in _CONSEQUENCE_WORDS) + r")\b", re.IGNORECASE
+)
 _ATTRIBUTION_PATTERNS = (
     r"operators? (say|report|complain)",
     r"buyers?[^.]{0,40}(are )?asking",
@@ -228,8 +257,11 @@ def check_pain_grounding(p: Prospect, draft: DraftSet) -> str:
     """
     if has_pain_source(p):
         return ""
-    body = f"{draft.initial_body}\n{draft.initial_body_alt}".lower()
-    hits = sorted({w for w in _CONSEQUENCE_WORDS if w in body})
+    text = (
+        f"{draft.initial_subject}\n{draft.initial_subject_alt}\n"
+        f"{draft.initial_body}\n{draft.initial_body_alt}"
+    ).lower()
+    hits = sorted({m.group(0) for m in _CONSEQUENCE_RE.finditer(text)})
     if hits:
         return (
             f"asserts a consequence ({', '.join(hits[:3])}) with no pain evidence — "
@@ -237,7 +269,7 @@ def check_pain_grounding(p: Prospect, draft: DraftSet) -> str:
             f"so nothing supports it; drop the claim"
         )
     for pat in _ATTRIBUTION_PATTERNS:
-        m = re.search(pat, body)
+        m = re.search(pat, text)
         if m:
             return (
                 f'attributes a claim to third parties ("{m.group(0)}") with no pain '
@@ -278,6 +310,8 @@ def build_draft_prompt(
             f"{weaknesses}\n"
         )
 
+    pain = has_pain_source(p)
+
     # Each tier is prompted separately from the same evidence, so without naming the
     # siblings the likely outcome is one email reworded per tier — cold-0727/Arcsky
     # shipped two tiers with a byte-identical subject. check_tier_distinctness catches
@@ -285,13 +319,24 @@ def build_draft_prompt(
     others = [t for t in (sibling_tiers or []) if t != tier]
     sibling_block = ""
     if others:
+        # There IS no pain block to differentiate on when this prospect has no pain
+        # source — pointing the model at one gives it nothing, which is the upstream
+        # cause of two no-pain tiers landing on the voice guide's literal default
+        # opener AND default close (only the middle paragraph differed), flagged by
+        # check_tier_distinctness as a near-duplicate.
+        differentiator = (
+            "the pain block written to what THIS tier is measured on."
+            if pain
+            else "a distinct middle paragraph — do not reuse the voice guide's literal "
+            "default opener or default closing line verbatim across sibling tiers, since "
+            "two tiers landing on the same opener+close will read as duplicates."
+        )
         sibling_block = (
             f"\n- OTHER TIERS AT THIS COMPANY: separate emails are also being written for the "
             f"{', '.join(repr(t) for t in others)} tier(s) from this same evidence. Yours must "
             f"not be a reworded copy of theirs — the voice guide bans two tiers sharing a "
             f"sentence skeleton. Differ in STRUCTURE: a different subject line (never the same "
-            f"one twice), a different opening move, and the pain block written to what THIS "
-            f"tier is measured on."
+            f"one twice), a different opening move, and {differentiator}"
         )
 
     thin = is_thin_signal(p)
@@ -304,7 +349,6 @@ draft an email — a generic "true but empty" email is worse than none. Set "dra
 to {{}} in the reply JSON; pain_points/talking_points below are the deliverable for this tier."""
         reply_schema = f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", "draft_initial": {{}}}}}}}}'
     else:
-        pain = has_pain_source(p)
         if pain:
             band, blocks, length = _TIER_SHAPE.get(p.status, _DEFAULT_SHAPE)
         elif p.status == "keep":
@@ -322,6 +366,10 @@ to {{}} in the reply JSON; pain_points/talking_points below are the deliverable 
                 f"description.\n"
             )
         no_pain_rule = "" if pain else _NO_PAIN_RULE
+        # A no-pain prospect has no pain to lead the subject with — offering that
+        # alternative here is what let the model justify fabricating one in the subject
+        # line even though the body-level prohibition (_NO_PAIN_RULE) targets only the body.
+        subject_lead_tail = ", airframe, or pain," if pain else " or airframe,"
 
         draft_section = f"""## Email draft (self-enforce — from the voice guide's "Email structure")
 Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emails for
@@ -342,7 +390,7 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
 ### Format (self-enforce — do not exceed)
 - This prospect is {band}: write {blocks}, body {length}.
 - Subject line: under 60 characters, TRIGGER-FIRST or AIRFRAME-FIRST — lead with the
-  prospect's own event, airframe, or pain, never with our product-line names (AV-Field,
+  prospect's own event{subject_lead_tail} never with our product-line names (AV-Field,
   AV-Micro, AV-Ops, AV-Convoy) — the prospect has never heard them. Good:
   "field kit for {{{{airframe_name}}}}". Bad: "AV-Field case for X?".
 - Plain-text paragraphs separated by blank lines. No links, no bullet lists.
