@@ -54,6 +54,23 @@ _TIER_SHAPE = {
 }
 _DEFAULT_SHAPE = _TIER_SHAPE["priority"]
 
+# 2026-07-28: a priority prospect with no researched pain still gets an email — it just
+# loses Block 3. Requesting a pain block with no pain evidence is what forces the model
+# to invent one (cold-0727/Arcsky). Tier 2 is already 3-block and keeps its own shape.
+_NO_PAIN_SHAPE = (
+    "Tier 1 (priority), no researched pain",
+    "three blocks — opener · what we build · close",
+    "~250-400 characters",
+)
+
+_NO_PAIN_RULE = (
+    "\n- NO RESEARCHED PAIN: community_signals and competitor_weaknesses are both empty for "
+    "this prospect. Do NOT assert any consequence they experience (damage, cracked or bent "
+    "airframes, warranty claims, downtime, lost jobs), and do NOT attribute a claim to "
+    "operators, buyers, customers, forums, or groups — nothing in the evidence supports one. "
+    "The trigger and the value line carry this email."
+)
+
 REFERENCE_TOKEN = "{{reference_customer}}"
 
 
@@ -229,7 +246,25 @@ draft an email — a generic "true but empty" email is worse than none. Set "dra
 to {{}} in the reply JSON; pain_points/talking_points below are the deliverable for this tier."""
         reply_schema = f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", "draft_initial": {{}}}}}}}}'
     else:
-        band, blocks, length = _TIER_SHAPE.get(p.status, _DEFAULT_SHAPE)
+        pain = has_pain_source(p)
+        if pain:
+            band, blocks, length = _TIER_SHAPE.get(p.status, _DEFAULT_SHAPE)
+        elif p.status == "keep":
+            band, blocks, length = _TIER_SHAPE["keep"]
+        else:
+            band, blocks, length = _NO_PAIN_SHAPE
+
+        pain_block, close_num = "", 3
+        if pain:
+            close_num = 4
+            pain_block = (
+                f"3. **The pain** — the consequence THIS tier ('{tier}') feels, per the voice "
+                f'guide\'s "Persona\n   tailoring". Ground it in community_signals / '
+                f"competitor_weaknesses. Without this\n   block the email is just a product "
+                f"description.\n"
+            )
+        no_pain_rule = "" if pain else _NO_PAIN_RULE
+
         draft_section = f"""## Email draft (self-enforce — from the voice guide's "Email structure")
 Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emails for
 {band} at the '{tier}' persona tier — those are the length/rhythm anchors.
@@ -242,10 +277,7 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
    bare comparative. Social proof goes here, as the literal token {{{{reference_customer}}}} —
    NEVER a hardcoded company name (AeroVault is a demo company with no customers, and naming
    another prospect from this run as a customer is the exact failure this token prevents).
-3. **The pain** — the consequence THIS tier ('{tier}') feels, per the voice guide's "Persona
-   tailoring". Ground it in community_signals / competitor_weaknesses / case_evidence.
-   Without this block the email is just a product description.
-4. **Close** — ONE low-pressure closed-ended ask, negative-CTA preferred ("Would it be a bad
+{pain_block}{close_num}. **Close** — ONE low-pressure closed-ended ask, negative-CTA preferred ("Would it be a bad
    idea for us to grab 15 minutes...?"). A single genuine question may precede it. Never
    stack asks. Then {{{{sender_name}}}} on its own line, nothing after.
 
@@ -263,7 +295,7 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
   look?". It satisfies every other rule and still reads like a bot. v1 and v2 must differ in
   STRUCTURE, not just wording: one leads with the congratulation, the other with a question
   about their current setup.
-- No banned phrases (see voice guide).{sibling_block}"""
+- No banned phrases (see voice guide).{sibling_block}{no_pain_rule}"""
         reply_schema = (
             f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", '
             f'"draft_initial": {{"v1": {{"subject": "...", "body": "..."}}, '

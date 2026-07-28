@@ -143,6 +143,46 @@ def test_has_pain_source_false_for_the_arcsky_shape():
     assert has_pain_source(p) is False
 
 
+def test_build_draft_prompt_drops_the_pain_block_when_no_pain_source():
+    p = _rich_prospect(
+        status="priority", community_signals=[], competitor_weaknesses=[],
+        case_evidence="packs nicely into one tough portable box",
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "SKIP" not in prompt              # still drafts — the trigger and value line stand
+    assert "**The pain**" not in prompt
+    assert "3. **Close**" in prompt          # renumbered from 4
+    assert "~250-400 characters" in prompt
+    assert "NO RESEARCHED PAIN" in prompt
+
+
+def test_build_draft_prompt_keeps_the_pain_block_when_pain_source_present():
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(status="priority"), "c-suite")
+    assert "**The pain**" in prompt
+    assert "4. **Close**" in prompt
+    assert "~450-700 characters" in prompt
+    assert "NO RESEARCHED PAIN" not in prompt
+
+
+def test_build_draft_prompt_keep_tier_keeps_its_shape_but_gains_the_prohibition():
+    # _TIER_SHAPE["keep"] is already 3-block, so there is nothing to drop — but it folds
+    # the pain into the value line, which is the same fabrication one block earlier.
+    p = _rich_prospect(status="keep", community_signals=[], competitor_weaknesses=[])
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "~250-350 characters" in prompt   # keep's own shape, not _NO_PAIN_SHAPE
+    assert "~250-400 characters" not in prompt
+    assert "NO RESEARCHED PAIN" in prompt
+
+
+def test_build_draft_prompt_pain_block_cites_only_the_two_pain_sources():
+    # case_evidence used to appear here and licensed Arcsky's fabrication.
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, _rich_prospect(), "manager")
+    pain_line = [ln for ln in prompt.splitlines() if "Ground it in" in ln][0]
+    assert "community_signals" in pain_line
+    assert "competitor_weaknesses" in pain_line
+    assert "case_evidence" not in pain_line
+
+
 def test_build_draft_prompt_skips_email_draft_when_signal_thin():
     p = Prospect(company="Ghost Drones", website="https://ghost.com")
     prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
