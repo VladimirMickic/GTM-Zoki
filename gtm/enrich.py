@@ -1,8 +1,9 @@
-"""S5 — enrichment for fit passers only (4 Serper credits per company: 1 linkedin,
-2 community-signal pain queries, 1 news).
+"""S5 — enrichment for fit passers only (5 Serper credits per company: 1 linkedin,
+2 community-signal pain queries, 1 headcount, 1 news).
 
 Python gathers raw signals: company LinkedIn, top-3 pain-focused community signals
-(gpt-4o-mini relevance/rewrite pass over 2 SERP queries), top-5 news with snippets.
+(gpt-4o-mini relevance/rewrite pass over 2 SERP queries), employee-count band
+(gpt-4o-mini parse of a LinkedIn/Craft/PitchBook query), top-5 news with snippets.
 Claude (orchestrator) synthesizes buying_signals + outreach_angle from them via
 build_signal_prompt() — the company-research skill adds depth when run in-loop.
 """
@@ -204,10 +205,10 @@ def _relevance_filter(results: list[dict], *, client=None, costlog=None) -> list
 
 
 def find_community_signals(p: Prospect, *, search=serper_search, client=None, costlog=None) -> list[str]:
-    """Pain-focused, not mention-focused (2026-07-27 redesign): airframe-specific,
-    ICP-category, and named-competitor queries, pooled and deduped, then a cheap
-    gpt-4o-mini pass keeps only genuine pain quotes and rewrites each as
-    '"<quote>" (<source>)' — ammo for gtm/draft.py's pain block, not raw SERP noise."""
+    """Pain-focused, not mention-focused (2026-07-27 redesign): airframe-specific
+    and ICP-category queries, pooled and deduped, then a cheap gpt-4o-mini pass
+    keeps only genuine pain quotes and rewrites each as '"<quote>" (<source>)' —
+    ammo for gtm/draft.py's pain block, not raw SERP noise."""
     pooled, seen_links = [], set()
     for q in _pain_queries(p):
         for r in search(q, num=10):
@@ -220,9 +221,75 @@ def find_community_signals(p: Prospect, *, search=serper_search, client=None, co
     return _relevance_filter(third_party, client=client, costlog=costlog)
 
 
+class _Headcount(BaseModel):
+    band: str = ""
+
+
+_HEADCOUNT_PROMPT = """From the search results below, find the employee headcount for the
+named company. Use ONLY the text in the search results below — you may already know real
+facts about well-known companies from training, but ignore all of that here; if your own
+knowledge disagrees with the results, or the results say nothing, still go only by the
+results, and return an empty band rather than filling in what you already know.
+
+Report the headcount EXACTLY as a source states it — a range ("51-200") or an exact
+count ("171") are both fine, but never convert one into the other: don't turn "51 total employees"
+into a range like "1-50" or "51-200", and don't turn "51-200 employees" into a single number.
+
+Sources disagree often. If more than one number appears, prefer a linkedin.com page over
+craft.co, pitchbook.com, or any other aggregator — it's the company's own listing. If the
+only sources are non-LinkedIn and they disagree with each other (e.g. one site says "5
+employees", another says "50"), that is unresolvable — return an empty band rather than
+picking one.
+
+Never estimate, round, or infer a count from unrelated numbers (revenue, funding, follower
+counts, founding year). If nothing states an employee count for this company, return an
+empty band. Reply with only the count/band string (e.g. "51-200" or "171"), not the word
+"employees"."""
+
+
+def _parse_headcount(company: str, results: list[dict], *, client=None, costlog=None) -> str:
+    if not results:
+        return ""
+    if client is None:
+        from dotenv import load_dotenv
+        from openai import OpenAI
+
+        load_dotenv()
+        client = OpenAI()
+
+    serp_text = f"Company: {company}\n" + "\n".join(
+        f"- {r.get('title', '')} | {r.get('snippet', '')} | {r.get('link', '')}" for r in results
+    )
+    completion = client.chat.completions.parse(
+        model=MODEL,
+        messages=[{"role": "system", "content": _HEADCOUNT_PROMPT}, {"role": "user", "content": serp_text}],
+        response_format=_Headcount,
+    )
+    if costlog is not None:
+        u = completion.usage
+        costlog.record(
+            stage="headcount",
+            model=MODEL,
+            tokens_in=u.prompt_tokens,
+            tokens_out=u.completion_tokens,
+            cost_usd=u.prompt_tokens * PRICE_IN + u.completion_tokens * PRICE_OUT,
+        )
+    parsed = completion.choices[0].message.parsed
+    return parsed.band if parsed is not None else ""
+
+
+def find_headcount(company: str, *, search=serper_search, client=None, costlog=None) -> str:
+    """1 Serper credit + 1 gpt-4o-mini call. Reads only LinkedIn/Craft/PitchBook
+    company-size listings, never guesses a number — "" when no source states one."""
+    q = f'"{company}" employees (site:linkedin.com/company OR site:craft.co OR site:pitchbook.com)'
+    results = search(q, num=10)
+    return _parse_headcount(company, results, client=client, costlog=costlog)
+
+
 def enrich(p: Prospect, *, search=serper_search, client=None, costlog=None) -> Prospect:
     p.linkedin = find_company_linkedin(p.company, search=search)
     p.community_signals = find_community_signals(p, search=search, client=client, costlog=costlog)
+    p.headcount = find_headcount(p.company, search=search, client=client, costlog=costlog)
     p.key_news = find_news(p.company, search=search)
     return p
 

@@ -32,6 +32,7 @@ SHEET_COLUMNS = [
     "buying_signals",
     "key_news",
     "linkedin",
+    "headcount",
     "community_signals",
 ]
 
@@ -112,6 +113,7 @@ class Prospect(BaseModel):
     buying_signals: list[str] = []
     key_news: list[str] = []
     linkedin: str = ""
+    headcount: str = ""  # employee-count band (e.g. "51-200"); "" when unknown — never a guessed number
     community_signals: list[str] = []
     outreach_angle: str = ""
     # stage "enrich" (displacement sub-step, gtm/displace.py) — state-only, feeds

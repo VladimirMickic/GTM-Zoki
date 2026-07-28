@@ -1,10 +1,12 @@
 """S5 — enrichment: Serper-sourced raw signals + Claude synthesis prompt."""
 from gtm.enrich import (
+    _Headcount,
     _SignalList,
     build_signal_prompt,
     enrich,
     find_community_signals,
     find_company_linkedin,
+    find_headcount,
     find_news,
 )
 from gtm.schema import Prospect
@@ -294,12 +296,24 @@ def test_community_signals_logs_openai_cost():
     assert cl.records[0]["model"] == "gpt-4o-mini"
 
 
+def _enrich_search(query, num=10):
+    # headcount query returns no hits here — this fixture's shared FakeClient is
+    # parsed as _SignalList, not _Headcount; see test_enrich_fills_headcount_from_llm_band
+    # below for a headcount-specific client/search pairing.
+    if "employees" in query:
+        return []
+    if "site:linkedin.com/company" in query:
+        return SERPS["linkedin"]
+    return SERPS["news"]
+
+
 def test_enrich_fills_prospect_fields():
     p = Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")
-    enrich(p, search=lambda q, num=10: SERPS["news"] if "linkedin" not in q else SERPS["linkedin"], client=FakeClient(FILTERED))
+    enrich(p, search=_enrich_search, client=FakeClient(FILTERED))
     assert p.linkedin.endswith("/company/teal-drones")
     assert len(p.community_signals) == 1
     assert len(p.key_news) == 5
+    assert p.headcount == ""  # FakeClient(FILTERED) has no .band — see headcount tests below for that path
 
 
 def test_empty_serps_leave_fields_blank():
@@ -308,6 +322,106 @@ def test_empty_serps_leave_fields_blank():
     assert p.linkedin == ""
     assert p.community_signals == []
     assert p.key_news == []
+    assert p.headcount == ""
+
+
+# ---- headcount (2026-07-27) ----
+
+HEADCOUNT_SERPS = [
+    {"title": "Teal Drones | LinkedIn", "link": "https://www.linkedin.com/company/teal-drones",
+     "snippet": "Teal Drones | 51-200 followers on LinkedIn."},
+]
+HEADCOUNT_HIT = _Headcount(band="51-200")
+HEADCOUNT_UNKNOWN = _Headcount(band="")
+
+
+def test_headcount_query_targets_company_size_sources():
+    captured = []
+
+    def spy(q, num=10):
+        captured.append(q)
+        return []
+
+    find_headcount("Teal Drones", search=spy, client=FakeClient(HEADCOUNT_UNKNOWN))
+    assert len(captured) == 1
+    assert '"Teal Drones"' in captured[0]
+    assert "employees" in captured[0]
+    assert "site:linkedin.com/company" in captured[0]
+
+
+def test_headcount_prompt_forbids_inventing_a_range_from_a_number():
+    """Live check on Teal Drones (2026-07-27) surfaced a real hallucination: a
+    PitchBook snippet said "51 total employees" (exact count) and the LLM invented
+    "1-50" — a range that appears nowhere in the source."""
+    from gtm.enrich import _HEADCOUNT_PROMPT
+
+    assert "exactly" in _HEADCOUNT_PROMPT.lower()
+    assert "51-200" in _HEADCOUNT_PROMPT and "51 total employees" in _HEADCOUNT_PROMPT
+
+
+def test_headcount_prompt_forbids_using_the_model_s_own_prior_knowledge():
+    """Live check on Teal Drones (2026-07-27), after the range-vs-number fix above:
+    no snippet in two fresh SERP pulls contained "51-200" anywhere, yet the LLM
+    still returned "51-200" — it answered from training-data knowledge of Teal's
+    real LinkedIn page, not from the provided text. Distinct root cause from the
+    range/number bug above (grounding, not format), so it gets its own guard."""
+    from gtm.enrich import _HEADCOUNT_PROMPT
+
+    assert "only the" in _HEADCOUNT_PROMPT.lower()
+    assert "training" in _HEADCOUNT_PROMPT.lower()
+
+
+def test_headcount_prompt_prefers_linkedin_and_rejects_unresolvable_conflicts():
+    """Live check on Neros Technologies (2026-07-27) surfaced a second real bug:
+    craft.co said "5 employees", LinkedIn's own jobs page said "171 employees" —
+    the LLM picked craft.co's smaller, less authoritative number."""
+    from gtm.enrich import _HEADCOUNT_PROMPT
+
+    assert "linkedin.com" in _HEADCOUNT_PROMPT.lower()
+    assert "disagree" in _HEADCOUNT_PROMPT.lower()
+
+
+def test_headcount_returns_llm_parsed_band():
+    band = find_headcount("Teal Drones", search=lambda q, num=10: HEADCOUNT_SERPS, client=FakeClient(HEADCOUNT_HIT))
+    assert band == "51-200"
+
+
+def test_headcount_empty_when_no_serp_results():
+    assert find_headcount("Ghost", search=lambda q, num=10: [], client=FakeClient(HEADCOUNT_HIT)) == ""
+
+
+def test_headcount_empty_when_llm_finds_no_band():
+    band = find_headcount("Teal Drones", search=lambda q, num=10: HEADCOUNT_SERPS, client=FakeClient(HEADCOUNT_UNKNOWN))
+    assert band == ""
+
+
+def test_headcount_logs_openai_cost():
+    from gtm.costlog import CostLog
+
+    class FakeCostLog(CostLog):
+        def __init__(self):
+            self.records = []
+
+        def record(self, **kwargs):
+            self.records.append(kwargs)
+
+    cl = FakeCostLog()
+    find_headcount("Teal Drones", search=lambda q, num=10: HEADCOUNT_SERPS, client=FakeClient(HEADCOUNT_HIT), costlog=cl)
+    assert len(cl.records) == 1
+    assert cl.records[0]["stage"] == "headcount"
+    assert cl.records[0]["model"] == "gpt-4o-mini"
+
+
+def test_enrich_fills_headcount_from_llm_band():
+    # community-signal/news queries return no hits here so the shared FakeClient
+    # (parsed as _Headcount, not _SignalList) is never asked to parse a signal list.
+    def search(q, num=10):
+        return HEADCOUNT_SERPS if "employees" in q else []
+
+    p = Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")
+    enrich(p, search=search, client=FakeClient(HEADCOUNT_HIT))
+    assert p.headcount == "51-200"
+    assert p.community_signals == []
 
 
 def test_news_queries_carry_drone_disambiguator():
