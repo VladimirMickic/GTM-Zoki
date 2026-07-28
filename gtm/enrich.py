@@ -97,30 +97,58 @@ _PAIN_TERMS = '(case OR transport OR foam OR broke OR cracked OR damaged)'
 # used when a company has no direct chatter of its own — the common case. Kept
 # generically-attributed in the query itself; the LLM pass below is instructed
 # to never imply a category hit is specifically about the prospect.
+#
+# Every phrase must contain "drone" — same load-bearing rule as the model query
+# (see _pain_queries). Locked by test_every_category_phrase_says_drone.
 _CATEGORY_KEYWORDS = (
     ("public safety drone", ("public safety", "first responder", "police", "fire department")),
     ("search and rescue drone", ("search and rescue",)),
-    ("industrial inspection drone", ("industrial", "inspection")),
+    # survey/mapping before industrial/inspection: "industrial" is a generic
+    # adjective most makers use ("industrial drones"), while "surveying"/"mapping"
+    # name an actual job — and the job is what operators talk about on forums.
     ("survey and mapping drone", ("survey", "mapping", "gis")),
+    ("industrial inspection drone", ("industrial", "inspection")),
     ("utility inspection drone", ("energy", "utility", "utilities", "powerline")),
 )
+# Fallback when the description names no use case.
+#
+# 2026-07-27 measurements, all on 10 raw results each: mission-level phrasings
+# reach nobody — "defense sUAS" returned pure defense-policy content (Pentagon
+# demos, r/AirForce career threads, IDF posts) and "defense drone" collided with
+# FTL: Faster Than Light, which has a "Defense Drone" item (4/10 hits were
+# r/ftlgame). A gear-level phrase ("drone case foam") is far better targeted — 8/10
+# results carried pain vocabulary, in r/drones, r/dji and r/fpv.
+#
+# It is NOT in use, deliberately. Live-running it showed the relevance filter
+# cannot hold the extra recall: Neros and Skyfront each went from 0 signals to 3,
+# and 5 of those 6 were satisfied DIY chatter ("I laser cut a custom foam insert
+# for my drone", "The foam is pick and pull"). Higher recall converts straight into
+# pain-block filler until Gate 2 actually holds — see _has_problem. Swap this in
+# once the filter is fixed, not before.
+_GEAR_LEVEL_CATEGORY = "drone case foam"
+_DEFAULT_CATEGORY = "field-deployed drone"
 
 
 def _infer_category(p: Prospect) -> str:
-    """Cheap keyword bucket into an ICP segment phrase — no LLM call. us_made_ndaa
-    is the strongest, cheapest defense signal already on the Prospect; description
-    keywords cover the rest of company/ICP.md's "Strong-fit segments" list.
+    """Cheap keyword bucket into an ICP segment phrase — no LLM call, sourced from
+    company/ICP.md's "Strong-fit segments" list.
+
+    us_made_ndaa is deliberately NOT consulted. Until 2026-07-27 it was checked
+    first and short-circuited to "defense sUAS". It is a *procurement* attribute,
+    not a use case, and nearly every US maker in our ICP has it — so it swallowed
+    almost every company and routed them all to the one query measured at 0 yield.
+    On the Arcsky cold run it beat out an explicit "surveying, mapping, and
+    infrastructure inspection" description, even though Arcsky's real operator
+    community sits in r/UAVmapping and r/Surveying.
 
     Deliberately reads only fields the extract/fit stages have already filled:
     buying_signals is written by cmd_signals, which runs after cmd_enrich, so it is
     always [] here."""
-    if p.us_made_ndaa is True:
-        return "defense sUAS"
     text = p.description.lower()
     for category, keywords in _CATEGORY_KEYWORDS:
         if any(kw in text for kw in keywords):
             return category
-    return "field-deployed drone"
+    return _DEFAULT_CATEGORY
 
 
 def _pain_queries(p: Prospect) -> list[str]:
@@ -139,6 +167,21 @@ def _pain_queries(p: Prospect) -> list[str]:
 class _Signal(BaseModel):
     quote: str
     source: str
+    # Structural Gate 2 (2026-07-27): the model must name the harm in its own words.
+    # A yes/no gate leaked 5 of 6 topically-perfect but painless quotes ("I laser cut
+    # a custom foam insert for my drone"); making it articulate what went wrong is
+    # far harder to fake than answering "is this pain?" — it cannot fill this in for
+    # a setup that works. Enforced by _has_problem, not by trusting the prompt.
+    problem: str = ""
+
+
+# Fillers a model reaches for when told to fill a field it has nothing for.
+_NON_PROBLEMS = {"", "-", "--", "n/a", "na", "none", "nothing", "no problem",
+                 "no issue", "no issues", "unknown", "unclear", "not stated", "null"}
+
+
+def _has_problem(sig: "_Signal") -> bool:
+    return sig.problem.strip().strip(".").lower() not in _NON_PROBLEMS
 
 
 class _SignalList(BaseModel):
@@ -166,6 +209,22 @@ Gate 2 — real pain. A real person must describe something going wrong or costi
 an airframe cracked or damaged in transit, foam collapsing or deteriorating, a case too
 heavy, too big, or that doesn't fit, gear rattling loose, a case that failed in the field.
 Neutral mentions, marketing copy, product listings, and satisfied reviews REJECT.
+
+For every result you keep, fill the "problem" field with the specific thing that went
+wrong, in your own words (e.g. "foam degrades and the airframe cracks in transit"). If you
+cannot quote a word in the text describing damage, failure, cost, frustration, or a
+workaround someone was forced into, then there is no problem to name — leave "problem"
+empty and do not include the result at all. Never write "none", "n/a" or similar to fill
+the field: an empty "problem" means the result is discarded, which is the correct outcome.
+Describing a setup that WORKS is not pain:
+"Our drones are stored in a plastic case with a BMS. The case connects to the 12-volt port
+on the technician's vehicle" is a REJECT — it names a drone and a case and passes Gates 0
+and 1, but nothing in it goes wrong. A satisfied or neutral description of how someone
+transports their gear is the most common false positive here; it reads relevant precisely
+because the vocabulary matches.
+
+Also beware "case" in a non-physical sense — a legal case, a court case, a use case, or
+the phrase "that's not the case" is not a transport container. REJECT those.
 
 Also REJECT: a result that matched only because the words of a drone's model name appear in
 an unrelated sentence (e.g. "Perimeter 8" matching "there are some snaps in the perimeter, 8
@@ -214,7 +273,8 @@ def _relevance_filter(results: list[dict], *, client=None, costlog=None) -> list
     parsed = completion.choices[0].message.parsed
     if parsed is None:
         return []
-    return [f'"{s.quote}" ({s.source})' for s in parsed.signals[:MAX_COMMUNITY_SIGNALS]]
+    kept = [s for s in parsed.signals if _has_problem(s)]
+    return [f'"{s.quote}" ({s.source})' for s in kept[:MAX_COMMUNITY_SIGNALS]]
 
 
 def find_community_signals(p: Prospect, *, search=serper_search, client=None, costlog=None) -> list[str]:

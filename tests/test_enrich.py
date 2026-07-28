@@ -135,7 +135,7 @@ PAIN_HIT = {"title": "Black Widow frame cracked after two flights, case was too 
 OWN_POST_HIT = {"title": "Teal Drones (@TealDrones) / Posts / X", "link": "https://x.com/TealDrones", "snippet": "our latest launch"}
 IRRELEVANT_HIT = {"title": "QS Blueprint for the Future of Energy Storage", "link": "https://reddit.com/r/energy/xyz", "snippet": "unrelated thread"}
 
-FILTERED = _SignalList(signals=[{"quote": "shipped in the stock soft case and it cracked in transit", "source": "reddit.com"}])
+FILTERED = _SignalList(signals=[{"quote": "shipped in the stock soft case and it cracked in transit", "source": "reddit.com", "problem": "airframe cracked in transit in the stock soft case"}])
 EMPTY = _SignalList(signals=[])
 
 
@@ -153,8 +153,68 @@ def test_community_signals_queries_airframe_and_category_only():
     find_community_signals(p, search=spy, client=FakeClient(EMPTY))
     assert len(captured) == 2
     assert '"Black Widow"' in captured[0]
-    assert "defense sUAS" in captured[1]
+    assert "field-deployed drone" in captured[1]
     assert not any("Pelican" in q or "Nanuk" in q for q in captured)
+
+
+def test_infer_category_prefers_use_case_over_the_ndaa_flag():
+    """Live cold run 2026-07-27 (Arcsky): us_made_ndaa short-circuited ahead of the
+    description keywords, so a surveying/mapping company was queried as "defense
+    sUAS" — which returned 12/12 defense-POLICY results (Pentagon demos, AFSC career
+    threads, IDF posts) and zero transport pain. Arcsky's real operator community is
+    r/UAVmapping and r/Surveying. NDAA compliance is a procurement attribute, not a
+    use case, and nearly every US maker in the ICP has it — so it must never
+    outrank an explicit use-case keyword."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="Arcsky",
+        website="https://arcskytech.com",
+        us_made_ndaa=True,
+        description=(
+            "American-made, NDAA-compliant industrial drones engineered for surveying, "
+            "mapping, and infrastructure inspection."
+        ),
+    )
+    assert _infer_category(p) == "survey and mapping drone"
+
+
+def test_infer_category_falls_back_to_gear_level_not_mission_level():
+    """No use-case keyword → the gear-level fallback, never a mission phrase.
+    Measured 2026-07-27: "defense sUAS" returned 10/10 defense-policy results and
+    "defense drone" returned 4/10 FTL: Faster Than Light (the game has a "Defense
+    Drone" item) — both 0 pain. The gear-level phrase measured 8/10 pain vocabulary."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="Neros",
+        website="https://n.com",
+        us_made_ndaa=True,
+        description="American-made NDAA-compliant unmanned aircraft.",
+    )
+    assert _infer_category(p) == "field-deployed drone"
+
+
+def test_infer_category_ignores_the_ndaa_flag_entirely():
+    """NDAA compliance must not steer the query at all — same description, both
+    flag values, same category."""
+    from gtm.enrich import _infer_category
+
+    kw = dict(company="X", website="https://x.com", description="drones for surveying")
+    assert _infer_category(Prospect(**kw, us_made_ndaa=True)) == _infer_category(
+        Prospect(**kw, us_made_ndaa=False)
+    ) == "survey and mapping drone"
+
+
+def test_every_category_phrase_says_drone():
+    """Same load-bearing-"drone" rule the model query already follows: "defense sUAS"
+    was the only category phrase missing the word, and "sUAS" is procurement jargon
+    no operator types on Reddit. Every phrase must name the aircraft."""
+    from gtm.enrich import _CATEGORY_KEYWORDS, _DEFAULT_CATEGORY
+
+    phrases = [c for c, _ in _CATEGORY_KEYWORDS] + [_DEFAULT_CATEGORY]
+    for phrase in phrases:
+        assert "drone" in phrase, f"{phrase!r} must name the aircraft"
 
 
 def test_relevance_prompt_demands_transport_or_protection_content():
@@ -168,6 +228,51 @@ def test_relevance_prompt_demands_transport_or_protection_content():
     assert "transport" in _RELEVANCE_PROMPT.lower()
     for clue in ("case", "bag", "foam", "shipping", "transit"):
         assert clue in _RELEVANCE_PROMPT.lower()
+
+
+def test_relevance_filter_drops_signals_that_name_no_problem():
+    """Structural Gate 2, not another prompt example. Live 2026-07-27: better
+    queries surfaced more candidates and the yes/no gate leaked 5 of 6 — "I laser
+    cut a custom foam insert for my drone", "It's only $30", "The foam is pick and
+    pull". All topically perfect, all describing setups that WORK. The model must
+    now name the harm in a `problem` field; anything it cannot fill is not pain."""
+    from gtm.enrich import _SignalList, _relevance_filter
+
+    parsed = _SignalList(signals=[
+        {"quote": "I laser cut a custom foam insert for my drone.", "source": "reddit.com",
+         "problem": ""},
+        {"quote": "Foam quickly deteriorates allowing my frame to move and crack in transit.",
+         "source": "reddit.com", "problem": "foam degrades and the airframe cracks in transit"},
+    ])
+    out = _relevance_filter([{"title": "t", "snippet": "s", "link": "l"}], client=FakeClient(parsed))
+    assert len(out) == 1
+    assert "Foam quickly deteriorates" in out[0]
+
+
+def test_relevance_filter_drops_signals_whose_problem_is_filler():
+    """The escape hatch to close: a model told to fill `problem` will write "none"
+    or "n/a" rather than leave it blank."""
+    from gtm.enrich import _SignalList, _relevance_filter
+
+    for filler in ("none", "N/A", "no problem", "-", "nothing"):
+        parsed = _SignalList(signals=[
+            {"quote": "Nice case, works great.", "source": "reddit.com", "problem": filler},
+        ])
+        out = _relevance_filter([{"title": "t", "snippet": "s", "link": "l"}], client=FakeClient(parsed))
+        assert out == [], f"{filler!r} should not count as a problem"
+
+
+def test_relevance_prompt_rejects_a_working_setup_and_non_physical_case():
+    """Live re-run after the category fix (2026-07-27, Arcsky) leaked one quote:
+    '"Our drones are stored in a plastic case with a BMS." (diydrones.com)'. It names
+    a drone and a case, so Gates 0/1 pass — but nothing goes wrong, and a pain block
+    citing it is exactly the "true but empty" filler the pipeline exists to avoid.
+    The same run's SERP also carried "NC Drone Mapping Case", a *court* case."""
+    from gtm.enrich import _RELEVANCE_PROMPT
+
+    lowered = _RELEVANCE_PROMPT.lower()
+    assert "plastic case with a bms" in lowered  # the leaked quote, as a named reject
+    assert "legal case" in lowered and "use case" in lowered
 
 
 def test_community_signals_infers_category_from_description_when_not_ndaa():
@@ -198,7 +303,7 @@ def test_community_signals_category_ignores_buying_signals():
     assert "field-deployed drone" in captured[0]
 
 
-def test_community_signals_falls_back_to_field_deployed_category():
+def test_community_signals_falls_back_to_gear_level_category():
     captured = []
 
     def spy(q, num=10):
@@ -267,7 +372,7 @@ def test_community_signals_rewrites_llm_output_as_quote_and_source():
 
 
 def test_community_signals_caps_at_three():
-    many = _SignalList(signals=[{"quote": f"pain {i}", "source": "reddit.com"} for i in range(5)])
+    many = _SignalList(signals=[{"quote": f"pain {i}", "source": "reddit.com", "problem": f"harm {i}"} for i in range(5)])
     p = Prospect(company="X", website="https://x.com")
     sigs = find_community_signals(p, search=lambda q, num=10: [PAIN_HIT], client=FakeClient(many))
     assert len(sigs) == 3
