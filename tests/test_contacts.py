@@ -189,6 +189,47 @@ def test_find_contacts_returns_empty_when_only_ceo_found():
     assert find_contacts("Teal Drones", search=lambda q, num=10: serp) == []
 
 
+def test_founder_ceo_survives_the_ceo_exclusion():
+    """cold-0727 (Arcsky, 2026-07-27): the SERP found both co-founders — "Co-CEO |
+    Co-Founder" and "Co-CEO/Co-Founder", each ranking 100, the top band — and the
+    CEO exclusion dropped both, leaving the company with zero contacts and a drafted
+    email with nobody to send it to. At a founder-led company the founder IS the CEO;
+    ICP.md ranks Founder #1 and excludes CEO, and those two rules collide. CEO is
+    only disqualifying when no founder term is present."""
+    serp = [
+        {"title": "Wilson Lau - Co-CEO | Co-Founder at Arcsky | LinkedIn", "link": "https://linkedin.com/in/wl"},
+        {"title": "Justin Squire - Co-CEO/Co-Founder at Arcsky | LinkedIn", "link": "https://linkedin.com/in/js"},
+    ]
+    names = [c.name for c in find_contacts("Arcsky", search=lambda q, num=10: serp)]
+    assert names == ["Wilson Lau", "Justin Squire"]
+
+
+def test_non_founder_ceo_is_still_excluded():
+    """The founder carve-out above must not reopen the door to a plain CEO at a
+    company big enough to have one who didn't found it."""
+    serp = [
+        {"title": "Alice Ames - CEO - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/alice"},
+        {"title": "Nina Ng - Chief Executive Officer - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/nn"},
+    ]
+    assert find_contacts("Teal Drones", search=lambda q, num=10: serp) == []
+
+
+def test_spelled_out_chief_executive_officer_is_excluded():
+    """Same cold run surfaced the mirror-image leak: "ceo" is word-boundary matched,
+    so "Chief Executive Officer" slipped through the exclusion entirely and ranked 90
+    on "chief" — the filter was over-broad on founders and leaky on the one title it
+    exists to block."""
+    serp = [{"title": "Nina Ng - Chief Executive Officer - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/nn"}]
+    assert find_contacts("Teal Drones", search=lambda q, num=10: serp) == []
+
+
+def test_founder_carve_out_does_not_rescue_other_excluded_titles():
+    """The carve-out is scoped to the founder/CEO collision only — a founding
+    engineer is still an engineer, and engineers are excluded for their own reason."""
+    serp = [{"title": "Ed Ellis - Founding Engineer - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/ee"}]
+    assert find_contacts("Teal Drones", search=lambda q, num=10: serp) == []
+
+
 def test_rank_uses_word_boundaries_not_substrings():
     # "Production Manager" must not match the "product" keyword (substring of "production")
     serp = [

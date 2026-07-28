@@ -32,12 +32,21 @@ _BUYER_TERMS = (
 )
 
 # never a target for outreach — excluded from find_contacts entirely, never a fallback.
-# ceo per ICP.md; the rest kill non-buyers the SERP drags in (engineers, students,
-# academics) — us-drone-3 shipped a "Chief Engineer" and a Penn State student.
+# These kill non-buyers the SERP drags in (engineers, students, academics) —
+# us-drone-3 shipped a "Chief Engineer" and a Penn State student.
 _EXCLUDE_KEYWORDS = (
-    "ceo", "engineer", "student", "intern", "university",
+    "engineer", "student", "intern", "university",
     "professor", "researcher", "scientist",
 )
+
+# CEO is excluded per ICP.md, but conditionally: at a founder-led company the founder
+# IS the CEO, and ICP.md ranks Founder #1. cold-0727 (Arcsky) hit the collision head
+# on — both co-founders titled "Co-CEO | Co-Founder", both ranked 100, both dropped,
+# company left with zero contacts. So CEO only disqualifies when no founder term is
+# present. Both spellings are listed because "ceo" is word-boundary matched and
+# "Chief Executive Officer" slipped through the old tuple entirely.
+_CEO_TITLES = ("ceo", "chief executive")
+_FOUNDER_TITLES = ("founder", "co-founder", "founding partner")
 
 
 class Contact(BaseModel):
@@ -158,4 +167,11 @@ def find_contacts(company: str, *, search=serper_search) -> list[Contact]:
 
 def _is_excluded(c: Contact) -> bool:
     t = c.title.lower()
-    return any(re.search(rf"\b{re.escape(kw)}\b", t) for kw in _EXCLUDE_KEYWORDS)
+    if any(re.search(rf"\b{re.escape(kw)}\b", t) for kw in _EXCLUDE_KEYWORDS):
+        return True
+    if any(re.search(rf"\b{re.escape(kw)}\b", t) for kw in _CEO_TITLES):
+        # a founder who is also CEO stays — see _CEO_TITLES. The founder carve-out is
+        # scoped to this collision only: it never rescues a title excluded above, so a
+        # "Founding Engineer" is still dropped as an engineer.
+        return not any(re.search(rf"\b{re.escape(kw)}\b", t) for kw in _FOUNDER_TITLES)
+    return False

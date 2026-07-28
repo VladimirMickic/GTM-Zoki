@@ -60,8 +60,13 @@ transport cases, not generic sales/biz-dev, so they rank highest:
 | 4 | Operations, Product, Program, Logistics (manager-level) | hands-on buyer, feels the pain directly |
 | 5 | Sales | fallback only — rarely the actual buyer |
 
-**Not targeted:** CEO — excluded entirely (`gtm/contacts.py::_EXCLUDE_KEYWORDS`), never
-surfaced as a contact even as a fallback when no other title is found.
+**Not targeted:** CEO — never surfaced as a contact, even as a fallback when no other title
+is found (`gtm/contacts.py::_CEO_TITLES`). **Unless they founded the company:** a founder who
+is also CEO stays, because Founder is rank 1 above and at a founder-led company the two are
+the same person. Decided 2026-07-27 after the cold-0727 run — Arcsky's SERP returned both
+co-founders, titled "Co-CEO | Co-Founder", and the blanket exclusion dropped both, leaving a
+drafted email with no recipient. The carve-out is scoped to this collision only: a "Founding
+Engineer" is still excluded, as an engineer.
 
 Draft tone is then tailored to whichever tier the top-ranked contact falls into
 (`gtm/persona.py::classify_persona` — finance / c-suite / director / manager / ic; doctrine
