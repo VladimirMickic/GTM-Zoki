@@ -33,6 +33,7 @@ from gtm.draft import (
     build_draft_prompt,
     build_redraft_prompt,
     check_reference_customer,
+    check_tier_distinctness,
     qa_check,
 )
 from gtm.extract import DroneExtraction, extract
@@ -397,9 +398,10 @@ def cmd_segment(run: str) -> None:
         for p in prospects:
             if p.status in ("priority", "keep"):
                 needs_draft = True
-                for tier in distinct_tiers_present(p.contact_title):
+                tiers = distinct_tiers_present(p.contact_title)
+                for tier in tiers:
                     print(f"\n----- {p.company} [{tier}] -----")
-                    print(build_draft_prompt(voice_guide, p, tier))
+                    print(build_draft_prompt(voice_guide, p, tier, sibling_tiers=tiers))
 
         if needs_draft:
             raise CheckpointPending(
@@ -426,10 +428,15 @@ def cmd_draft(run: str, drafts_json: str) -> None:
                     continue
                 n += 1
                 try:
-                    # Deterministic guard runs first and short-circuits the paid
-                    # qa_check: a draft naming a run-mate as our customer is broken
-                    # regardless of whether every factual claim in it checks out.
-                    flag = check_reference_customer(p, draft, others) or qa_check(p, draft, costlog=costlog)
+                    # Deterministic guards run first and short-circuit the paid
+                    # qa_check: a draft naming a run-mate as our customer, or reusing
+                    # another tier's skeleton, is broken regardless of whether every
+                    # factual claim in it checks out.
+                    flag = (
+                        check_reference_customer(p, draft, others)
+                        or check_tier_distinctness(p, tier, draft)
+                        or qa_check(p, draft, costlog=costlog)
+                    )
                     draft.qa_flag = flag or "passed"
                     if flag:
                         flagged += 1
@@ -477,7 +484,11 @@ def cmd_redraft(run: str, drafts_json: str) -> None:
                     continue
                 n += 1
                 try:
-                    flag = check_reference_customer(p, draft, others) or qa_check(p, draft, costlog=costlog)
+                    flag = (
+                        check_reference_customer(p, draft, others)
+                        or check_tier_distinctness(p, tier, draft)
+                        or qa_check(p, draft, costlog=costlog)
+                    )
                     draft.qa_flag = flag or "passed"
                     if flag:
                         still_flagged += 1

@@ -6,6 +6,7 @@ from gtm.draft import (
     build_draft_prompt,
     build_redraft_prompt,
     check_reference_customer,
+    check_tier_distinctness,
     is_thin_signal,
     qa_check,
 )
@@ -293,6 +294,126 @@ def test_check_reference_customer_allows_naming_the_recipient_itself():
         initial_body="Saw Teal Drones' SRR win — congrats.",
     )
     assert check_reference_customer(p, draft, ["Teal Drones", "AeroVironment"]) == ""
+
+
+# --- cross-tier distinctness (voice guide "Banned skeleton" hard rule) ----------
+# 2026-07-28, cold-0727/Arcsky: the unknown and c-suite tiers both shipped the
+# subject "transport for the new Xplorer" and the same four-paragraph skeleton,
+# and both came back qa_flag="passed" — qa_check reads one draft at a time and
+# only fact-checks claims, so nothing in the pipeline compared the tiers.
+
+def _tiered(subject, body):
+    return DraftSet(initial_subject=subject, initial_body=body)
+
+
+CSUITE_BODY = (
+    "{{first_name}},\n\n"
+    "Saw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+    "We build cases with foam cut to a single airframe — aircraft, controller, batteries "
+    "and payload each in their own cavity.\n\n"
+    "{{airframe_name}} goes out in a tough portable box today. Every unit that arrives with "
+    "a cracked arm is a warranty claim you pay for.\n\n"
+    "Would it be a bad idea to spend 15 minutes on what a {{case_line}} build costs per unit?\n\n"
+    "{{sender_name}}"
+)
+# Same skeleton, only wording swapped — the exact failure the guide bans.
+UNKNOWN_BODY = (
+    "{{first_name}},\n\n"
+    "Saw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+    "We build cases with foam cut to one airframe, so the aircraft, controller, batteries "
+    "and payload each seat in their own cavity.\n\n"
+    "{{airframe_name}} travels in a tough portable box today. That protects the outside of "
+    "the load, but it lets the aircraft move.\n\n"
+    "Would it be a bad idea to spend 15 minutes on what a {{case_line}} build looks like?\n\n"
+    "{{sender_name}}"
+)
+
+
+def test_check_tier_distinctness_flags_an_identical_subject_across_tiers():
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drafts_by_tier={
+        "unknown": _tiered("transport for the new Xplorer", UNKNOWN_BODY),
+        "c-suite": _tiered("transport for the new Xplorer", CSUITE_BODY),
+    })
+    flag = check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"])
+    assert "subject" in flag.lower()
+    assert "unknown" in flag  # names the tier it collides with
+
+
+def test_check_tier_distinctness_flags_a_reworded_but_identical_skeleton():
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drafts_by_tier={
+        "unknown": _tiered("how {{airframe_name}} ships today", UNKNOWN_BODY),
+        "c-suite": _tiered("transport for the new Xplorer", CSUITE_BODY),
+    })
+    flag = check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"])
+    assert "skeleton" in flag.lower() or "structure" in flag.lower()
+
+
+def test_check_tier_distinctness_passes_structurally_different_tiers():
+    # Guide's own anchors: c-suite v1 leads with the congratulation, director v1
+    # opens on a question about their current setup. Same company, same facts.
+    question_led = (
+        "{{first_name}},\n\n"
+        "How does {{company_name}}'s field team pack {{airframe_name}} today — one kit, or "
+        "separate bags for batteries and controller?\n\n"
+        "Asking because we cut foam per airframe so setup and teardown is identical every "
+        "time, no loose gear before a deployment.\n\n"
+        "Is packing something your team has dialed in, or still ad hoc?\n\n"
+        "{{sender_name}}"
+    )
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drafts_by_tier={
+        "director": _tiered("kitting for {{airframe_name}}", question_led),
+        "c-suite": _tiered("transport for the new Xplorer", CSUITE_BODY),
+    })
+    assert check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"]) == ""
+
+
+def test_check_tier_distinctness_passes_when_only_one_tier_exists():
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drafts_by_tier={
+        "c-suite": _tiered("transport for the new Xplorer", CSUITE_BODY),
+    })
+    assert check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"]) == ""
+
+
+def test_check_tier_distinctness_ignores_the_mandated_greeting_and_signature():
+    # "{{first_name}}," and "{{sender_name}}" are REQUIRED identical by the guide
+    # (Block 1 / Signature) — counting them as overlap would flag every pair.
+    bare_a = "{{first_name}},\n\nCongrats on {{trigger_event}}.\n\n{{sender_name}}"
+    bare_b = "{{first_name}},\n\nWhat protects {{airframe_name}} in transit today?\n\n{{sender_name}}"
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drafts_by_tier={
+        "director": _tiered("a", bare_a),
+        "c-suite": _tiered("b", bare_b),
+    })
+    assert check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"]) == ""
+
+
+def test_check_tier_distinctness_skips_tiers_with_no_draft_written():
+    # A thin-signal tier is talking-points-only (empty subject) — not a collision.
+    p = Prospect(company="Arcsky", website="https://arcskytech.com", drafts_by_tier={
+        "unknown": DraftSet(),
+        "c-suite": _tiered("transport for the new Xplorer", CSUITE_BODY),
+    })
+    assert check_tier_distinctness(p, "c-suite", p.drafts_by_tier["c-suite"]) == ""
+
+
+def test_draft_prompt_names_sibling_tiers_that_must_not_match():
+    # Detection alone (check_tier_distinctness) costs a redraft round trip. Each
+    # tier is prompted separately, so unless the prompt says who else is being
+    # written from the same evidence, identical output is the likely outcome.
+    p = Prospect(company="Arcsky", website="https://arcskytech.com",
+                 status="priority", buying_signals=["launched the Xplorer"],
+                 case_evidence="packs into one tough portable box")
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite",
+                                sibling_tiers=["c-suite", "director", "unknown"])
+    assert "director" in prompt and "unknown" in prompt
+    assert "c-suite" in prompt
+
+
+def test_draft_prompt_omits_sibling_warning_when_this_is_the_only_tier():
+    p = Prospect(company="Arcsky", website="https://arcskytech.com",
+                 status="priority", buying_signals=["launched the Xplorer"],
+                 case_evidence="packs into one tough portable box")
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite", sibling_tiers=["c-suite"])
+    assert "also being written" not in prompt.lower()
 
 
 def test_build_redraft_prompt_includes_qa_flag_reason_and_original_prompt():

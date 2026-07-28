@@ -8,6 +8,8 @@ the same company never get the same email.
 """
 from __future__ import annotations
 
+import re
+
 from pydantic import BaseModel
 
 from gtm.costlog import CostLog
@@ -79,6 +81,70 @@ def check_reference_customer(p: Prospect, draft: DraftSet, others: list[str]) ->
     return ""
 
 
+# The guide mandates these two lines be identical in every draft (Block 1 opener is
+# "{{first_name}}," on its own line, Signature is "{{sender_name}}"), so they are
+# structural boilerplate, not evidence two tiers share a skeleton.
+_MANDATED_LINES = {"{{first_name}},", "{{sender_name}}"}
+_SKELETON_WORDS = 5      # a paragraph's "shape" = how it opens
+# >half the real paragraphs opening alike = same email. Deliberately not stricter:
+# the guide itself supplies a default opener ("Saw {{company_name}}'s
+# {{trigger_event}} — congrats.") and a default close ("Would it be a bad idea..."),
+# so two tiers sharing exactly those two is compliance, not duplication. It takes a
+# shared *body* block on top of them to cross this line.
+_SKELETON_LIMIT = 0.5
+
+
+def _paragraph_skeletons(body: str) -> list[str]:
+    """Each real paragraph reduced to its opening few words, lowercased. Two drafts
+    that share most of these are the same email with synonyms swapped in."""
+    out = []
+    for para in body.split("\n\n"):
+        para = para.strip()
+        if not para or para in _MANDATED_LINES:
+            continue
+        words = re.sub(r"[^\w\s{}]", " ", para.lower()).split()
+        if words:
+            out.append(" ".join(words[:_SKELETON_WORDS]))
+    return out
+
+
+def check_tier_distinctness(p: Prospect, tier: str, draft: DraftSet) -> str:
+    """Deterministic guard for the voice guide's "Banned skeleton" hard rule: two
+    persona tiers at the same company must never get the same sentence skeleton.
+
+    qa_check cannot catch this — it sees one draft at a time and only fact-checks
+    claims against evidence, so a CFO and a director can both receive the same email
+    with every claim true. The failure this exists to catch (cold-0727/Arcsky,
+    2026-07-28): the `unknown` and `c-suite` tiers shipped the identical subject
+    "transport for the new Xplorer" and four paragraphs that differed only in
+    wording, and both were marked qa_flag="passed".
+
+    Returns "" when clean, else the flag text (same contract as check_reference_customer).
+    """
+    if not draft.initial_subject:
+        return ""
+    mine = _paragraph_skeletons(draft.initial_body)
+    for other_tier, other in p.drafts_by_tier.items():
+        if other_tier == tier or not other.initial_subject:
+            continue
+        if draft.initial_subject.strip().lower() == other.initial_subject.strip().lower():
+            return (
+                f"subject line is identical to the {other_tier} tier's "
+                f'("{draft.initial_subject}") — each persona tier needs its own'
+            )
+        theirs = _paragraph_skeletons(other.initial_body)
+        if not mine or not theirs:
+            continue
+        shared = len(set(mine) & set(theirs))
+        if shared / min(len(mine), len(theirs)) > _SKELETON_LIMIT:
+            return (
+                f"reuses the {other_tier} tier's sentence skeleton ({shared} of "
+                f"{min(len(mine), len(theirs))} paragraphs open identically) — the two tiers must "
+                f"differ in structure, not just wording"
+            )
+    return ""
+
+
 def is_thin_signal(p: Prospect) -> bool:
     """A tier's prospect lacks enough concrete ammo (a named competitor weakness,
     direct case evidence, or an evidence-backed buying signal) to write an email that
@@ -94,7 +160,9 @@ def is_thin_signal(p: Prospect) -> bool:
     return sum(bool(x) for x in (p.competitor_weaknesses, p.case_evidence, p.buying_signals)) < 2
 
 
-def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
+def build_draft_prompt(
+    voice_guide: str, p: Prospect, tier: str, sibling_tiers: list[str] | None = None
+) -> str:
     contact_block = ""
     if tier != "unknown":
         contact_block = (
@@ -121,6 +189,22 @@ def build_draft_prompt(voice_guide: str, p: Prospect, tier: str) -> str:
             f"Name {p.competitor} specifically in the value prop and cite ONE of these "
             f"researched weaknesses verbatim — never a generic \"better than X\" claim:\n"
             f"{weaknesses}\n"
+        )
+
+    # Each tier is prompted separately from the same evidence, so without naming the
+    # siblings the likely outcome is one email reworded per tier — cold-0727/Arcsky
+    # shipped two tiers with a byte-identical subject. check_tier_distinctness catches
+    # that afterwards; this is what stops it being written in the first place.
+    others = [t for t in (sibling_tiers or []) if t != tier]
+    sibling_block = ""
+    if others:
+        sibling_block = (
+            f"\n- OTHER TIERS AT THIS COMPANY: separate emails are also being written for the "
+            f"{', '.join(repr(t) for t in others)} tier(s) from this same evidence. Yours must "
+            f"not be a reworded copy of theirs — the voice guide bans two tiers sharing a "
+            f"sentence skeleton. Differ in STRUCTURE: a different subject line (never the same "
+            f"one twice), a different opening move, and the pain block written to what THIS "
+            f"tier is measured on."
         )
 
     thin = is_thin_signal(p)
@@ -167,7 +251,7 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
   look?". It satisfies every other rule and still reads like a bot. v1 and v2 must differ in
   STRUCTURE, not just wording: one leads with the congratulation, the other with a question
   about their current setup.
-- No banned phrases (see voice guide)."""
+- No banned phrases (see voice guide).{sibling_block}"""
         reply_schema = (
             f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", '
             f'"draft_initial": {{"v1": {{"subject": "...", "body": "..."}}, '
