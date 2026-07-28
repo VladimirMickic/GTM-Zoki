@@ -14,8 +14,25 @@ import csv
 import os
 import re
 from pathlib import Path
+from typing import NamedTuple
 
 from gtm.schema import CONTACT_FIELD_SEP, SHEET_COLUMNS, DraftSet, Prospect, _trim
+
+
+class SheetPush(NamedTuple):
+    """What a push actually did. `updated` exists because a re-run after a bugfix
+    must be able to correct a row it wrote earlier — see push_to_sheet."""
+
+    added: int
+    updated: int
+
+    @property
+    def total(self) -> int:
+        return self.added + self.updated
+
+    def __str__(self) -> str:
+        return f"{self.added} new, {self.updated} updated"
+
 
 SERVICE_ACCOUNT_FILE = "credentials/service_account.json"
 
@@ -176,29 +193,62 @@ def _open_worksheet(name: str = "Companies"):
         return ss.add_worksheet(title=name, rows=1000, cols=len(CONTACT_COLUMNS) + 5)
 
 
-def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
+def _flush(
+    ws, updates: list[tuple[int, list]], appends: list[list], header: list[str] | None = None
+) -> SheetPush:
+    """One batch_update for every in-place row refresh, one append_rows for the
+    new ones — two API calls per tab regardless of row count (the Sheets free
+    quota is per-request, see docs/tools/gspread.md). `header` is prepended to
+    the append batch when the tab is still empty, and is not counted as added."""
+    if updates:
+        ws.batch_update(
+            [{"range": f"A{row_no}", "values": [row]} for row_no, row in updates],
+            value_input_option="RAW",
+        )
+    added = len(appends)
+    if appends:
+        ws.append_rows(
+            ([list(header)] + appends) if header else appends, value_input_option="RAW"
+        )
+    return SheetPush(added=added, updated=len(updates))
+
+
+def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:
     # main sheet = full funnel: every tier, drops included (tagged tier "3").
-    # Append-only, no manual-clear ritual: skip any prospect whose domain is
-    # already a row on the sheet (2026-07-24 feedback).
+    #
+    # A domain already on the sheet is REFRESHED in place; only genuinely new
+    # domains append. This supersedes the 2026-07-24 skip-if-present rule, which
+    # kept the no-manual-clear property but made every row permanent: a company
+    # pushed before a bugfix (Arcsky, live with 0 contacts) could never be
+    # corrected by re-running. Refreshing keeps both properties — no clear
+    # ritual, and a re-run is the fix.
     ws = worksheet if worksheet is not None else _open_worksheet()
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)
     website_idx = SHEET_COLUMNS.index("website")
     data_rows = existing[1:] if has_content else []
-    existing_domains = {
-        _normalize_domain(row[website_idx]) for row in data_rows if len(row) > website_idx
-    }
-    keep = [p for p in prospects if _normalize_domain(p.website) not in existing_domains]
-    rows = [p.to_sheet_row() for p in keep]
-    if not rows:
-        return 0
-    if not has_content:
-        rows.insert(0, list(SHEET_COLUMNS))
-    ws.append_rows(rows, value_input_option="RAW")
-    return len(keep)
+
+    # +2: get_all_values is 0-based and row 1 is the header. First occurrence
+    # wins if the sheet somehow already holds a domain twice.
+    row_by_domain: dict[str, int] = {}
+    for i, row in enumerate(data_rows):
+        if len(row) > website_idx:
+            row_by_domain.setdefault(_normalize_domain(row[website_idx]), i + 2)
+
+    updates: list[tuple[int, list]] = []
+    appends: list[list] = []
+    for p in prospects:
+        row = p.to_sheet_row()
+        row_no = row_by_domain.get(_normalize_domain(p.website))
+        if row_no is None:
+            appends.append(row)
+        else:
+            updates.append((row_no, row))
+
+    return _flush(ws, updates, appends, header=None if has_content else SHEET_COLUMNS)
 
 
-def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
+def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:
     ws = worksheet if worksheet is not None else _open_worksheet("Contacts")
     keep = [p for p in prospects if p.status != "drop"]
     candidate_rows = [row for p in keep for row in build_contact_rows(p)]
@@ -210,29 +260,34 @@ def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> int:
     linkedin_idx = CONTACT_COLUMNS.index("contact_linkedin")
     company_idx = CONTACT_COLUMNS.index("company")
     name_idx = CONTACT_COLUMNS.index("contact_name")
-    existing_keys = set()
-    for row in data_rows:
+    # Same refresh-don't-skip rule as the Companies tab: a contact already on the
+    # tab gets their row rewritten, so a re-drafted email or a corrected title
+    # actually reaches the sheet. +2 = header offset (see push_to_sheet).
+    row_by_key: dict[str, int] = {}
+    for i, row in enumerate(data_rows):
         if len(row) <= max(email_idx, linkedin_idx, company_idx, name_idx):
             continue
-        existing_keys.add(_contact_dedupe_key({
+        key = _contact_dedupe_key({
             "contact_email": row[email_idx],
             "contact_linkedin": row[linkedin_idx],
             "company": row[company_idx],
             "contact_name": row[name_idx],
-        }))
+        })
+        row_by_key.setdefault(key, i + 2)
 
-    new_rows, seen = [], set()
+    updates: list[tuple[int, list]] = []
+    appends: list[list] = []
+    seen: set[str] = set()
     for row in candidate_rows:
         key = _contact_dedupe_key(row)
-        if key in existing_keys or key in seen:
+        if key in seen:  # same person twice within this run
             continue
         seen.add(key)
-        new_rows.append([row[col] for col in CONTACT_COLUMNS])
+        values = [row[col] for col in CONTACT_COLUMNS]
+        row_no = row_by_key.get(key)
+        if row_no is None:
+            appends.append(values)
+        else:
+            updates.append((row_no, values))
 
-    n = len(new_rows)
-    if n == 0:
-        return 0
-    if not has_content:
-        new_rows.insert(0, list(CONTACT_COLUMNS))
-    ws.append_rows(new_rows, value_input_option="RAW")
-    return n
+    return _flush(ws, updates, appends, header=None if has_content else CONTACT_COLUMNS)

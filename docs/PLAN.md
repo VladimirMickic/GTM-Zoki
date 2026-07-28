@@ -39,6 +39,12 @@ email waterfall (`gtm/emails.py`, `gtm/email_providers.py`), HubSpot push (`gtm/
   log&skip → `data/errors.log`, cost log. Live E2E on Teal Drones: fit 85/priority (re-run 2026-07-18 after feedback round 1: split dims/weights, top-3 contacts, news snippets, line-per-point reasons). Commands in CLAUDE.md.
 
 ## Sheet columns
+Pushes are **upserts**, not appends: a company already on the sheet (matched on
+normalized website domain) has its row rewritten in place; only new domains append.
+Contacts match on email → LinkedIn → name+company (`_contact_dedupe_key`). So
+re-running a company after a bugfix corrects its row — no manual clear ritual,
+and no permanently stale row (2026-07-27, supersedes the 2026-07-24 skip rule).
+
 Main tab = full funnel, one row per company, ends at community_signals. Shows all
 three tiers (Tier 3/drops included, tagged in the `tier` column):
 company · website · description · drone_models · drone_dimensions · drone_weights · best_case_line · us_made/NDAA ·

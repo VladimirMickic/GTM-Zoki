@@ -448,13 +448,17 @@ def _setup_output_run(monkeypatch, tmp_path):
     monkeypatch.setattr(output_mod, "SERVICE_ACCOUNT_FILE", str(fake_creds))
 
     calls = {"push": 0, "push_contacts": 0}
-    monkeypatch.setattr(
-        output_mod, "push_to_sheet", lambda *a, **k: calls.__setitem__("push", calls["push"] + 1)
-    )
-    monkeypatch.setattr(
-        output_mod, "push_contacts_to_sheet",
-        lambda *a, **k: calls.__setitem__("push_contacts", calls["push_contacts"] + 1),
-    )
+
+    def _count(key):
+        # both pushers return a SheetPush (added/updated) that cmd_output prints
+        def stub(*a, **k):
+            calls[key] += 1
+            return output_mod.SheetPush(added=1, updated=0)
+
+        return stub
+
+    monkeypatch.setattr(output_mod, "push_to_sheet", _count("push"))
+    monkeypatch.setattr(output_mod, "push_contacts_to_sheet", _count("push_contacts"))
     return calls
 
 

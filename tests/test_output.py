@@ -86,6 +86,7 @@ class FakeWorksheet:
     def __init__(self):
         self.appended = []
         self.values = []
+        self.batched = []
 
     def get_all_values(self):
         return self.values
@@ -93,11 +94,14 @@ class FakeWorksheet:
     def append_rows(self, rows, value_input_option="RAW"):
         self.appended.extend(rows)
 
+    def batch_update(self, data, value_input_option="RAW"):
+        self.batched.extend(data)
+
 
 def test_push_to_sheet_writes_header_once_then_rows():
     ws = FakeWorksheet()
-    n = push_to_sheet([TEAL], worksheet=ws)
-    assert n == 1
+    res = push_to_sheet([TEAL], worksheet=ws)
+    assert res.added == 1
     assert ws.appended[0] == SHEET_COLUMNS
     assert ws.appended[1][0] == "Teal Drones"
 
@@ -110,8 +114,8 @@ def test_push_to_sheet_writes_header_once_then_rows():
 def test_push_to_sheet_includes_dropped_tier3_rows():
     ws = FakeWorksheet()
     dropped = TEAL.model_copy(update={"company": "BadCo", "status": "drop", "fit_score": 12})
-    n = push_to_sheet([TEAL, dropped], worksheet=ws)
-    assert n == 2
+    res = push_to_sheet([TEAL, dropped], worksheet=ws)
+    assert res.added == 2
     pushed = [r[SHEET_COLUMNS.index("company")] for r in ws.appended[1:]]
     assert "BadCo" in pushed
 
@@ -126,43 +130,85 @@ def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
     assert ws.appended[1][0] == "Teal Drones"
 
 
-def test_push_to_sheet_skips_rows_whose_domain_already_present():
-    # feedback 2026-07-24: append-only sheet + manual clear ritual is error-prone
+def test_push_to_sheet_updates_row_whose_domain_already_present():
+    # 2026-07-27 (user): a domain already on the sheet is REFRESHED in place, not
+    # skipped. Supersedes the 2026-07-24 skip rule: skipping meant any row pushed
+    # before a bugfix stayed stale forever (Arcsky shipped with 0 contacts).
     ws = FakeWorksheet()
-    ws.values = [SHEET_COLUMNS, ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)]
-    n = push_to_sheet([TEAL], worksheet=ws)
-    assert n == 0
+    stale = ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)
+    ws.values = [SHEET_COLUMNS, stale]
+    res = push_to_sheet([TEAL], worksheet=ws)
+    assert (res.added, res.updated) == (0, 1)
     assert ws.appended == []
+    assert ws.batched == [{"range": "A2", "values": [TEAL.to_sheet_row()]}]
 
 
 def test_push_to_sheet_domain_dedupe_ignores_scheme_www_and_trailing_slash():
     ws = FakeWorksheet()
     ws.values = [SHEET_COLUMNS, ["Teal Drones", "www.tealdrones.com/"] + [""] * (len(SHEET_COLUMNS) - 2)]
-    n = push_to_sheet([TEAL], worksheet=ws)
-    assert n == 0
+    res = push_to_sheet([TEAL], worksheet=ws)
+    assert (res.added, res.updated) == (0, 1)
 
 
-def test_push_to_sheet_still_pushes_new_domains_alongside_existing():
+def test_push_to_sheet_update_targets_the_matching_row_not_the_first():
+    # off-by-one guard: data_rows is 0-based and the header occupies row 1, so the
+    # nth data row is sheet row n+2. Updating the wrong row would silently
+    # overwrite a different company.
+    ws = FakeWorksheet()
+    other = ["OtherCo", "https://otherco.com"] + [""] * (len(SHEET_COLUMNS) - 2)
+    stale = ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)
+    ws.values = [SHEET_COLUMNS, other, stale]
+    push_to_sheet([TEAL], worksheet=ws)
+    assert ws.batched == [{"range": "A3", "values": [TEAL.to_sheet_row()]}]
+
+
+def test_push_to_sheet_appends_new_domains_and_updates_existing_ones():
     ws = FakeWorksheet()
     ws.values = [SHEET_COLUMNS, ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)]
     fresh = TEAL.model_copy(update={"company": "NewCo", "website": "https://newco.com"})
-    n = push_to_sheet([TEAL, fresh], worksheet=ws)
-    assert n == 1
+    res = push_to_sheet([TEAL, fresh], worksheet=ws)
+    assert (res.added, res.updated) == (1, 1)
     assert ws.appended[0][SHEET_COLUMNS.index("company")] == "NewCo"
+    assert ws.batched[0]["range"] == "A2"
 
 
-def test_push_contacts_to_sheet_skips_rows_with_existing_email():
+def test_push_to_sheet_no_write_calls_when_nothing_to_push():
+    ws = FakeWorksheet()
+    ws.values = [SHEET_COLUMNS]
+    res = push_to_sheet([], worksheet=ws)
+    assert (res.added, res.updated) == (0, 0)
+    assert ws.appended == [] and ws.batched == []
+
+
+def test_push_contacts_to_sheet_updates_rows_with_existing_email():
+    # 2026-07-27 (user): same rule as the Companies tab — a contact already on the
+    # tab gets their row refreshed (re-drafted email, new title), not skipped.
     ws = FakeWorksheet()
     existing_row = [""] * len(CONTACT_COLUMNS)
     existing_row[CONTACT_COLUMNS.index("company")] = "Teal Drones"
     existing_row[CONTACT_COLUMNS.index("contact_email")] = "blake@tealdrones.com"
     ws.values = [CONTACT_COLUMNS, existing_row]
-    n = push_contacts_to_sheet([MULTI], worksheet=ws)
-    # Blake (email match) skipped; Manoj + Steven (no prior email match) still pushed
-    assert n == 2
+    res = push_contacts_to_sheet([MULTI], worksheet=ws)
+    # Blake (email match) updated in place; Manoj + Steven appended as new
+    assert (res.added, res.updated) == (2, 1)
     pushed_names = [r[CONTACT_COLUMNS.index("contact_name")] for r in ws.appended]
     assert "Blake Resnick" not in pushed_names
     assert "Manoj Mohan" in pushed_names
+    assert ws.batched[0]["range"] == "A2"
+    assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
+
+
+def test_push_contacts_to_sheet_matches_on_linkedin_when_email_is_a_miss():
+    # Steven has no email ("-"), so his identity falls back to LinkedIn
+    # (_contact_dedupe_key). He must still update, not duplicate.
+    ws = FakeWorksheet()
+    existing_row = [""] * len(CONTACT_COLUMNS)
+    existing_row[CONTACT_COLUMNS.index("company")] = "Teal Drones"
+    existing_row[CONTACT_COLUMNS.index("contact_linkedin")] = "https://linkedin.com/in/steven"
+    ws.values = [CONTACT_COLUMNS, existing_row]
+    res = push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert (res.added, res.updated) == (2, 1)
+    assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Steven Butler"
 
 
 def test_contact_columns_locked_order():
@@ -372,8 +418,8 @@ def test_write_contacts_csv_drops_are_excluded(tmp_path):
 
 def test_push_contacts_to_sheet_writes_header_once_then_rows():
     ws = FakeWorksheet()
-    n = push_contacts_to_sheet([MULTI], worksheet=ws)
-    assert n == 3
+    res = push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert res.added == 3
     assert ws.appended[0] == CONTACT_COLUMNS
     assert ws.appended[1][CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
 

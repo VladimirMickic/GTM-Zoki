@@ -510,8 +510,8 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         if Path(SERVICE_ACCOUNT_FILE).exists() and writes_enabled(not dry_run):
             pushed = push_to_sheet(prospects)
             pushed_contacts = push_contacts_to_sheet(prospects)
-            print(f"pushed {pushed} rows to Google Sheet")
-            print(f"pushed {pushed_contacts} rows to Contacts tab")
+            print(f"pushed {pushed.total} rows to Google Sheet ({pushed})")
+            print(f"pushed {pushed_contacts.total} rows to Contacts tab ({pushed_contacts})")
         elif dry_run:
             print("--dry-run — skipped Sheet push (CSV is ready)")
         else:
