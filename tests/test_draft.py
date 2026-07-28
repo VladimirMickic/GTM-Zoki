@@ -7,6 +7,7 @@ from gtm.draft import (
     build_redraft_prompt,
     check_reference_customer,
     check_tier_distinctness,
+    has_pain_source,
     is_thin_signal,
     qa_check,
 )
@@ -111,6 +112,35 @@ def test_is_thin_signal_false_when_any_two_of_three_present():
     assert is_thin_signal(_rich_prospect(competitor_weaknesses=[])) is False
     assert is_thin_signal(_rich_prospect(case_evidence="")) is False
     assert is_thin_signal(_rich_prospect(buying_signals=[])) is False
+
+
+# --- pain grounding (voice guide Block 3) ---------------------------------------
+# 2026-07-28: is_thin_signal counts case_evidence and buying_signals, but neither is
+# evidence that anything HURTS — one is what they ship in today, the other a trigger
+# event. Only community_signals and competitor_weaknesses record an actual complaint.
+
+def test_has_pain_source_true_for_community_signals_alone():
+    p = _rich_prospect(competitor_weaknesses=[], community_signals=["arms crack in transit"])
+    assert has_pain_source(p) is True
+
+
+def test_has_pain_source_true_for_competitor_weaknesses_alone():
+    assert has_pain_source(_rich_prospect(community_signals=[])) is True
+
+
+def test_has_pain_source_false_for_the_arcsky_shape():
+    # cold-0727/Arcsky, live 2026-07-28: case_evidence + 4 buying_signals, both pain
+    # fields empty. Clears is_thin_signal's 2-of-3 gate and still has nothing to write a
+    # pain block from — so the draft invented "a cracked arm or a gimbal out of true".
+    # Its case_evidence is a POSITIVE statement, which is why it licenses no pain at all.
+    p = _rich_prospect(
+        company="Arcsky",
+        community_signals=[],
+        competitor_weaknesses=[],
+        case_evidence="packs nicely into one tough portable box",
+    )
+    assert is_thin_signal(p) is False
+    assert has_pain_source(p) is False
 
 
 def test_build_draft_prompt_skips_email_draft_when_signal_thin():

@@ -160,6 +160,18 @@ def is_thin_signal(p: Prospect) -> bool:
     return sum(bool(x) for x in (p.competitor_weaknesses, p.case_evidence, p.buying_signals)) < 2
 
 
+def has_pain_source(p: Prospect) -> bool:
+    """Whether any researched evidence of a pain exists for this prospect.
+
+    The voice guide's Block 3 asserts a consequence the prospect feels; only these two
+    fields record one. case_evidence describes what they ship in today and buying_signals
+    describe a trigger event — neither is evidence that anything hurts, and treating them
+    as such is what let cold-0727/Arcsky ship "a cracked arm or a gimbal out of true"
+    with nothing behind it (2026-07-28).
+    """
+    return bool(p.community_signals or p.competitor_weaknesses)
+
+
 def build_draft_prompt(
     voice_guide: str, p: Prospect, tier: str, sibling_tiers: list[str] | None = None
 ) -> str:
