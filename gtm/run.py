@@ -328,16 +328,22 @@ def cmd_enrich(run: str) -> None:
     from gtm.enrich import build_signal_prompt, enrich
 
     with _track_stage(run, "enrich"):
-        run_costlog(run)  # arms serper credit logging for enrich + contacts
+        costlog = run_costlog(run)  # arms serper credit logging for enrich + contacts
         prospects = load_state(run_dir(run))
         for p in prospects:
             if p.status not in ("priority", "keep"):
                 continue
             try:
-                enrich(p)
+                enrich(p, costlog=costlog)
                 contacts = find_contacts(p.company)
                 if contacts:
                     p.contact_name, p.contact_title, p.contact_linkedin = top_contact_fields(contacts)
+                # case_evidence only — never community_signals. competitor is asserted
+                # as fact downstream ("{company} currently ships in a {competitor} case",
+                # gtm/draft.py), and community_signals cannot support that: the
+                # competitor-pain query (gtm/enrich.py::_COMPETITOR_QUERY) is
+                # category-wide with no company name in it. Competitor pain still
+                # reaches the draft as generic market pain via community_signals.
                 p.competitor = detect_competitor(p.case_evidence)
             except Exception as e:
                 _log_error(ERROR_LOG, p.company, "enrich/contacts", e)

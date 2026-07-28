@@ -1097,5 +1097,33 @@ def test_cmd_enrich_no_displacement_prompt_when_no_competitor(monkeypatch, tmp_p
     with pytest.raises(CheckpointPending):
         cmd_enrich("teal-demo-nodisplace")
 
+
+def test_cmd_enrich_never_derives_competitor_from_community_signals(monkeypatch, tmp_path, capsys):
+    """competitor means "what THIS company ships in today" — draft.py asserts it
+    verbatim ("{company} currently ships in a {competitor} case"). community_signals
+    cannot support that claim: gtm/enrich.py::_COMPETITOR_QUERY is category-wide with
+    no company name in it, so a brand there is generic chatter, and free-form quote
+    text also feeds detect_competitor stray digits it reads as model numbers
+    ("cracked after 2 flights" -> "Pelican 2")."""
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(
+        company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority",
+        case_evidence="ships in a soft backpack",  # no named brand — the common case
+        community_signals=[
+            '"Pelican case felt heavy, our drone cracked after 2 flights" (reddit.com)',
+            '"SKB foam is fine" (rcgroups.com)',
+        ],
+    )]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending):
+        cmd_enrich("teal-demo-no-signal-competitor")
+
+    assert load_state(tmp_path)[0].competitor == ""
+    assert "displacement" not in capsys.readouterr().out
+
     out = capsys.readouterr().out
     assert "displacement" not in out
