@@ -159,8 +159,18 @@ def _infer_category(p: Prospect) -> str:
 
     Deliberately reads only fields the extract/fit stages have already filled:
     buying_signals is written by cmd_signals, which runs after cmd_enrich, so it is
-    always [] here."""
-    text = p.description.lower()
+    always [] here.
+
+    Scans description + case_evidence + drone_models, not description alone
+    (widened 2026-07-28): the use case is often named in what they ship in or
+    what they call the airframe ("Guardian Public Safety UAV") rather than in
+    marketing copy. description-only matching meant any company whose niche
+    only showed up in those other fields fell through to the generic
+    "field-deployed drone" fallback — the coarseness the GTM-engineer review
+    flagged (gtm/enrich.py's community-signal sourcing, `_GEAR_LEVEL_CATEGORY`).
+    p.segment is NOT consulted: assign_segment runs in a later pipeline stage
+    (cmd_segment, after cmd_enrich) and is always "" here."""
+    text = " ".join((p.description, p.case_evidence, " ".join(p.drone_models))).lower()
     for category, keywords in _CATEGORY_KEYWORDS:
         if any(kw in text for kw in keywords):
             return category

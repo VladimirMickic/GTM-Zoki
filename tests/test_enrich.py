@@ -192,6 +192,37 @@ def test_infer_category_prefers_use_case_over_the_ndaa_flag():
     assert _infer_category(p) == "survey and mapping drone"
 
 
+def test_infer_category_also_scans_case_evidence():
+    """description doesn't always carry the use case — case_evidence (the scrape's
+    own read of what they ship in / who they sell to) often does. Widened
+    2026-07-28: description-only matching routed any company whose niche only
+    showed up in case_evidence to the generic "field-deployed drone" fallback,
+    which is the exact coarseness the GTM-engineer review flagged."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="X",
+        website="https://x.com",
+        description="American-made unmanned aircraft.",
+        case_evidence="Ships to powerline patrol crews in a soft duffel bag.",
+    )
+    assert _infer_category(p) == "utility inspection drone"
+
+
+def test_infer_category_also_scans_drone_models():
+    """A model line can name the use case ("Guardian Public Safety UAV") when the
+    marketing description doesn't."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="X",
+        website="https://x.com",
+        description="American-made unmanned aircraft.",
+        drone_models=["Guardian Public Safety UAV"],
+    )
+    assert _infer_category(p) == "public safety drone"
+
+
 def test_infer_category_falls_back_to_gear_level_not_mission_level():
     """No use-case keyword → the gear-level fallback, never a mission phrase.
     Measured 2026-07-27: "defense sUAS" returned 10/10 defense-policy results and
