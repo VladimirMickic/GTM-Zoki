@@ -166,7 +166,7 @@ def test_community_signals_queries_airframe_and_category_only():
     find_community_signals(p, search=spy, client=FakeClient(EMPTY))
     assert len(captured) == 2
     assert '"Black Widow"' in captured[0]
-    assert "field-deployed drone" in captured[1]
+    assert "drone case foam" in captured[1]
     assert not any("Pelican" in q or "Nanuk" in q for q in captured)
 
 
@@ -223,11 +223,41 @@ def test_infer_category_also_scans_drone_models():
     assert _infer_category(p) == "public safety drone"
 
 
+def test_infer_category_buckets_agriculture():
+    """Agriculture had no bucket until 2026-07-29, so every ag-drone maker fell to
+    the fallback. Live run us-drone-13 (Hylio): description said "AgDrones ...
+    agricultural operators ... crop treatments" and still queried the fallback.
+    Measured the same day, 10 raw hits each: "agricultural spray drone" returned
+    10/10 genuine ag-operator threads (r/farming, r/Agriculture, r/diydrones),
+    while the then-fallback "field-deployed drone" returned r/ftlgame, r/WarCollege,
+    r/amateurradio and r/LancerRPG — "deploy" collides across whole genres."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="Hylio",
+        website="https://hyl.io",
+        description="Hylio manufactures AgDrones for agricultural operators, "
+        "planning and reporting crop treatments.",
+    )
+    assert _infer_category(p) == "agricultural spray drone"
+
+
 def test_infer_category_falls_back_to_gear_level_not_mission_level():
     """No use-case keyword → the gear-level fallback, never a mission phrase.
     Measured 2026-07-27: "defense sUAS" returned 10/10 defense-policy results and
     "defense drone" returned 4/10 FTL: Faster Than Light (the game has a "Defense
-    Drone" item) — both 0 pain. The gear-level phrase measured 8/10 pain vocabulary."""
+    Drone" item) — both 0 pain. The gear-level phrase measured 8/10 pain vocabulary.
+
+    The fallback was "field-deployed drone" until 2026-07-29 despite this test's
+    name, because the gear-level phrase was benched on 2026-07-27 for leaking
+    satisfied DIY chatter past the relevance filter. Re-measured 2026-07-29:
+    "field-deployed drone" scored 0/10 on-topic (r/ftlgame, r/WarCollege,
+    r/amateurradio, r/LancerRPG — "deployed" is the collision), while the
+    gear-level phrase scored 10/10 transport-case content. The bench reason also
+    expired: find_community_signals became candidates-NOT-a-verdict on 2026-07-28,
+    one day after the bench, so Claude re-judges every candidate in
+    build_signal_prompt. A leaked satisfied quote now costs prompt tokens; a
+    fallback that reaches r/LancerRPG costs the entire pain block."""
     from gtm.enrich import _infer_category
 
     p = Prospect(
@@ -236,7 +266,7 @@ def test_infer_category_falls_back_to_gear_level_not_mission_level():
         us_made_ndaa=True,
         description="American-made NDAA-compliant unmanned aircraft.",
     )
-    assert _infer_category(p) == "field-deployed drone"
+    assert _infer_category(p) == "drone case foam"
 
 
 def test_infer_category_ignores_the_ndaa_flag_entirely():
@@ -344,7 +374,7 @@ def test_community_signals_category_ignores_buying_signals():
     p = Prospect(company="X", website="https://x.com",
                  buying_signals=["won a public safety first responder contract"])
     find_community_signals(p, search=spy, client=FakeClient(EMPTY))
-    assert "field-deployed drone" in captured[0]
+    assert "drone case foam" in captured[0]
 
 
 def test_community_signals_falls_back_to_gear_level_category():
@@ -356,7 +386,7 @@ def test_community_signals_falls_back_to_gear_level_category():
 
     p = Prospect(company="X", website="https://x.com")
     find_community_signals(p, search=spy, client=FakeClient(EMPTY))
-    assert "field-deployed drone" in captured[0]  # no drone_models, so index 0 is the category query
+    assert "drone case foam" in captured[0]  # no drone_models, so index 0 is the category query
 
 
 def test_community_signals_excludes_own_handle_posts_before_llm_call():

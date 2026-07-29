@@ -119,6 +119,13 @@ _PAIN_TERMS = '(case OR transport OR foam OR broke OR cracked OR damaged)'
 _CATEGORY_KEYWORDS = (
     ("public safety drone", ("public safety", "first responder", "police", "fire department")),
     ("search and rescue drone", ("search and rescue",)),
+    # Agriculture before survey/mapping (added 2026-07-29): ag-drone copy routinely
+    # says "crop mapping" / "field mapping", so survey-first swallowed the whole
+    # segment. Measured the same day, 10 raw hits: "agricultural spray drone"
+    # returned 10/10 real ag-operator threads (r/farming, r/Agriculture,
+    # r/diydrones). Live run us-drone-13 (Hylio, "AgDrones ... crop treatments") is
+    # the miss that prompted this — it had no bucket at all and hit the fallback.
+    ("agricultural spray drone", ("agricultur", "spray", "crop", "farm")),
     # survey/mapping before industrial/inspection: "industrial" is a generic
     # adjective most makers use ("industrial drones"), while "surveying"/"mapping"
     # name an actual job — and the job is what operators talk about on forums.
@@ -135,14 +142,29 @@ _CATEGORY_KEYWORDS = (
 # r/ftlgame). A gear-level phrase ("drone case foam") is far better targeted — 8/10
 # results carried pain vocabulary, in r/drones, r/dji and r/fpv.
 #
-# It is NOT in use, deliberately. Live-running it showed the relevance filter
-# cannot hold the extra recall: Neros and Skyfront each went from 0 signals to 3,
-# and 5 of those 6 were satisfied DIY chatter ("I laser cut a custom foam insert
-# for my drone", "The foam is pick and pull"). Higher recall converts straight into
-# pain-block filler until Gate 2 actually holds — see _has_problem. Swap this in
-# once the filter is fixed, not before.
+# Benched 2026-07-27, put in use 2026-07-29. The bench reason: live-running it
+# showed the relevance filter could not hold the extra recall — Neros and Skyfront
+# each went from 0 signals to 3, and 5 of those 6 were satisfied DIY chatter ("I
+# laser cut a custom foam insert for my drone", "The foam is pick and pull").
+#
+# Two measurements on 2026-07-29 retired that objection:
+#
+# 1. The old mission-level fallback, "field-deployed drone", scored 0/10 on-topic —
+#    r/ftlgame, r/WarCollege, r/amateurradio (antenna deployment), r/LancerRPG.
+#    "deployed" collides across whole genres, the same trap "defense drone" hit.
+#    This phrase scored 10/10 transport-case content on the same query shape.
+# 2. The bench predates the second gate. find_community_signals became
+#    candidates-NOT-a-verdict on 2026-07-28 — one day after the bench — so Claude
+#    re-judges every candidate in build_signal_prompt. Re-running the current
+#    filter on live SERP confirmed it still leaks (it now rejects the laser-cut
+#    quote, but kept "It's only $30 and has 2 separate layers of tear-away foam").
+#    That leak is now Claude's to drop, and costs prompt tokens. A fallback that
+#    reaches r/LancerRPG costs the entire pain block.
+#
+# So: precision at this stage is cheap, recall is not. If Claude is ever removed
+# from the loop, re-measure before trusting this.
 _GEAR_LEVEL_CATEGORY = "drone case foam"
-_DEFAULT_CATEGORY = "field-deployed drone"
+_DEFAULT_CATEGORY = _GEAR_LEVEL_CATEGORY
 
 
 def _infer_category(p: Prospect) -> str:
@@ -165,9 +187,18 @@ def _infer_category(p: Prospect) -> str:
     (widened 2026-07-28): the use case is often named in what they ship in or
     what they call the airframe ("Guardian Public Safety UAV") rather than in
     marketing copy. description-only matching meant any company whose niche
-    only showed up in those other fields fell through to the generic
-    "field-deployed drone" fallback — the coarseness the GTM-engineer review
-    flagged (gtm/enrich.py's community-signal sourcing, `_GEAR_LEVEL_CATEGORY`).
+    only showed up in those other fields fell through to the fallback — the
+    coarseness the GTM-engineer review flagged (gtm/enrich.py's community-signal
+    sourcing, `_GEAR_LEVEL_CATEGORY`).
+
+    Widening what gets scanned was only half that fix, though. Live run
+    us-drone-13 (2026-07-29) hit the fallback anyway: Hylio's description says
+    "AgDrones ... agricultural operators ... crop treatments" and there was no
+    agriculture bucket to match. Scanning more fields cannot help a segment with
+    no phrase behind it — hence the bucket added the same day. When a live run
+    lands on the fallback, check for a missing bucket before assuming the text
+    was thin.
+
     p.segment is NOT consulted: assign_segment runs in a later pipeline stage
     (cmd_segment, after cmd_enrich) and is always "" here."""
     text = " ".join((p.description, p.case_evidence, " ".join(p.drone_models))).lower()
