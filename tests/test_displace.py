@@ -1,5 +1,5 @@
 """New stage: deterministic competitor detection + displacement research prompt."""
-from gtm.displace import build_displacement_prompt, detect_competitor
+from gtm.displace import build_displacement_prompt, detect_competitor, detect_inhouse_case
 
 
 def test_detect_competitor_named_brand_with_model_number():
@@ -44,4 +44,70 @@ def test_build_displacement_prompt_names_company_and_competitor():
     assert "Pelican 1520" in prompt
     assert "reddit-find" in prompt
     assert "company-research" in prompt
+    assert "competitor_weaknesses" in prompt
+
+
+# --- 2026-07-28: OEM-built enclosures (drone-in-a-box, docks, own hard case) ---
+# Symptom in run data/runs/test-batch-1: Easy Aerial builds its own Drone-in-a-Box
+# ground station — the single most important displacement fact — and nothing in the
+# pipeline could represent it, because detect_competitor only knows 6 brand names.
+
+
+def test_detect_inhouse_case_drone_in_a_box():
+    assert detect_inhouse_case("The Sparrow ships as a Drone-in-a-Box system") == "drone-in-a-box enclosure"
+
+
+def test_detect_inhouse_case_hyphenless_drone_in_a_box():
+    assert detect_inhouse_case("an autonomous drone in a box solution") == "drone-in-a-box enclosure"
+
+
+def test_detect_inhouse_case_docking_station():
+    assert detect_inhouse_case("recharges inside a weatherproof docking station") == "docking station"
+
+
+def test_detect_inhouse_case_base_station():
+    assert detect_inhouse_case("returns to the ruggedized base station between flights") == "base station enclosure"
+
+
+def test_detect_inhouse_case_ground_control_station_is_not_an_enclosure():
+    # A ground CONTROL station is a controller/laptop, not a housing for the airframe.
+    assert detect_inhouse_case("flown from a handheld ground control station") == ""
+
+
+def test_detect_inhouse_case_self_manufactured_case():
+    assert detect_inhouse_case("Every unit ships in our own custom-molded hard case") == "OEM-built case"
+
+
+def test_detect_inhouse_case_proprietary_case():
+    assert detect_inhouse_case("a proprietary transport case designed in house") == "OEM-built case"
+
+
+def test_detect_inhouse_case_unbranded_included_hard_case():
+    assert detect_inhouse_case("includes a hard case") == "OEM-supplied hard case"
+
+
+def test_detect_inhouse_case_defers_to_a_named_competitor_brand():
+    # A Pelican-supplied case is a third-party displacement target, not an OEM build —
+    # detect_competitor owns that string.
+    assert detect_inhouse_case("includes a Pelican 1520 hard case") == ""
+
+
+def test_detect_inhouse_case_no_match_on_soft_bag():
+    assert detect_inhouse_case("ships in a soft backpack") == ""
+
+
+def test_detect_inhouse_case_no_match_on_payload_sentence():
+    # The exact wrong string case_evidence returned for Easy Aerial in the live run.
+    assert detect_inhouse_case("The Sparrow drone is backpack-portable and can carry a 5 lb. payload.") == ""
+
+
+def test_detect_inhouse_case_empty_evidence():
+    assert detect_inhouse_case("") == ""
+
+
+def test_build_displacement_prompt_pitches_tooling_cost_for_an_inhouse_enclosure():
+    prompt = build_displacement_prompt("Easy Aerial", "drone-in-a-box enclosure", inhouse=True)
+    assert "Easy Aerial" in prompt
+    assert "drone-in-a-box enclosure" in prompt
+    assert "tooling" in prompt.lower()
     assert "competitor_weaknesses" in prompt

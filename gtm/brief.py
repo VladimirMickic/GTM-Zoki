@@ -18,6 +18,11 @@ class Brief(BaseModel):
     query: Optional[str] = None
     scraper: str = "crawl4ai"
     max_companies: int = 10
+    # 2026-07-28: geography stopped being an ICP constraint (company/ICP.md). US-only
+    # is now an explicit per-run opt-in — set `require_us: true` in the brief's
+    # frontmatter when the run genuinely needs NDAA/Blue-UAS-eligible manufacturers.
+    # It filters *input*, before scoring; the fit rubric itself never sees it.
+    require_us: bool = False
 
     @model_validator(mode="after")
     def _needs_input(self) -> "Brief":

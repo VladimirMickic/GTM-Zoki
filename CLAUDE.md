@@ -72,5 +72,8 @@ full pipeline end-to-end with only 2 human checkpoints).
 ## Structure
 - `gtm/` — pipeline code (module per stage, added per slice)
 - `company/ICP.md` — company profile + fit criteria (drives Fit)
+- `company/outreach.md` — sender identity + approved reference customers; fills the
+  `{{sender_name}}` / `{{reference_customer}}` draft tokens at output. Unfilled (TODO) =
+  that contact row is blocked from the sheet, never sent with raw tokens.
 - `tests/` — pytest (fixtures) · `data/` — outputs, feedback, errors
 - `docs/PLAN.md` — build plan + slice order · `docs/notes.md` — original brain dump

@@ -73,3 +73,17 @@ def test_freeze_brief_raises_on_different_content(tmp_path):
     changed = Brief(run="teal-demo", urls=["https://tealdrones.com/other"])
     with pytest.raises(ValueError, match="brief already frozen"):
         freeze_brief(changed, tmp_path)
+
+
+def test_brief_defaults_to_no_geography_constraint():
+    # 2026-07-28: US-only became an explicit per-run opt-in, not the default.
+    brief = Brief(run="r", urls=["https://x.com"])
+    assert brief.require_us is False
+
+
+def test_brief_can_opt_into_us_only(tmp_path):
+    path = tmp_path / "brief.md"
+    path.write_text(
+        "---\nrun: us-only\nquery: NDAA drone makers\nrequire_us: true\n---\nbody\n"
+    )
+    assert load_brief(path).require_us is True

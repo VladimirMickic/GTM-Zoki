@@ -10,6 +10,7 @@ build_signal_prompt() — the company-research skill adds depth when run in-loop
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from pydantic import BaseModel
 
@@ -19,6 +20,9 @@ from gtm.schema import Prospect
 
 MAX_NEWS = 5
 SNIPPET_WORDS = 25
+# A signal older than this is context, not a reason to email today. Everything in
+# run test-batch-1 was 1-2 years old and still got written up as fresh news.
+RECENCY_MONTHS = 12
 
 
 def _normalize(s: str) -> str:
@@ -48,10 +52,22 @@ def _news_line(r: dict) -> str:
     return f"{title} — {snippet} ({link})" if snippet else f"{title} ({link})"
 
 
-def find_news(company: str, *, search=serper_search) -> list[str]:
+def _is_own_domain(own: str, r: dict) -> bool:
+    """The prospect's own site is not news about the prospect. Run test-batch-1
+    scraped Easy Aerial's homepage footer into key_news, which then fed a buying
+    signal. Matches the bare domain and any subdomain of it (news.x.com)."""
+    if not own:
+        return False
+    link = _domain(r.get("link", ""))
+    return link == own or link.endswith(f".{own}")
+
+
+def find_news(company: str, *, website: str = "", search=serper_search) -> list[str]:
     q = f'"{company}" drone (contract OR launch OR funding OR award OR NDAA OR "Blue UAS")'
     results = search(q, num=10)
-    return [_news_line(r) for r in results[:MAX_NEWS]]
+    own = _domain(website)
+    third_party = [r for r in results if not _is_own_domain(own, r)]
+    return [_news_line(r) for r in third_party[:MAX_NEWS]]
 
 
 MAX_COMMUNITY_SIGNALS = 3  # 2026-07-27: cap tightened when signals became pain-quote-shaped
@@ -395,16 +411,37 @@ def enrich(p: Prospect, *, search=serper_search, client=None, costlog=None) -> P
     p.headcount = find_headcount(
         p.company, website=p.website, search=search, client=client, costlog=costlog
     )
-    p.key_news = find_news(p.company, search=search)
+    p.key_news = find_news(p.company, website=p.website, search=search)
     return p
 
 
-def build_signal_prompt(p: Prospect) -> str:
+def build_signal_prompt(p: Prospect, *, today: date | None = None) -> str:
+    now = today or date.today()
     return f"""From the evidence below, synthesize for {p.company}:
 - buying_signals: concrete triggers matching our ICP watchlist (new launch, gov contract,
-  NDAA/Blue UAS cert, funding, relevant hiring, new vertical). Only evidence-backed ones.
+  NDAA/Blue UAS or equivalent national cert, funding, relevant hiring, new vertical). Only
+  evidence-backed ones.
   Each list item is one line: "<what happened> — <why it matters to us> (<source>, <date>)".
-  Plain English, expand jargon/acronyms on first use; omit the date if the evidence has none.
+  Plain English, expand jargon/acronyms on first use.
+
+  **Dating (today is {now.isoformat()}).** Every signal carries a date when the evidence
+  gives one. Anything older than {RECENCY_MONTHS} months gets " [stale]" appended to the
+  line; a signal with no date at all gets " [undated]". Keep them — they are still context
+  for the pitch — but they may not be used as an email opener, so the marker has to be
+  there. Run test-batch-1 opened a July-2026 email with "congrats" on a 2025 event; that is
+  the failure these markers prevent.
+
+  **Not a buying signal — never list these, marked or otherwise:**
+  · an unawarded bid or proposal ("is proposing", "has bid", "submitted a proposal", an
+    SBIR/RFP response) — nobody has spent anything yet;
+  · an equity or analyst note (price target, stock rating, upgraded/downgraded, market cap)
+    — that's a trader's opinion, not a company event;
+  · a contract *ceiling* on a shared multi-award vehicle (IDIQ, GSA schedule, BPA) reported
+    as this company's own money. The ceiling is what a pool of vendors may compete for. Only
+    a task order actually awarded to {p.company}, at its own stated value, counts;
+  · a directory, database or profile page (Crunchbase, ZoomInfo, a listing site) — a record
+    that they exist is not an event;
+  · anything sourced from {p.company}'s own site or press page describing what they sell.
 - outreach_angle: 2-3 sentences: (1) the strongest ICP outreach angle for this prospect,
   (2) why it's the strongest fit for THIS prospect specifically, (3) which piece of
   evidence (news / community signal / fit reason) backs it. Still a single string, no

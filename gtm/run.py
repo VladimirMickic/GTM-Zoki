@@ -204,6 +204,7 @@ def process_company(
     p.drone_weights = ex.drone_weights
     p.case_evidence = ex.case_evidence
     p.us_made_ndaa = ex.us_made_ndaa
+    p.compliance_evidence = ex.compliance_evidence
     p.hq_city = ex.hq_city
     p.hq_country = ex.hq_country
     if not p.drone_dimensions or not p.case_evidence:
@@ -212,9 +213,14 @@ def process_company(
             p.drone_dimensions = p.drone_dimensions or found.drone_dimensions
             p.drone_weights = p.drone_weights or found.drone_weights
             p.case_evidence = p.case_evidence or found.case_evidence
+            # Backfilled off the same two queries the hunt already paid for — no
+            # extra Serper credit. The hunt never runs on its own account for this
+            # field, so a site that publishes its certs keeps the scraped value.
+            p.compliance_evidence = p.compliance_evidence or found.compliance_evidence
             ex.drone_dimensions, ex.drone_weights, ex.case_evidence = (
                 p.drone_dimensions, p.drone_weights, p.case_evidence,
             )
+            ex.compliance_evidence = p.compliance_evidence
         except Exception as e:
             _log_error(error_log, p.company, "spechunt", e)  # hunt is best-effort, never fatal
     dq = check_disqualifiers(ex)
@@ -282,7 +288,9 @@ def cmd_start(brief_path: str) -> None:
         if brief.query:
             from gtm.discover import discover
 
-            for c in discover(brief.query, brief.max_companies, costlog=costlog):
+            for c in discover(
+                brief.query, brief.max_companies, costlog=costlog, require_us=brief.require_us
+            ):
                 prospects.append(Prospect(company=c.company, website=c.website, source=f"serper:{brief.query}"))
         prospects = prospects[: brief.max_companies]
         prospects, skipped = filter_known(prospects, known_domains(exclude_run=brief.run))
@@ -331,7 +339,7 @@ def cmd_fit(run: str, fit_json: str) -> None:
 
 def cmd_enrich(run: str) -> None:
     from gtm.contacts import find_contacts, top_contact_fields
-    from gtm.displace import build_displacement_prompt, detect_competitor
+    from gtm.displace import build_displacement_prompt, detect_competitor, detect_inhouse_case
     from gtm.enrich import build_signal_prompt, enrich
 
     with _track_stage(run, "enrich"):
@@ -352,6 +360,10 @@ def cmd_enrich(run: str) -> None:
                 # category-wide with no company name in it. Competitor pain still
                 # reaches the draft as generic market pain via community_signals.
                 p.competitor = detect_competitor(p.case_evidence)
+                # Mutually exclusive by construction (detect_inhouse_case defers to
+                # a named brand): a bought case is a competitor, a self-tooled one
+                # is a manufacturing line we take over instead.
+                p.inhouse_case = detect_inhouse_case(p.case_evidence)
             except Exception as e:
                 _log_error(ERROR_LOG, p.company, "enrich/contacts", e)
         save_state(prospects, run_dir(run))
@@ -365,6 +377,9 @@ def cmd_enrich(run: str) -> None:
                 if p.competitor:
                     print(f"\n----- {p.company} [displacement: {p.competitor}] -----")
                     print(build_displacement_prompt(p.company, p.competitor))
+                elif p.inhouse_case:
+                    print(f"\n----- {p.company} [displacement: {p.inhouse_case}] -----")
+                    print(build_displacement_prompt(p.company, p.inhouse_case, inhouse=True))
 
         _print_cost_summary(run)
         if needs_signals:
@@ -510,6 +525,7 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         SERVICE_ACCOUNT_FILE,
         push_contacts_to_sheet,
         push_to_sheet,
+        unrendered_summary,
         write_contacts_csv,
         write_csv,
     )
@@ -526,6 +542,13 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         nc = write_contacts_csv(prospects, contacts_csv_path)
         print(f"wrote {n} prospects → {csv_path}")
         print(f"wrote {nc} contacts → {contacts_csv_path}")
+        blocked = unrendered_summary(prospects)
+        if blocked:
+            print(
+                f"{blocked} contact row{'s' if blocked > 1 else ''} blocked from send — a "
+                f"draft token had no value behind it (see each row's qa_flag; fill "
+                f"company/outreach.md for sender/reference tokens)"
+            )
         if Path(SERVICE_ACCOUNT_FILE).exists() and writes_enabled(not dry_run):
             pushed = push_to_sheet(prospects)
             pushed_contacts = push_contacts_to_sheet(prospects)
@@ -549,18 +572,25 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
 
 
 def emails_for_prospect(p: Prospect, *, waterfall_fn=None) -> Prospect:
-    from gtm.emails import EmailResult, split_contact_names, waterfall
+    from gtm.emails import EmailResult, candidate_domains, split_contact_names, waterfall
 
     fn = waterfall_fn or waterfall
-    domain = _domain(p.website)
+    # Aliases matter: a company's press/product domain often isn't the domain in
+    # `website` (redcatholdings.com vs redcat.red), and the pattern tier can only
+    # hit a mailbox on a domain it actually tries.
+    domains = candidate_domains(p.website, p.company, p.key_news) or [_domain(p.website)]
     cells = []
     for name in split_contact_names(p.contact_name):
         try:
-            r = fn(name, domain)
+            r = fn(name, domains[0], domains=domains)
         except Exception as e:  # one contact's failure must not zero out the others'
             _log_error(ERROR_LOG, p.company, f"emails/{name}", e)
             r = EmailResult()
-        cells.append(f"{r.email} ({r.status})" if r.email else "-")
+        if r.email:
+            cells.append(f"{r.email} ({r.status})")
+        else:
+            # "-" is a genuine miss; "- (no-finder-key)" means nothing was searched.
+            cells.append(f"- ({r.status})" if r.status else "-")
     p.contact_emails = "; ".join(cells)
     return p
 

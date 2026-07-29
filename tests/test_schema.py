@@ -158,8 +158,8 @@ def test_contact_fields_are_state_only_not_on_sheet():
 
 def test_segment_field_is_state_only_not_on_sheet():
     assert "segment" not in SHEET_COLUMNS
-    p = Prospect(company="X", website="https://x.com", segment="defense-ndaa-win")
-    assert p.segment == "defense-ndaa-win"
+    p = Prospect(company="X", website="https://x.com", segment="procurement-compliance-win")
+    assert p.segment == "procurement-compliance-win"
 
 
 def test_outreach_drafts_qa_status_are_state_only_not_on_main_sheet():
@@ -209,3 +209,9 @@ def test_drafts_by_tier_roundtrips_through_json():
     )
     again = Prospect.model_validate_json(p.model_dump_json())
     assert again.drafts_by_tier["director"].initial_subject == "Subj"
+
+
+def test_prospect_carries_an_inhouse_case_label():
+    p = Prospect(company="X", website="https://x.com", inhouse_case="docking station")
+    assert p.inhouse_case == "docking station"
+    assert Prospect(company="Y", website="https://y.com").inhouse_case == ""

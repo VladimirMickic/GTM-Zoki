@@ -19,6 +19,17 @@ HUNTER_VERIFIER_URL = "https://api.hunter.io/v2/email-verifier"
 # All three are misses, not errors — the caller should try the next provider.
 _MISS_STATUS_CODES = {404, 429, 451}
 
+# Every provider in the chain that can FIND an address (as opposed to verify one).
+# With none of these set the find walk defers at every link and returns {} — which
+# is indistinguishable from "searched and found nothing" unless someone asks. Run
+# test-batch-1 read a pure config gap as three genuine misses.
+FINDER_KEY_VARS = ("PROSPEO_API_KEY", "GETPROSPECT_API_KEY", "HUNTER_API_KEY")
+
+
+def finder_keys_configured() -> bool:
+    """True when at least one finder vendor can actually be called."""
+    return any(os.environ.get(var) for var in FINDER_KEY_VARS)
+
 
 class EmailProvider(Protocol):
     name: str

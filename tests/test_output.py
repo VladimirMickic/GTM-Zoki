@@ -42,16 +42,16 @@ MULTI = Prospect(
             pain_points="Damaged units eat into margin | slow RFP turnaround",
             talking_points="MIL-STD-810H drop rating | US-made, matches Teal's own NDAA angle",
             initial_subject="Case built for the Teal 2?",
-            initial_body="{FIRST_NAME} — saw Teal's SRR win.",
+            initial_body="{{first_name}} — saw Teal's SRR win.",
             initial_subject_alt="Teal 2 field kit?",
-            initial_body_alt="{FIRST_NAME} — SRR win puts more Teal 2s in the field.",
+            initial_body_alt="{{first_name}} — SRR win puts more Teal 2s in the field.",
             qa_flag="passed",
         ),
         "ic": DraftSet(
             pain_points="Field gear takes a beating",
             talking_points="Foam insert sized to the Teal 2 | faster swap in the field",
             initial_subject="Field kit for the Teal 2?",
-            initial_body="{FIRST_NAME} — Teal's SRR win means more units in the field.",
+            initial_body="{{first_name}} — Teal's SRR win means more units in the field.",
             qa_flag="passed",
         ),
     },
@@ -243,8 +243,8 @@ def test_build_contact_rows_carries_both_email_versions():
     rows = build_contact_rows(MULTI)
     assert rows[0]["draft_initial_subject_alt"] == "Teal 2 field kit?"
     assert rows[0]["draft_initial_body_alt"] == "Blake — SRR win puts more Teal 2s in the field."
-    # {FIRST_NAME} substitution applies to v2 exactly as it does to v1
-    assert "{FIRST_NAME}" not in rows[0]["draft_initial_body_alt"]
+    # {{first_name}} substitution applies to v2 exactly as it does to v1
+    assert "{{first_name}}" not in rows[0]["draft_initial_body_alt"]
 
 
 def test_open_worksheet_default_name_is_companies():
@@ -322,7 +322,7 @@ def test_build_contact_rows_needs_research_yes_when_tier_has_no_draft():
 
 def test_build_contact_rows_falls_back_to_unknown_tier_draft_when_contacts_tier_has_no_draft():
     p = MULTI.model_copy(update={
-        "drafts_by_tier": {"unknown": DraftSet(initial_subject="Generic subject", initial_body="Hi {FIRST_NAME}.")},
+        "drafts_by_tier": {"unknown": DraftSet(initial_subject="Generic subject", initial_body="Hi {{first_name}}.")},
     })
     rows = build_contact_rows(p)
     # none of CEO/VP Engineering/Field Technician classify as "unknown", but no
@@ -338,14 +338,14 @@ def test_build_contact_rows_blank_draft_when_no_matching_or_unknown_tier():
 
 
 def test_build_contact_rows_merges_first_name_per_row():
-    # 2026-07-21 (user): {FIRST_NAME} must never ship literal — merge each
+    # 2026-07-21 (user): {{first_name}} must never ship literal — merge each
     # contact's own first name into their (tier-matched) draft body.
     rows = build_contact_rows(MULTI)
     assert rows[0]["draft_initial_body"] == "Blake — saw Teal's SRR win."
     assert rows[1]["draft_initial_body"] == "Manoj — saw Teal's SRR win."
     assert rows[2]["draft_initial_body"] == "Steven — Teal's SRR win means more units in the field."
     for r in rows:
-        assert "{FIRST_NAME}" not in r["draft_initial_body"]
+        assert "{{first_name}}" not in r["draft_initial_body"]
 
 
 def test_build_contact_rows_merges_company_variable():
@@ -353,7 +353,7 @@ def test_build_contact_rows_merges_company_variable():
         "drafts_by_tier": {
             **MULTI.drafts_by_tier,
             "c-suite": MULTI.drafts_by_tier["c-suite"].model_copy(
-                update={"initial_body": "Hi {FIRST_NAME}, {COMPANY} ships tough."}
+                update={"initial_body": "Hi {{first_name}}, {{company_name}} ships tough."}
             ),
         }
     })
@@ -435,3 +435,97 @@ def test_push_contacts_to_sheet_writes_header_on_blank_but_nonempty_values():
     push_contacts_to_sheet([MULTI], worksheet=ws)
     assert ws.appended[0] == CONTACT_COLUMNS
     assert ws.appended[1][CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
+
+
+# --- 2026-07-28: ship gate. Run test-batch-1 pushed literal {{tokens}} to the live
+# Sheet and HubSpot because output.py's substitution used a vocabulary no prompt emits.
+
+
+def test_build_contact_rows_blanks_and_flags_a_row_with_an_unfillable_token():
+    from gtm.render import OutreachConfig
+
+    p = Prospect(
+        company="Red Cat", website="https://redcatholdings.com", status="priority",
+        contact_name="Jeff Thompson", contact_title="CEO",
+        contact_emails="jeff@redcatholdings.com (verified)",
+        drafts_by_tier={"c-suite": DraftSet(
+            initial_subject="Case for the Black Widow?",
+            initial_body="{{first_name}} — nice work.\n\n{{sender_name}}",
+            initial_subject_alt="alt",
+            initial_body_alt="alt body",
+            qa_flag="passed",
+        )},
+    )
+    rows = build_contact_rows(p, config=OutreachConfig(), run_mates=[])
+    row = rows[0]
+    assert row["draft_initial_body"] == ""       # blanked, not shipped half-filled
+    assert row["draft_initial_subject"] == ""
+    assert row["draft_initial_body_alt"] == ""
+    assert row["draft_initial_subject_alt"] == ""
+    assert row["qa_flag"].startswith("unrendered: {{sender_name}}")
+
+
+def test_build_contact_rows_ships_when_every_token_resolves():
+    from gtm.render import OutreachConfig
+
+    cfg = OutreachConfig(sender_name="Vladimir Mickic", fallback_reference="defense sUAS makers we work with")
+    p = Prospect(
+        company="Red Cat", website="https://redcatholdings.com", status="priority",
+        contact_name="Jeff Thompson", contact_title="CEO",
+        contact_emails="jeff@redcatholdings.com (verified)",
+        drone_models=["Black Widow"], best_case_line="AV-Field",
+        drafts_by_tier={"c-suite": DraftSet(
+            initial_subject="Case for the {{airframe_name}}?",
+            initial_body="{{first_name}} — {{reference_customer}} runs our {{case_line}} line.\n\n{{sender_name}}",
+            qa_flag="passed",
+        )},
+    )
+    row = build_contact_rows(p, config=cfg, run_mates=[])[0]
+    assert row["draft_initial_subject"] == "Case for the Black Widow?"
+    assert row["draft_initial_body"] == (
+        "Jeff — defense sUAS makers we work with runs our AV-Field line.\n\nVladimir Mickic"
+    )
+    assert row["qa_flag"] == "passed"
+
+
+def test_build_contact_rows_never_names_a_run_mate_as_the_reference():
+    from gtm.render import OutreachConfig
+
+    cfg = OutreachConfig(sender_name="V M", reference_customers=["Easy Aerial"],
+                         fallback_reference="defense sUAS makers we work with")
+    p = Prospect(
+        company="Red Cat", website="https://redcatholdings.com", status="priority",
+        contact_name="Jeff Thompson", contact_title="CEO",
+        drafts_by_tier={"c-suite": DraftSet(initial_body="{{reference_customer}} likes it. {{sender_name}}")},
+    )
+    row = build_contact_rows(p, config=cfg, run_mates=["Easy Aerial", "Red Cat"])[0]
+    assert "Easy Aerial" not in row["draft_initial_body"]
+    assert "defense sUAS makers we work with" in row["draft_initial_body"]
+
+
+def test_write_contacts_csv_gates_every_run_mate_together(tmp_path):
+    # The reference filter needs the whole run, not one prospect at a time.
+    a = Prospect(company="Easy Aerial", website="https://easyaerial.com", status="priority",
+                 contact_name="Ido Gur", contact_title="CEO",
+                 drafts_by_tier={"c-suite": DraftSet(initial_body="{{reference_customer}} ships ours.")})
+    b = Prospect(company="Red Cat", website="https://redcatholdings.com", status="priority",
+                 contact_name="Jeff Thompson", contact_title="CEO",
+                 drafts_by_tier={"c-suite": DraftSet(initial_body="{{reference_customer}} ships ours.")})
+    path = tmp_path / "contacts.csv"
+    write_contacts_csv([a, b], path)
+    text = path.read_text()
+    assert "Easy Aerial ships ours" not in text
+    assert "Red Cat ships ours" not in text
+
+
+def test_unrendered_summary_counts_blocked_rows():
+    from gtm.output import unrendered_summary
+    from gtm.render import OutreachConfig
+
+    blocked = Prospect(company="Red Cat", website="https://redcatholdings.com", status="priority",
+                       contact_name="Jeff Thompson", contact_title="CEO",
+                       drafts_by_tier={"c-suite": DraftSet(initial_body="hi {{sender_name}}")})
+    clean = Prospect(company="Skydio", website="https://skydio.com", status="priority",
+                     contact_name="Adam Bry", contact_title="CEO",
+                     drafts_by_tier={"c-suite": DraftSet(initial_body="hi there")})
+    assert unrendered_summary([blocked, clean], config=OutreachConfig()) == 1

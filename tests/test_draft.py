@@ -20,7 +20,7 @@ VOICE_GUIDE_SAMPLE = "## Tone\nWarm, consultative.\n## Banned phrases\ncircle ba
 def test_build_draft_prompt_embeds_voice_guide_and_prospect_fields():
     p = Prospect(
         company="Teal Drones", website="https://tealdrones.com",
-        segment="defense-ndaa-win", outreach_angle="US-made, MIL-STD case to match your US-made drone.",
+        segment="procurement-compliance-win", outreach_angle="US-made, MIL-STD case to match your US-made drone.",
         buying_signals=["SRR win — US Army contract (source, 2026-05-01)"],
         key_news=["Teal wins SRR — ..."],
         fit_reason="NDAA/defense 15/15 — US Army SRR program",
@@ -29,7 +29,7 @@ def test_build_draft_prompt_embeds_voice_guide_and_prospect_fields():
     )
     prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
     assert "Teal Drones" in prompt
-    assert "defense-ndaa-win" in prompt
+    assert "procurement-compliance-win" in prompt
     assert "US-made, MIL-STD case to match your US-made drone." in prompt
     assert "SRR win" in prompt
     assert "Warm, consultative" in prompt  # voice guide content is embedded verbatim
@@ -792,3 +792,60 @@ def test_qa_check_system_prompt_scope_is_not_widened():
     qa_check(_prospect(), _draft(), client=client)
     system = client.last_messages[0]["content"]
     assert "stat, contract, certification, or event" in system
+
+
+def test_build_draft_prompt_inhouse_block_pitches_ending_the_case_line_not_a_swap():
+    p = Prospect(
+        company="Easy Aerial", website="https://easyaerial.com",
+        segment="oem-inhouse-displacement",
+        inhouse_case="drone-in-a-box enclosure",
+        competitor_weaknesses=["operators report the dock lid cracks below -10C — r/drones thread"],
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "drone-in-a-box enclosure" in prompt
+    assert "builds and ships its own" in prompt
+    assert "currently ships in a  case" not in prompt  # the third-party wording, with an empty competitor
+
+
+# --- 2026-07-28: stale/undated signals may not open an email ---
+
+
+def test_fresh_signals_drops_stale_and_undated_lines():
+    from gtm.draft import fresh_signals
+
+    p = Prospect(
+        company="Red Cat", website="https://redcatholdings.com",
+        buying_signals=[
+            "FANG cleared Blue UAS — (defensenews, 2025-03-01) [stale]",
+            "Hiring 4 field-ops techs — (linkedin, 2026-07-01)",
+            "Named on a state UAS framework — (source) [undated]",
+        ],
+    )
+    assert fresh_signals(p) == ["Hiring 4 field-ops techs — (linkedin, 2026-07-01)"]
+
+
+def test_draft_prompt_forbids_a_congratulatory_opener_when_every_signal_is_stale():
+    p = Prospect(
+        company="Red Cat", website="https://redcatholdings.com", status="priority", tier="Tier 1",
+        buying_signals=["FANG cleared Blue UAS — (defensenews, 2025-03-01) [stale]"],
+        community_signals=['"the lid cracked in transit" (reddit.com)'],
+        case_evidence="ships in a soft case",
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    draft_section = prompt.split("## Email draft")[-1]
+    assert "no fresh, dated trigger" in draft_section.lower()
+    assert "congrats" not in draft_section.lower()  # the mandated opener is withdrawn
+
+
+def test_draft_prompt_keeps_the_trigger_opener_when_a_fresh_signal_exists():
+    p = Prospect(
+        company="Red Cat", website="https://redcatholdings.com", status="priority", tier="Tier 1",
+        buying_signals=["Hiring 4 field-ops techs — (linkedin, 2026-07-01)"],
+        community_signals=['"the lid cracked in transit" (reddit.com)'],
+        case_evidence="ships in a soft case",
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    draft_section = prompt.split("## Email draft")[-1]
+    assert "{{trigger_event}}" in draft_section
+    assert "congrats" in draft_section.lower()
+    assert "no fresh, dated trigger" not in prompt.lower()

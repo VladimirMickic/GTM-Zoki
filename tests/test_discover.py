@@ -145,3 +145,37 @@ def test_discover_drops_candidates_whose_name_is_absent_from_domain():
     got = discover("q", search=lambda q, num=10: serp, client=FakeClient(marked), denylist=set())
     # Skydio's URL is someone else's site; the other three match their own domains
     assert [c.company for c in got] == ["BRINC", "Teal Drones", "Red Cat Holdings"]
+
+
+def test_discover_does_not_narrow_to_us_by_default():
+    seen = []
+
+    def fake_search(q, num=10):
+        seen.append(q)
+        return []
+
+    discover("drone manufacturers", 5, search=fake_search, denylist=set())
+    assert seen == ["drone manufacturers"]
+
+
+def test_require_us_narrows_the_search_query():
+    seen = []
+
+    def fake_search(q, num=10):
+        seen.append(q)
+        return []
+
+    discover("drone manufacturers", 5, search=fake_search, denylist=set(), require_us=True)
+    assert "NDAA" in seen[0]
+    assert seen[0].startswith("drone manufacturers")
+
+
+def test_require_us_does_not_double_up_an_already_ndaa_query():
+    seen = []
+
+    def fake_search(q, num=10):
+        seen.append(q)
+        return []
+
+    discover("NDAA drone makers", 5, search=fake_search, denylist=set(), require_us=True)
+    assert seen == ["NDAA drone makers"]

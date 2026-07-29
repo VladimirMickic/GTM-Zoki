@@ -97,6 +97,12 @@ class Prospect(BaseModel):
     drone_weights: list[str] = []
     case_evidence: str = ""  # what they ship in today (state-only, feeds fit; not a sheet column)
     us_made_ndaa: Optional[bool] = None
+    # 2026-07-28: the non-US half of "Procurement & compliance fit" (company/ICP.md).
+    # us_made_ndaa is one route into the top scoring band; this field carries the
+    # others (NATO stock number, national MoD framework, EASA/CAA type cert, BVLOS
+    # waiver, awarded gov contract). "" = the hunt found no procurement evidence,
+    # which scores 0-3 — never treat empty as "commercial, therefore mid-band".
+    compliance_evidence: str = ""
     hq_city: str = ""  # state-only; feeds gtm/hubspot.py company city/country properties
     hq_country: str = ""
     # stage 4 — fit
@@ -120,6 +126,11 @@ class Prospect(BaseModel):
     # draft's value-prop ammo; "" / [] when no named competitor was detected.
     competitor: str = ""
     competitor_weaknesses: list[str] = []
+    # 2026-07-28: the OEM half of displacement (gtm/displace.py::detect_inhouse_case).
+    # A short label ("drone-in-a-box enclosure", "OEM-built case") when the prospect
+    # builds its own housing instead of buying one; mutually exclusive with
+    # `competitor`, and the higher-value target of the two.
+    inhouse_case: str = ""
     # stage "segment" — deterministic bucketing, feeds draft's angle choice; not a sheet column
     segment: str = ""
     # stage "draft" — one DraftSet per distinct persona tier present among this

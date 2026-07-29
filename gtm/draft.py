@@ -21,6 +21,20 @@ MODEL = "gpt-4.1-mini"
 PRICE_IN, PRICE_OUT = 0.40 / 1e6, 1.60 / 1e6
 
 
+# gtm/enrich.py::build_signal_prompt marks any signal older than its recency
+# cutoff "[stale]" and any signal with no date "[undated]". Both are legitimate
+# context for the pitch; neither may open an email. Run test-batch-1 opened a
+# July-2026 email congratulating a 2025 certification, which reads as automated
+# because it is.
+_SIGNAL_MARKERS = ("[stale]", "[undated]")
+
+
+def fresh_signals(p: Prospect) -> list[str]:
+    """buying_signals that are dated and inside the recency window — the only
+    ones allowed to supply {{trigger_event}} in an opener."""
+    return [s for s in p.buying_signals if not any(m in s.lower() for m in _SIGNAL_MARKERS)]
+
+
 class QAError(Exception):
     pass
 
@@ -301,7 +315,21 @@ def build_draft_prompt(
     )
 
     competitor_block = ""
-    if p.competitor_weaknesses:
+    if p.competitor_weaknesses and p.inhouse_case and not p.competitor:
+        # OEM-built enclosure: there is no incumbent vendor to beat. The pitch is
+        # handing us a manufacturing line they currently run themselves — tooling,
+        # molds, warehousing, revisions — not swapping one case brand for another.
+        weaknesses = "\n".join(f"- {w}" for w in p.competitor_weaknesses)
+        competitor_block = (
+            f"\n## Displacement ammo — {p.company} builds and ships its own "
+            f"{p.inhouse_case}\n"
+            f"Do NOT pitch this as replacing a competitor's case — there is no competitor. "
+            f"Pitch retiring the in-house {p.inhouse_case}: they stop paying for tooling, "
+            f"molds, warehousing and revisions every time the airframe changes. Cite ONE of "
+            f"these researched costs/complaints verbatim:\n"
+            f"{weaknesses}\n"
+        )
+    elif p.competitor_weaknesses:
         weaknesses = "\n".join(f"- {w}" for w in p.competitor_weaknesses)
         competitor_block = (
             f"\n## Displacement ammo — {p.company} currently ships in a {p.competitor} case\n"
@@ -371,13 +399,26 @@ to {{}} in the reply JSON; pain_points/talking_points below are the deliverable 
         # line even though the body-level prohibition (_NO_PAIN_RULE) targets only the body.
         subject_lead_tail = ", airframe, or pain," if pain else " or airframe,"
 
+        fresh = fresh_signals(p)
+        if fresh:
+            opener_block = f"""1. **Opener** — "{{{{first_name}}}}," on its own line, then one line naming their real
+   trigger ("Saw {{{{company_name}}}}'s {{{{trigger_event}}}} — congrats."). The trigger must come
+   from this fresh, dated list — not from a [stale] or [undated] signal, and never invented:
+   {fresh}. No generic greeting, no banned opener."""
+        else:
+            opener_block = """1. **Opener** — "{{first_name}}," on its own line, then one line of real context about
+   THEM. There is **no fresh, dated trigger** for this prospect: every signal is [stale] or
+   [undated], so do not reference a recent event and do not congratulate them on anything —
+   an old event greeted as news is the clearest tell of an automated email. Open instead on
+   their current setup or airframe as a plain observation or a genuine question (e.g. "Your
+   {{airframe_name}} kit travels a lot more than most — how is it packed today?"). No generic
+   greeting, no banned opener, no invented event."""
+
         draft_section = f"""## Email draft (self-enforce — from the voice guide's "Email structure")
 Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emails for
 {band} at the '{tier}' persona tier — those are the length/rhythm anchors.
 
-1. **Opener** — "{{{{first_name}}}}," on its own line, then one line naming their real
-   trigger ("Saw {{{{company_name}}}}'s {{{{trigger_event}}}} — congrats."). The trigger must come
-   from buying_signals / key_news — never invented. No generic greeting, no banned opener.
+{opener_block}
 2. **What we build** — foam-fitted to one airframe (aircraft + controller + batteries +
    payload seated together), IP67 / MIL-STD-810H, US-made. Name a mechanism or spec, never a
    bare comparative. Social proof goes here, as the literal token {{{{reference_customer}}}} —

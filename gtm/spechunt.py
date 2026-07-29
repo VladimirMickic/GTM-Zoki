@@ -19,21 +19,33 @@ Only state what the snippets support — leave fields empty when unsure.
 - drone_dimensions: physical L x W x H only, verbatim with units, prefixed by model when
   stated, noting folded/unfolded (e.g. "X10: 13.7 x 9.8 x 4.6 in folded"). No performance specs.
 - drone_weights: airframe weights only, verbatim with units.
-- case_evidence: 1-2 sentences on what the drone ships/packs in — hard case, soft bag,
-  backpack, a named case partner — or empty if the snippets never say."""
+- case_evidence: 1-2 sentences on what the drone ships, packs or docks in, and who built
+  it — hard case, soft bag, backpack, a dock / drone-in-a-box / base station, a named
+  third-party case brand (Pelican, Nanuk, SKB...), or a housing the manufacturer builds
+  itself ("our own", "custom-molded", "proprietary"). The CONTAINER only: payload
+  capacity, range, flight time and portability claims are not case evidence — leave the
+  field empty rather than filling it with a payload or spec sentence.
+- compliance_evidence: any named procurement credential the snippets state, comma-
+  separated — NATO stock number, a national ministry-of-defence or police framework, an
+  EU/allied defense program, an aviation-authority type certification (EASA, CAA,
+  Transport Canada), a BVLOS or equivalent waiver, a named awarded government contract.
+  Any country. Marketing adjectives ("military-grade") are not credentials — leave empty
+  rather than filling the field with them."""
 
 
 class SpecFindings(BaseModel):
     drone_dimensions: list[str] = []
     drone_weights: list[str] = []
     case_evidence: str = ""
+    compliance_evidence: str = ""
 
 
 def build_spec_queries(company: str, models: list[str]) -> list[str]:
     subject = models[0] if models else company
     return [
         f'"{subject}" drone dimensions specs folded weight',
-        f'"{company}" drone case OR "carrying case" OR backpack OR unboxing OR "ships with"',
+        f'"{company}" drone case OR "carrying case" OR backpack OR unboxing OR "ships with" '
+        f'OR "drone-in-a-box" OR dock OR enclosure',
     ]
 
 

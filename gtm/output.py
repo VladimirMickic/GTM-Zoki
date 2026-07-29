@@ -91,7 +91,15 @@ def _parse_email_entry(entry: str) -> tuple[str, str]:
     return "", "miss"
 
 
-def build_contact_rows(prospect: Prospect) -> list[dict]:
+_DRAFT_ROW_FIELDS = (
+    "draft_initial_subject",
+    "draft_initial_body",
+    "draft_initial_subject_alt",
+    "draft_initial_body_alt",
+)
+
+
+def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list[dict]:
     """Reconstructs one dict per tracked contact from the CONTACT_FIELD_SEP-joined
     parallel fields (contact_name/contact_title/contact_linkedin/contact_emails).
     Every index is kept, including email misses. Company-level fields
@@ -102,7 +110,9 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
     and matched against prospect.drafts_by_tier, falling back to the "unknown"
     tier's draft if that contact's classified tier has no draft of its own."""
     from gtm.persona import classify_persona
+    from gtm.render import build_render_context, load_outreach_config, render_tokens, unrendered_tokens
 
+    config = config if config is not None else load_outreach_config()
     names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
     titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
     linkedins = (
@@ -119,14 +129,16 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
         tier = classify_persona(title)
         draft = prospect.drafts_by_tier.get(tier) or prospect.drafts_by_tier.get("unknown") or DraftSet()
 
-        def merge(text: str) -> str:
-            # {FIRST_NAME}/{COMPANY} are drafted once per company, substitute this
-            # contact's own first name so no placeholder ever ships literal.
-            return text.replace("{FIRST_NAME}", first or "there").replace(
-                "{COMPANY}", prospect.company
-            )
+        # A draft is written once per company but addressed per contact, so the
+        # context is rebuilt per row (first_name differs; everything else repeats).
+        ctx = build_render_context(
+            prospect, first_name=first, config=config, run_mates=run_mates
+        )
 
-        rows.append({
+        def merge(text: str) -> str:
+            return render_tokens(text, ctx)
+
+        row = {
             "company": prospect.company,
             "website": prospect.website,
             "contact_name": name,
@@ -144,12 +156,45 @@ def build_contact_rows(prospect: Prospect) -> list[dict]:
             "needs_research": "yes" if draft.needs_research else "no",
             "qa_flag": draft.qa_flag,
             "date_processed": prospect.date_processed,
-        })
+        }
+
+        # Ship gate. A token that survived the render has no data behind it —
+        # {{sender_name}} with an unfilled company/outreach.md, {{trigger_event}}
+        # with nothing fresh to cite. Run test-batch-1 shipped exactly that to the
+        # live Sheet and HubSpot. Blank the draft and say why, loudly.
+        survivors = []
+        for field in _DRAFT_ROW_FIELDS:
+            survivors.extend(t for t in unrendered_tokens(row[field]) if t not in survivors)
+        if survivors:
+            for field in _DRAFT_ROW_FIELDS:
+                row[field] = ""
+            flag = f"unrendered: {', '.join(survivors)}"
+            row["qa_flag"] = f"{flag} | {draft.qa_flag}" if draft.qa_flag else flag
+
+        rows.append(row)
     return rows
 
 
+def unrendered_summary(prospects: list[Prospect], *, config=None) -> int:
+    """How many contact rows this run refused to ship. cmd_output prints it — a
+    silent gate is barely better than the silent literal-token delivery it fixes."""
+    run_mates = [p.company for p in prospects]
+    return sum(
+        1
+        for p in prospects
+        if p.status != "drop"
+        for row in build_contact_rows(p, config=config, run_mates=run_mates)
+        if row["qa_flag"].startswith("unrendered:")
+    )
+
+
 def write_contacts_csv(prospects: list[Prospect], path: str | Path) -> int:
+    from gtm.render import load_outreach_config
+
     keep = [p for p in prospects if p.status != "drop"]
+    # Every company in the run is a forbidden reference customer for every other
+    # one (company/voice-guide.md's hard rule), so the whole list goes to each row.
+    config, run_mates = load_outreach_config(), [p.company for p in prospects]
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     n = 0
@@ -157,7 +202,7 @@ def write_contacts_csv(prospects: list[Prospect], path: str | Path) -> int:
         w = csv.writer(f)
         w.writerow(CONTACT_COLUMNS)
         for p in keep:
-            for row in build_contact_rows(p):
+            for row in build_contact_rows(p, config=config, run_mates=run_mates):
                 w.writerow([row[col] for col in CONTACT_COLUMNS])
                 n += 1
     return n
@@ -250,8 +295,13 @@ def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:
 
 def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:
     ws = worksheet if worksheet is not None else _open_worksheet("Contacts")
+    from gtm.render import load_outreach_config
+
     keep = [p for p in prospects if p.status != "drop"]
-    candidate_rows = [row for p in keep for row in build_contact_rows(p)]
+    config, run_mates = load_outreach_config(), [p.company for p in prospects]
+    candidate_rows = [
+        row for p in keep for row in build_contact_rows(p, config=config, run_mates=run_mates)
+    ]
 
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)

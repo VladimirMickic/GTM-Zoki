@@ -70,6 +70,9 @@ def load_denylist(path: str | Path = DENYLIST_FILE) -> set[str]:
     return domains
 
 
+_US_CLAUSE = '(NDAA OR "Blue UAS" OR "made in USA" OR "US-made")'
+
+
 def discover(
     query: str,
     max_companies: int = 10,
@@ -78,9 +81,16 @@ def discover(
     client=None,
     costlog: CostLog | None = None,
     denylist: set[str] | None = None,
+    require_us: bool = False,
 ) -> list[Candidate]:
+    """`require_us` is the only place geography enters the pipeline (2026-07-28). It
+    narrows the *search*, so a US-only run costs the same and the fit rubric downstream
+    stays geography-blind. Off by default: the ICP has no country constraint, only a
+    size one."""
     if denylist is None:
         denylist = load_denylist()
+    if require_us and "ndaa" not in query.lower():
+        query = f"{query} {_US_CLAUSE}"
     results = search(query, num=max(10, max_companies * 4))
     if not results:
         return []

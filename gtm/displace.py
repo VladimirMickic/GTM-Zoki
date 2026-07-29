@@ -15,6 +15,31 @@ import re
 # imports this rather than keeping its own copy.
 _RUGGED_BRANDS = ("pelican", "seahorse", "nanuk", "skb", "hardigg", "explorer case")
 
+# In-house enclosures — the OEM builds and warehouses its own housing for the
+# airframe (a drone-in-a-box dock, a self-tooled hard case). Ordered most
+# specific first; the first match names the label. Detected in 2026-07-28 after
+# run test-batch-1 mislabeled Easy Aerial (a DiB vendor) as having no case
+# situation at all, because only third-party brands were detectable.
+_INHOUSE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"drone[\s-]?in[\s-]?a[\s-]?box", re.IGNORECASE), "drone-in-a-box enclosure"),
+    (re.compile(r"\bdock(?:ing)?\s+station\b", re.IGNORECASE), "docking station"),
+    (re.compile(r"\bbase\s+station\b", re.IGNORECASE), "base station enclosure"),
+    # "ground station" houses the aircraft; "ground CONTROL station" is a
+    # handheld/laptop controller and never matches this pattern.
+    (re.compile(r"\bground\s+station\b", re.IGNORECASE), "base station enclosure"),
+    (
+        re.compile(
+            r"\b(?:our own|its own|their own|in[\s-]house|proprietary|self[\s-]tooled|custom[\s-]molded|"
+            r"custom[\s-]moulded|purpose[\s-]built)\b[^.]{0,60}?\b(?:case|enclosure|housing|container|box)\b",
+            re.IGNORECASE,
+        ),
+        "OEM-built case",
+    ),
+    # An unbranded case that simply ships with the drone: someone tooled it, and
+    # since no third-party brand is named it is the OEM's own supply line.
+    (re.compile(r"\b(?:include[sd]?|ships? (?:with|in)|comes with)\b[^.]{0,40}?\bhard(?:[\s-]shell)?\s+case\b", re.IGNORECASE), "OEM-supplied hard case"),
+)
+
 _MODEL_TOKEN = re.compile(r"\b\d[\dA-Za-z-]*\b")
 # Spec-rating shapes that look like model numbers but aren't — never treat a
 # match as a competitor model number if it also matches one of these.
@@ -57,7 +82,39 @@ def detect_competitor(case_evidence: str) -> str:
     return ""
 
 
-def build_displacement_prompt(company: str, competitor: str) -> str:
+def detect_inhouse_case(case_evidence: str) -> str:
+    """Deterministic detection of an OEM-built enclosure, no LLM call. Returns a
+    short label ("drone-in-a-box enclosure", "docking station", "OEM-built case",
+    ...) or "" when the evidence shows no self-built housing.
+
+    Defers to detect_competitor: if a third-party rugged brand is named in the
+    same evidence string, that case is bought, not built, and the named-brand
+    displacement pitch owns it."""
+    evidence = case_evidence or ""
+    if detect_competitor(evidence):
+        return ""
+    for pattern, label in _INHOUSE_PATTERNS:
+        if pattern.search(evidence):
+            return label
+    return ""
+
+
+def build_displacement_prompt(company: str, competitor: str, *, inhouse: bool = False) -> str:
+    if inhouse:
+        return f"""Research displacement ammo for {company}, who build and ship their own
+{competitor} rather than buying a case from anyone (an OEM in-house enclosure, not a
+third-party product).
+
+This is the harder, higher-value pitch: we are not replacing a competitor's case, we are
+taking over a manufacturing line they run themselves. Use the reddit-find and
+company-research skills — not a single search — to find 2-3 concrete, cited costs or
+complaints about carrying that enclosure in-house: tooling and mold spend, warehousing
+and spares, field failures or damage reports from operators, lead-time or revision pain
+when the airframe changes. Plain English, one line each: "<cost or complaint> — <source/context>".
+
+Reply with ONLY this JSON (no prose), keyed by company name:
+{{"{company}": {{"competitor_weaknesses": ["...", "..."]}}}}"""
+
     return f"""Research displacement ammo for {company}, whose drones currently ship in a
 {competitor} case (a named competitor product, not ours).
 

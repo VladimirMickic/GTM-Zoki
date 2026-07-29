@@ -80,3 +80,29 @@ def test_hunt_specs_drops_blank_entries_from_findings():
     got = hunt_specs("X", [], search=lambda q, num=10: serp, client=FakeClient(dirty))
     assert got.drone_dimensions == []
     assert got.drone_weights == ["4.6 lbs"]
+
+
+def test_hunt_prompt_also_hunts_non_us_procurement_credentials():
+    # Backfilled off the two queries the hunt already pays for — no extra credit.
+    from gtm.spechunt import HUNT_PROMPT
+
+    assert "compliance_evidence" in HUNT_PROMPT
+    assert SpecFindings().compliance_evidence == ""
+    assert "nato" in HUNT_PROMPT.lower()
+
+
+def test_hunt_prompt_hunts_the_enclosure_and_rejects_payload_sentences():
+    from gtm.spechunt import HUNT_PROMPT
+
+    low = HUNT_PROMPT.lower()
+    assert "drone-in-a-box" in low or "drone in a box" in low
+    assert "dock" in low
+    assert "payload" in low
+
+
+def test_spec_queries_look_for_an_oem_enclosure():
+    from gtm.spechunt import build_spec_queries
+
+    queries = " ".join(build_spec_queries("Easy Aerial", ["Sparrow"])).lower()
+    assert "drone-in-a-box" in queries or "drone in a box" in queries
+    assert "dock" in queries or "enclosure" in queries

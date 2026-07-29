@@ -46,6 +46,13 @@ Tier 3 (`drop`) is never drafted.
 trigger: *"Saw {{company_name}}'s {{trigger_event}} — congrats."* No generic greeting, no
 banned opener. The trigger must come from `buying_signals` / `key_news` — never invented.
 
+*No fresh trigger?* Signals older than the recency cutoff are marked `[stale]` and undated
+ones `[undated]` (`gtm/enrich.py`); neither may open an email. Congratulating someone in
+July 2026 on a 2025 certification is the clearest tell of an automated send. When nothing
+fresh exists, drop the congratulation entirely and open on their current setup as an
+observation or a genuine question — *"Your {{airframe_name}} kit travels a lot more than
+most — how is it packed today?"* Stale signals still inform the pitch; they just never lead.
+
 **Block 2 — what we build.** Concrete and specific: foam-fitted to one airframe (aircraft +
 controller + batteries + payload seated together), IP67 / MIL-STD-810H, made in the US.
 Name a mechanism or spec, never a bare comparative. Social proof goes here (see below).
@@ -79,6 +86,11 @@ mode this token exists to prevent (`gtm/draft.py::check_reference_customer` enfo
 Where no reference fits, fall back to category-level only — *"defense sUAS makers we work
 with"* — never a named client or logo written out literally.
 
+The token is filled at output time from `company/outreach.md`
+(`gtm/render.py::pick_reference_customer`), which drops the recipient and every run-mate
+before picking, then falls back to the category phrase. A token with nothing behind it is
+left standing and the row is blocked from the sheet — never sent with the braces showing.
+
 ## Banned phrases / openers
 No generic openers: "I hope this finds you well", "I wanted to reach out", "just checking in".
 No corporate filler: "circle back", "synergy", "game-changer", "solution" (as a noun standing
@@ -101,6 +113,23 @@ drop-test rating, an exact dimension, a cited competitor weakness (`competitor_w
 from `gtm/displace.py`'s research step), or a real operator complaint (`community_signals`).
 Never a bare comparative with nothing behind it: banned — "protects better", "keeps your gear
 safe", "built for reliability" — unless immediately followed by the specific fact that backs it.
+
+## Displacing an in-house enclosure (`oem-inhouse-displacement`)
+Some prospects don't buy a case at all — they build one. A drone-in-a-box dock, a base
+station, a self-molded hard case shipped with every unit (`inhouse_case`, from
+`gtm/displace.py::detect_inhouse_case`). Do **not** write the swap pitch at them: there is
+no Pelican to beat, and "we protect better than your case" reads as an insult to a product
+their own engineers designed.
+
+Pitch the line item instead — they are running a small case factory next to a drone
+factory: tooling and mold spend, a revision every time the airframe changes, spares and
+warehousing, RMA handling on a part that isn't their product. We absorb that; they get
+their engineers back. Credit the enclosure ("your dock is clearly built for the mission") —
+the argument is that owning its manufacture is expensive, not that it's bad.
+
+Never claim a specific in-house cost figure we haven't been told. Cite
+`competitor_weaknesses` (which for this segment holds researched tooling/warehousing/field
+complaints) or say nothing.
 
 ## Persona tailoring (pitch by seniority)
 The `draft` prompt injects the top contact's **persona tier** (from `gtm/persona.py`). Block 3

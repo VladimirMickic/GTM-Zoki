@@ -634,3 +634,64 @@ def test_news_queries_carry_drone_disambiguator():
 
     find_news("Paladin", search=spy)
     assert "drone" in captured[0].lower()
+
+
+# --- 2026-07-28: signal quality gate (run test-batch-1) ---
+# 4 of 9 buying signals were noise: an IDIQ ceiling on a shared multi-award vehicle
+# read as the prospect's own budget, an unawarded SBIR proposal, an equity-analyst
+# price note, and a directory listing. All were 1-2 years old, and one draft opened
+# "congrats" about a 2025 event in a July 2026 email.
+
+
+def test_find_news_drops_the_prospects_own_domain():
+    results = [
+        {"title": "Easy Aerial | Autonomous Drone Systems", "link": "https://easyaerial.com/", "snippet": "our homepage"},
+        {"title": "Easy Aerial wins Air Force contract", "link": "https://defensenews.com/x", "snippet": "award"},
+    ]
+    news = find_news("Easy Aerial", website="https://www.easyaerial.com", search=lambda q, num=10: results)
+    assert len(news) == 1
+    assert "defensenews.com" in news[0]
+
+
+def test_find_news_drops_own_subdomains_too():
+    results = [
+        {"title": "Press release", "link": "https://news.easyaerial.com/pr/1", "snippet": "we announce"},
+        {"title": "Third party", "link": "https://suasnews.com/x", "snippet": "coverage"},
+    ]
+    news = find_news("Easy Aerial", website="https://easyaerial.com", search=lambda q, num=10: results)
+    assert len(news) == 1
+    assert "suasnews.com" in news[0]
+
+
+def test_find_news_without_a_website_keeps_everything():
+    results = [{"title": "T", "link": "https://easyaerial.com/", "snippet": "s"}]
+    assert len(find_news("Easy Aerial", search=lambda q, num=10: results)) == 1
+
+
+def test_signal_prompt_states_todays_date_and_the_recency_cutoff():
+    from datetime import date
+
+    from gtm.enrich import RECENCY_MONTHS
+
+    p = Prospect(company="Red Cat", website="https://redcatholdings.com", key_news=["FANG cleared Blue UAS (url, 2025-03-01)"])
+    prompt = build_signal_prompt(p, today=date(2026, 7, 28))
+    assert "2026-07-28" in prompt
+    assert str(RECENCY_MONTHS) in prompt
+    assert "[stale]" in prompt
+    assert "[undated]" in prompt
+
+
+def test_signal_prompt_rejects_proposals_analyst_notes_and_shared_ceilings():
+    p = Prospect(company="Red Cat", website="https://redcatholdings.com")
+    low = build_signal_prompt(p).lower()
+    assert "proposal" in low          # unawarded bids are not signals
+    assert "price target" in low      # equity-analyst notes are not signals
+    assert "ceiling" in low           # a shared multi-award IDIQ ceiling is not their revenue
+    assert "directory" in low         # profile/listing pages are not news
+
+
+def test_signal_prompt_defaults_to_today_when_no_date_is_passed():
+    from datetime import date
+
+    p = Prospect(company="X", website="https://x.com")
+    assert date.today().isoformat() in build_signal_prompt(p)

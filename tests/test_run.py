@@ -344,7 +344,7 @@ def test_emails_for_prospect_runs_waterfall_per_contact_parallel_order():
         "Blake Resnick": EmailResult(email="blake@brincdrones.com", tier="pattern", status="verified", score=98),
         "Manoj Mohan": EmailResult(),  # total miss
     }
-    emails_for_prospect(p, waterfall_fn=lambda name, domain: results[name])
+    emails_for_prospect(p, waterfall_fn=lambda name, domain, **kw: results[name])
     assert p.contact_emails == "blake@brincdrones.com (verified); -"
 
 
@@ -362,7 +362,7 @@ def test_emails_for_prospect_isolates_a_failing_contact_from_the_rest(tmp_path, 
         contact_name="Blake Resnick; Manoj Mohan", status="priority",
     )
 
-    def flaky(name, domain):
+    def flaky(name, domain, **kw):
         if name == "Blake Resnick":
             raise TimeoutError("provider timed out")
         return EmailResult(email="manoj@brincdrones.com", tier="pattern", status="verified")
@@ -632,7 +632,7 @@ def test_cmd_segment_assigns_and_raises_checkpoint_for_draft_prompts(monkeypatch
     assert "drafts.json" in cp.resume
 
     saved = load_state(tmp_path)
-    assert saved[0].segment == "defense-ndaa-win"  # assigned before the checkpoint fired
+    assert saved[0].segment == "procurement-compliance-win"  # assigned before the checkpoint fired
 
 
 def test_cmd_segment_prints_one_draft_prompt_block_per_distinct_tier(monkeypatch, tmp_path, capsys):
@@ -922,7 +922,7 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
     saved = load_state(tmp_path)
     assert len(saved) == 1
     p = saved[0]
-    assert p.segment == "defense-ndaa-win"  # survived the round-trip from cmd_segment
+    assert p.segment == "procurement-compliance-win"  # survived the round-trip from cmd_segment
     assert p.drafts_by_tier["unknown"].initial_subject == "Case built for the Teal 2?"
     assert p.drafts_by_tier["unknown"].qa_flag == "passed"
 
@@ -1232,3 +1232,90 @@ def test_cmd_redraft_rechecks_pain_grounding(monkeypatch, tmp_path):
 
     saved = load_state(tmp_path)
     assert "asserts a consequence" in saved[0].drafts_by_tier["c-suite"].qa_flag
+
+
+def test_cmd_enrich_prints_inhouse_displacement_prompt_for_an_oem_enclosure(monkeypatch, tmp_path, capsys):
+    # run test-batch-1: Easy Aerial builds its own Drone-in-a-Box housing and got no
+    # displacement prompt at all, because only third-party brands were detectable.
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    _stub_enrich_deps(monkeypatch)
+    prospects = [Prospect(
+        company="Easy Aerial", website="https://easyaerial.com", fit_score=84, status="priority",
+        case_evidence="The Sparrow deploys from a weatherproof Drone-in-a-Box enclosure",
+    )]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending):
+        cmd_enrich("teal-demo-inhouse")
+
+    out = capsys.readouterr().out
+    assert "displacement: drone-in-a-box enclosure" in out
+    assert "tooling" in out.lower()
+
+    saved = load_state(tmp_path)
+    assert saved[0].inhouse_case == "drone-in-a-box enclosure"
+    assert saved[0].competitor == ""  # an OEM build is not a named third-party incumbent
+
+
+def test_emails_for_prospect_passes_alias_domains_to_the_waterfall():
+    # run test-batch-1: Red Cat got 0/3 because only redcatholdings.com was tried,
+    # while their press domain is redcat.red.
+    from gtm.emails import EmailResult
+    from gtm.run import emails_for_prospect
+
+    seen = {}
+
+    def spy(name, domain, **kw):
+        seen["domain"] = domain
+        seen["domains"] = kw.get("domains")
+        return EmailResult(email="j@redcat.red", tier="hunter", status="verified")
+
+    p = Prospect(
+        company="Red Cat Holdings", website="https://redcatholdings.com",
+        contact_name="Jeff Thompson", status="priority",
+        key_news=["Red Cat press release — (https://news.redcat.red/pr/12)"],
+    )
+    emails_for_prospect(p, waterfall_fn=spy)
+    assert seen["domain"] == "redcatholdings.com"
+    assert "redcat.red" in seen["domains"]
+
+
+def test_emails_for_prospect_shows_a_config_gap_instead_of_a_bare_miss():
+    from gtm.emails import EmailResult
+    from gtm.run import emails_for_prospect
+
+    p = Prospect(company="Red Cat", website="https://redcatholdings.com",
+                 contact_name="Jeff Thompson", status="priority")
+    emails_for_prospect(p, waterfall_fn=lambda name, domain, **kw: EmailResult(status="no-finder-key"))
+    assert p.contact_emails == "- (no-finder-key)"
+
+
+def test_cmd_output_reports_rows_blocked_by_the_render_gate(monkeypatch, tmp_path, capsys):
+    # Run test-batch-1 pushed literal {{tokens}} to the live Sheet with no warning.
+    # The gate now blanks those rows — and must say it did.
+    import gtm.run as run_mod
+    from gtm.schema import DraftSet
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    prospects = [Prospect(
+        company="Red Cat", website="https://redcatholdings.com", fit_score=87, status="priority",
+        contact_name="Jeff Thompson", contact_title="CEO",
+        drafts_by_tier={"c-suite": DraftSet(initial_body="Hi {{first_name}} — {{sender_name}}")},
+    )]
+    save_state(prospects, tmp_path)
+
+    cmd_output("ignored", dry_run=True)
+
+    out = capsys.readouterr().out
+    assert "1 contact row blocked" in out
+    assert "company/outreach.md" in out
+
+
+def test_cmd_output_says_nothing_about_the_gate_when_every_row_renders(monkeypatch, tmp_path, capsys):
+    calls = _setup_output_run(monkeypatch, tmp_path)  # noqa: F841 — fixture side effects
+
+    cmd_output("ignored", dry_run=True)
+
+    assert "blocked" not in capsys.readouterr().out

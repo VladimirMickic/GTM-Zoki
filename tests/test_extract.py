@@ -114,3 +114,34 @@ def test_extraction_captures_case_evidence_field():
     low = SYSTEM_PROMPT.lower()
     assert "case_evidence" in SYSTEM_PROMPT
     assert "ship" in low  # what do they ship/pack the drone in
+
+
+def test_extraction_captures_non_us_compliance_evidence():
+    # 2026-07-28: geography stopped being an ICP constraint, so the procurement story
+    # for a non-US maker (NATO stock number, national MoD framework, EASA type cert)
+    # needs somewhere to land — us_made_ndaa alone scored every foreign company 0.
+    from gtm.extract import DroneExtraction, SYSTEM_PROMPT
+
+    assert DroneExtraction().compliance_evidence == ""
+    assert "compliance_evidence" in SYSTEM_PROMPT
+    low = SYSTEM_PROMPT.lower()
+    assert "nato" in low
+    assert "easa" in low
+
+
+def test_extract_prompt_does_not_frame_foreign_manufacture_as_a_negative():
+    from gtm.extract import SYSTEM_PROMPT
+
+    assert "equally good prospect" in SYSTEM_PROMPT
+
+
+def test_case_evidence_prompt_hunts_the_enclosure_and_rejects_payload_sentences():
+    # run test-batch-1: Easy Aerial's case_evidence came back "The Sparrow drone is
+    # backpack-portable and can carry a 5 lb. payload." — a payload spec, while the
+    # company's own Drone-in-a-Box housing went unrecorded.
+    from gtm.extract import SYSTEM_PROMPT
+
+    low = SYSTEM_PROMPT.lower()
+    assert "drone-in-a-box" in low or "drone in a box" in low
+    assert "dock" in low
+    assert "payload" in low  # explicitly named as NOT case evidence

@@ -89,3 +89,85 @@ def test_icp_uses_displacement_opportunity_not_upgrade_gap():
     lowered = text.lower()
     assert "upgrade gap" not in lowered
     assert "upgrade-gap" not in lowered
+
+
+# --- 2026-07-28: size is the only hard constraint; geography is not a constraint ---
+# Live test-batch-1 review found the rubric handed 15 points to every US company and 0
+# to every non-US one — a geography bias, not a business signal.
+
+
+def test_oversize_airframe_is_disqualified():
+    # Heavy-lift ag sprayer: nothing this maker publishes fits AV-Convoy (40x24x16 in).
+    ex = DroneExtraction(
+        drone_models=["AgHawk 60"], drone_dimensions=["58 x 52 x 30 in folded"]
+    )
+    dq = check_disqualifiers(ex)
+    assert dq is not None and "oversize" in dq
+    assert "AV-Convoy" in dq
+
+
+def test_oversize_check_uses_the_smallest_airframe_that_fits():
+    # A maker with one huge fixed-wing AND a pocketable quad is still a prospect for
+    # the quad — one oversize model must not drop the whole company.
+    ex = DroneExtraction(
+        drone_models=["Titan", "Sparrow"],
+        drone_dimensions=["120 x 90 x 40 in", "13.7 x 9.8 x 3.5 in folded"],
+    )
+    assert check_disqualifiers(ex) is None
+
+
+def test_oversize_check_converts_metric_dimensions():
+    # 1200 x 900 x 400 mm = 47.2 x 35.4 x 15.7 in — over on two axes.
+    ex = DroneExtraction(drone_models=["EU-Lift"], drone_dimensions=["1200 x 900 x 400 mm"])
+    assert "oversize" in check_disqualifiers(ex)
+    # 500 x 350 x 200 mm = 19.7 x 13.8 x 7.9 in — comfortably inside AV-Field.
+    ex_ok = DroneExtraction(drone_models=["EU-Scout"], drone_dimensions=["500 × 350 × 200 mm"])
+    assert check_disqualifiers(ex_ok) is None
+
+
+def test_unitless_dimensions_never_disqualify():
+    # "685 x 385 x 175" is almost certainly mm, but if it were inches we'd drop a good
+    # prospect on a guess. A false drop is the expensive error — defer to Claude.
+    ex = DroneExtraction(drone_models=["Ambiguous"], drone_dimensions=["685 x 385 x 175"])
+    assert check_disqualifiers(ex) is None
+
+
+def test_unfolded_dimensions_are_ignored_for_the_size_bound():
+    # The ICP's limit is on the folded/packed footprint; rotors-out span is not it.
+    ex = DroneExtraction(
+        drone_models=["Osprey"], drone_dimensions=["48 x 48 x 20 in unfolded"]
+    )
+    assert check_disqualifiers(ex) is None
+
+
+def test_foreign_manufacturer_is_never_disqualified():
+    ex = DroneExtraction(
+        company_description="German maker of inspection sUAS",
+        drone_weights=["3.1 kg"],
+        drone_dimensions=["18 x 12 x 7 in folded"],
+        us_made_ndaa=False,
+        hq_country="Germany",
+    )
+    assert check_disqualifiers(ex) is None
+
+
+def test_fit_prompt_states_geography_is_not_scored():
+    ex = DroneExtraction(us_made_ndaa=False, hq_country="Norway")
+    prompt = build_fit_prompt("ICP", "NordUAS", ex)
+    assert "Geography is NOT a scoring factor" in prompt
+    assert "Norway" in prompt
+    assert "never deduct" in prompt.lower()
+
+
+def test_fit_prompt_carries_non_us_compliance_evidence():
+    ex = DroneExtraction(compliance_evidence="NATO stock number, Bundeswehr framework")
+    prompt = build_fit_prompt("ICP", "NordUAS", ex)
+    assert "NATO stock number, Bundeswehr framework" in prompt
+    # ...and says so explicitly when there is none, so the 0-3 band can bite.
+    assert "none found" in build_fit_prompt("ICP", "X", DroneExtraction())
+
+
+def test_icp_scores_procurement_fit_not_us_origin():
+    text = Path("company/ICP.md").read_text()
+    assert "Procurement & compliance fit" in text
+    assert "| US-made / NDAA / defense/gov buyers | 15 |" not in text
