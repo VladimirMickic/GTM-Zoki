@@ -12,6 +12,13 @@ of these (even under caveman/terse mode — compress wording, never drop a fact)
 Fires once at session start only — no real wake-word/background listener in Claude Code,
 "hey zoki" typed mid-conversation is just a normal message, not a re-trigger.
 
+**Challenge vague asks.** A request like "find me 3 drone companies" has no region —
+ask before writing the brief/running discover (`gtm/discover.py` has no region field to
+fall back on, and a Serper credit spent on the wrong geography is wasted). Ask, don't
+assume, when a request is missing: region, count, or segment (e.g. defense vs
+industrial/survey). Don't ask when the brief/URLs already specify it, or the user has
+already answered in this conversation.
+
 ## How we build
 - **Vertical slices**: one stage fully built + tested before the next. Never build-all-then-test.
 - **Credit-efficient**: CLI-first; `gpt-4o-mini` for bulk extraction, Claude for judgment;
