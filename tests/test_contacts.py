@@ -305,3 +305,153 @@ def test_contact_query_disambiguates_generic_company_names():
     q = build_contact_query("Paladin")
     assert 'site:linkedin.com/in "Paladin"' in q
     assert "drone" in q.lower()
+
+
+# --- 2026-07-30 (us-drone-19 live-sheet audit) -------------------------------
+# The run shipped contacts who do not work at the target company, with
+# qa_flag="passed": Cleo Robotics got "Nicole Poltorak - Founder | AI, Emotion &
+# Human Systems" and "Ruming Z. - Startup Founder | YC, Tesla, Stanford" (neither
+# is at Cleo), Harris Aerial got "John Apkarian - Director of Drone Technology |
+# Darley" (Darley is a different company). Every filter in this module was
+# NEGATIVE — drop known-bad shapes — so a profile that merely mentions the company
+# somewhere passed by default. These tests add the positive check.
+
+
+def test_employer_segment_verifies_the_contact():
+    """"Name - Title - Company | LinkedIn" is the canonical LinkedIn SERP shape and
+    its third segment is the employer. It was parsed and thrown away."""
+    c = parse_linkedin_result(
+        "George Matus - Founder & CTO - Teal Drones | LinkedIn",
+        "https://www.linkedin.com/in/georgematus",
+        "Teal Drones",
+    )
+    assert c.verified is True
+
+
+def test_no_employer_segment_leaves_the_contact_unverified():
+    """The live Cleo rows: two-segment titles, nothing tying them to the company."""
+    c = parse_linkedin_result(
+        "Nicole Poltorak - Founder | AI, Emotion & Human Systems",
+        "https://www.linkedin.com/in/nicolepoltorak",
+        "Cleo Robotics",
+    )
+    assert c.verified is False
+
+
+def test_employer_segment_naming_someone_else_is_not_verified():
+    c = parse_linkedin_result(
+        "John Apkarian - Director of Drone Technology - Darley | LinkedIn",
+        "https://www.linkedin.com/in/apkarianjohn",
+        "Harris Aerial",
+    )
+    assert c.verified is False
+
+
+def test_truncated_employer_segment_still_verifies():
+    """Serper truncates: "Neros ..." is all that survives of "Neros Technologies"."""
+    c = parse_linkedin_result(
+        "Clayton Calk - Head of Mission Success - Neros ... | LinkedIn",
+        "https://www.linkedin.com/in/claytoncalk",
+        "Neros Technologies",
+    )
+    assert c.verified is True
+
+
+def test_snippet_verifies_when_the_title_has_no_employer_segment():
+    """Fallback so a two-segment title does not auto-flag everyone: the SERP snippet
+    is the profile blurb, and the company appearing there is real evidence."""
+    c = parse_linkedin_result(
+        "Adam Mohamed - CTO, Co-Founder",
+        "https://www.linkedin.com/in/adamohamed",
+        "Asylon",
+        snippet="Adam Mohamed. CTO, Co-Founder at Asylon. Philadelphia, Pennsylvania.",
+    )
+    assert c.verified is True
+
+
+def test_snippet_naming_no_company_does_not_verify():
+    c = parse_linkedin_result(
+        "Ruming Z. - Startup Founder | YC, Tesla, Stanford",
+        "https://www.linkedin.com/in/zhenruming",
+        "Cleo Robotics",
+        snippet="Startup Founder | YC, Tesla, Stanford. San Francisco Bay Area.",
+    )
+    assert c.verified is False
+
+
+def test_engineering_is_excluded_like_engineer():
+    """\\bengineer\\b never matched "Engineering" — Asylon's "Director of Platform
+    Engineering" shipped past an exclusion list that names engineers as never-targets."""
+    from gtm.contacts import Contact, _is_excluded
+
+    for title in ("Director of Platform Engineering", "VP Engineering", "Engineering Manager"):
+        assert _is_excluded(Contact(name="x", title=title)) is True, title
+
+
+def test_find_contacts_keeps_unverified_contacts_but_marks_them():
+    """Flag and block, not drop: an unverified contact may still be the right person,
+    and a human reads the flag. Dropping would hide the only lead at a passing company."""
+    serp = [
+        {"title": "Val Vee - VP of Operations - Teal Drones | LinkedIn", "link": "https://linkedin.com/in/vv"},
+        {"title": "Mystery Person - Director of Ops", "link": "https://linkedin.com/in/mp"},
+    ]
+    contacts = find_contacts("Teal Drones", search=lambda q, num=10: serp)
+    by_name = {c.name: c for c in contacts}
+    assert set(by_name) == {"Val Vee", "Mystery Person"}
+    assert by_name["Val Vee"].verified is True
+    assert by_name["Mystery Person"].verified is False
+
+
+def test_top_contact_flags_parallels_top_contact_fields():
+    from gtm.contacts import Contact, top_contact_fields, top_contact_flags
+
+    contacts = [
+        Contact(name="Bob Lee", title="CEO", linkedin="https://li.com/in/bob", verified=True),
+        Contact(name="Jane Smith", title="VP Operations", linkedin="https://li.com/in/jane"),
+        Contact(name="Dave Derry", title="Production Manager", linkedin="https://li.com/in/dave", verified=True),
+        Contact(name="Ann Extra", title="Director", linkedin="https://li.com/in/ann", verified=True),
+    ]
+    names, _, _ = top_contact_fields(contacts)
+    flags = top_contact_flags(contacts)
+    # same slice, same order, same length — the sheet reads these by index
+    assert names.split("; ") == ["Bob Lee", "Jane Smith", "Dave Derry"]
+    assert flags.split("; ") == ["yes", "no", "yes"]
+    assert top_contact_flags([]) == ""
+
+
+def test_pipe_suffix_naming_another_company_beats_the_snippet():
+    """Live re-check 2026-07-30: the snippet fallback VERIFIED "John Apkarian -
+    Director of Drone Technology | Darley" against Harris Aerial, because a profile
+    that turns up in a Harris Aerial search naturally mentions Harris Aerial. A
+    headline pipe-tail is ambiguous — "| Darley" is an employer, "| AI, Emotion &
+    Human Systems" is a topic list — so it cannot DROP the contact, but it is more
+    than enough to withhold trust that the weaker snippet signal was granting."""
+    c = parse_linkedin_result(
+        "John Apkarian - Director of Drone Technology | Darley",
+        "https://www.linkedin.com/in/apkarianjohn",
+        "Harris Aerial",
+        snippet="John Apkarian. Director of Drone Technology at Darley. Harris Aerial H6 dealer.",
+    )
+    assert c.verified is False
+    assert c.name == "John Apkarian"  # kept for review, not dropped
+
+
+def test_pipe_suffix_naming_our_own_company_still_verifies():
+    c = parse_linkedin_result(
+        "Ada Lovelace - VP of Operations | Teal Drones",
+        "https://www.linkedin.com/in/ada",
+        "Teal Drones",
+        snippet="VP of Operations at Teal Drones.",
+    )
+    assert c.verified is True
+
+
+def test_employer_segment_outranks_a_pipe_tail():
+    """The third " - " segment is the SERP's own company field — authoritative. A
+    pipe inside the headline does not override it."""
+    c = parse_linkedin_result(
+        "Val Vee - VP of Operations | Drones, Robotics - Teal Drones | LinkedIn",
+        "https://www.linkedin.com/in/vv",
+        "Teal Drones",
+    )
+    assert c.verified is True

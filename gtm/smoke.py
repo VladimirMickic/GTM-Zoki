@@ -5,7 +5,7 @@ Standalone judgment for fit scoring. Mirrors the extract() pattern.
 from pydantic import BaseModel
 
 from gtm.brief import Brief, freeze_brief
-from gtm.contacts import find_contacts, top_contact_fields
+from gtm.contacts import find_contacts, top_contact_fields, top_contact_flags
 from gtm.control import writes_enabled
 from gtm.enrich import enrich
 from gtm.extract import DroneExtraction
@@ -94,6 +94,7 @@ def run_smoke(url: str, *, live: bool = False, run: str = "smoke") -> Prospect:
         contacts = find_contacts(p.company)
         if contacts:
             p.contact_name, p.contact_title, p.contact_linkedin = top_contact_fields(contacts)
+            p.contact_verified = top_contact_flags(contacts)
 
         print(f"[smoke] emails — {p.company}")
         emails_for_prospect(p)

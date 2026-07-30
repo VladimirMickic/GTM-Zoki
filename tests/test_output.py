@@ -673,3 +673,67 @@ def test_blocked_row_tokens_names_the_tokens_that_actually_blocked():
     assert not any(t in OUTREACH_TOKENS for t in blocked_row_tokens([airframe], config=filled))
     assert blocked_row_tokens([sender], config=OutreachConfig()) == ["{{sender_name}}"]
     assert blocked_row_tokens([], config=filled) == []
+
+
+# --- 2026-07-30 (us-drone-19 live-sheet audit) -------------------------------
+# Contacts who do not work at the target company reached the send-ready Contacts
+# tab with qa_flag="passed". gtm/contacts.py now records whether the SERP actually
+# tied each person to the company; this is the gate that acts on it.
+
+
+def test_unverified_contact_is_blocked_and_says_why():
+    p = MULTI.model_copy(update={"contact_verified": "yes; no; yes"})
+    rows = build_contact_rows(p)
+    assert "unverified-contact" in rows[1]["qa_flag"]
+    assert "Manoj Mohan" in rows[1]["qa_flag"]
+    assert "Teal Drones" in rows[1]["qa_flag"]
+    # blocked means the copy does not ship, same gate as an unrendered token
+    assert rows[1]["draft_initial_subject"] == ""
+    assert rows[1]["draft_initial_body"] == ""
+    assert rows[1]["draft_initial_subject_alt"] == ""
+    assert rows[1]["draft_initial_body_alt"] == ""
+    # the person is still on the sheet to be reviewed, not silently deleted
+    assert rows[1]["contact_name"] == "Manoj Mohan"
+    assert rows[1]["contact_linkedin"] == "https://linkedin.com/in/manoj"
+
+
+def test_verified_contacts_ship_normally():
+    p = MULTI.model_copy(update={"contact_verified": "yes; no; yes"})
+    rows = build_contact_rows(p)
+    assert "unverified-contact" not in rows[0]["qa_flag"]
+    assert rows[0]["draft_initial_body"]
+    assert "unverified-contact" not in rows[2]["qa_flag"]
+
+
+def test_missing_verification_data_does_not_block_anything():
+    """Runs enriched before this check exists have an empty contact_verified. Absent
+    evidence is not negative evidence — blocking them all would wipe historical runs."""
+    rows = build_contact_rows(MULTI)  # no contact_verified set
+    assert all("unverified-contact" not in r["qa_flag"] for r in rows)
+    assert rows[0]["draft_initial_body"]
+
+
+def test_unverified_flag_composes_with_the_unrendered_gate():
+    p = MULTI.model_copy(
+        update={
+            "contact_verified": "no; yes; yes",
+            "drafts_by_tier": {
+                "c-suite": DraftSet(
+                    initial_subject="s", initial_body="Hi {{nickname}}",
+                    initial_subject_alt="s2", initial_body_alt="b2",
+                )
+            },
+        }
+    )
+    row = build_contact_rows(p)[0]
+    # unrendered_summary() keys off this prefix — it stays first
+    assert row["qa_flag"].startswith("unrendered:")
+    assert "unverified-contact" in row["qa_flag"]
+
+
+def test_unverified_summary_counts_the_blocked_rows():
+    from gtm.output import unverified_summary
+
+    p = MULTI.model_copy(update={"contact_verified": "yes; no; no"})
+    assert unverified_summary([p]) == 2
+    assert unverified_summary([MULTI]) == 0

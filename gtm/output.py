@@ -150,6 +150,9 @@ def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list
         prospect.contact_linkedin.split(CONTACT_FIELD_SEP) if prospect.contact_linkedin else []
     )
     emails = prospect.contact_emails.split(CONTACT_FIELD_SEP) if prospect.contact_emails else []
+    verifieds = (
+        prospect.contact_verified.split(CONTACT_FIELD_SEP) if prospect.contact_verified else []
+    )
 
     rows = []
     for i, name in enumerate(names):
@@ -202,6 +205,19 @@ def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list
                 row[field] = ""
             # Stays first: unrendered_summary() and cmd_output key off this prefix.
             flags.append(f"unrendered: {', '.join(survivors)}")
+        # Second ship gate: the SERP never tied this person to this company. Run
+        # us-drone-19 put two strangers on Cleo Robotics and one Darley employee on
+        # Harris Aerial, all reading qa_flag="passed" on the live sheet. Blocks like
+        # the token gate (copy blanked, row kept for review) because the person may
+        # still be right — but nobody should be able to send to them by accident.
+        # An empty cell means the run predates the check: no data, so no block.
+        if i < len(verifieds) and verifieds[i].strip().lower() == "no":
+            for field in _DRAFT_ROW_FIELDS:
+                row[field] = ""
+            flags.append(
+                f"unverified-contact: nothing ties {name or 'this contact'} to "
+                f"{prospect.company} — confirm before sending"
+            )
         # A shared inbox is deliverable and sometimes the only way in, so this warns
         # rather than blanking the copy — whether to send a first-name email to a
         # staffed inbox is a human call, and the flag is how they get to make it.
@@ -225,6 +241,20 @@ def unrendered_summary(prospects: list[Prospect], *, config=None) -> int:
         if p.status != "drop"
         for row in build_contact_rows(p, config=config, run_mates=run_mates)
         if row["qa_flag"].startswith("unrendered:")
+    )
+
+
+def unverified_summary(prospects: list[Prospect], *, config=None) -> int:
+    """How many contact rows this run blocked for unproven company membership.
+    Counted separately from unrendered_summary: that one means "we had no data to
+    render", this one means "we had data and do not trust who it is about"."""
+    run_mates = [p.company for p in prospects]
+    return sum(
+        1
+        for p in prospects
+        if p.status != "drop"
+        for row in build_contact_rows(p, config=config, run_mates=run_mates)
+        if "unverified-contact:" in row["qa_flag"]
     )
 
 

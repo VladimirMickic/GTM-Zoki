@@ -360,7 +360,7 @@ def cmd_fit(run: str, fit_json: str) -> None:
 
 
 def cmd_enrich(run: str) -> None:
-    from gtm.contacts import find_contacts, top_contact_fields
+    from gtm.contacts import find_contacts, top_contact_fields, top_contact_flags
     from gtm.displace import build_displacement_prompt, detect_competitor, detect_inhouse_case
     from gtm.enrich import build_signal_prompt, enrich
 
@@ -375,6 +375,7 @@ def cmd_enrich(run: str) -> None:
                 contacts = find_contacts(p.company)
                 if contacts:
                     p.contact_name, p.contact_title, p.contact_linkedin = top_contact_fields(contacts)
+                    p.contact_verified = top_contact_flags(contacts)
                 # case_evidence only — never community_signals. competitor is asserted
                 # as fact downstream ("{company} currently ships in a {competitor} case",
                 # gtm/draft.py), and community_signals cannot support that: the
@@ -564,6 +565,7 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         push_contacts_to_sheet,
         push_to_sheet,
         unrendered_summary,
+        unverified_summary,
         write_contacts_csv,
         write_csv,
     )
@@ -580,6 +582,13 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         nc = write_contacts_csv(prospects, contacts_csv_path)
         print(f"wrote {n} prospects → {csv_path}")
         print(f"wrote {nc} contacts → {contacts_csv_path}")
+        unverified = unverified_summary(prospects)
+        if unverified:
+            print(
+                f"{unverified} contact row{'s' if unverified > 1 else ''} blocked from send — "
+                "nothing in the SERP ties that person to that company (see each row's "
+                "qa_flag); confirm on LinkedIn before sending"
+            )
         blocked = unrendered_summary(prospects)
         if blocked:
             tokens = blocked_row_tokens(prospects)

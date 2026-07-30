@@ -147,6 +147,10 @@ class Prospect(BaseModel):
     contact_title: str = ""
     contact_linkedin: str = ""
     contact_emails: str = ""  # "email (status)" per contact, parallel to contact_name; "-" = miss
+    # "yes"/"no" per contact, parallel to contact_name — did the SERP tie this person
+    # to THIS company (gtm/contacts.py::Contact.verified)? Empty = the run was enriched
+    # before the check existed; gtm/output.py treats that as "no data", not as "no".
+    contact_verified: str = ""
     buying_signals: list[str] = []
     key_news: list[str] = []
     linkedin: str = ""
