@@ -161,3 +161,76 @@ def test_getprospect_verify_none_on_unrecognized_status(monkeypatch):
     monkeypatch.setattr("gtm.email_providers.requests.get", lambda *a, **k: R())
     monkeypatch.setenv("GETPROSPECT_API_KEY", "x")
     assert GetProspectProvider().verify("a@b.com") is None
+
+
+# --- credit accounting -------------------------------------------------------
+# 2026-07-30 (user): the email waterfall was the one stage whose spend never
+# reached a run's cost line. Every vendor free tier meters per call, so a call
+# attempted is a credit burned — a miss costs the same as a hit.
+
+import pytest
+
+from gtm.costlog import CostLog
+
+
+@pytest.fixture
+def armed(tmp_path, monkeypatch):
+    import gtm.email_providers as ep
+
+    log = CostLog(tmp_path / "cost.jsonl")
+    ep.set_active_costlog(log)
+    yield log
+    ep.set_active_costlog(None)
+
+
+def _ok(payload, status_code=200):
+    class R:
+        def __init__(self):
+            self.status_code = status_code
+        def raise_for_status(self): pass
+        def json(self): return payload
+    return lambda *a, **k: R()
+
+
+def test_hunter_call_charges_one_credit(armed, monkeypatch):
+    monkeypatch.setattr("gtm.email_providers.requests.get", _ok({"data": {"status": "valid", "score": 9}}))
+    monkeypatch.setenv("HUNTER_API_KEY", "x")
+    HunterProvider().verify("a@b.com")
+    assert armed.by_provider()["hunter"]["credits"] == 1
+
+
+def test_a_miss_still_costs_a_credit(armed, monkeypatch):
+    monkeypatch.setattr("gtm.email_providers.requests.get", _ok({}, status_code=404))
+    monkeypatch.setenv("HUNTER_API_KEY", "x")
+    assert HunterProvider().verify("a@b.com") is None
+    assert armed.by_provider()["hunter"]["credits"] == 1
+
+
+def test_an_unconfigured_vendor_is_never_charged(armed, monkeypatch):
+    monkeypatch.delenv("HUNTER_API_KEY", raising=False)
+    monkeypatch.delenv("PROSPEO_API_KEY", raising=False)
+    assert HunterProvider().verify("a@b.com") is None
+    assert ProspeoProvider().find("a", "b", "b.com") is None
+    assert armed.by_provider() == {}
+
+
+def test_every_vendor_charges_under_its_own_name(armed, monkeypatch):
+    monkeypatch.setattr("gtm.email_providers.requests.get", _ok({"error_code": 0, "Status": "Valid", "catch_all": "false"}))
+    monkeypatch.setattr("gtm.email_providers.requests.post", _ok({"person": {"email": {"email": "a@b.com", "status": "VERIFIED"}}}))
+    for var in ("MYEMAILVERIFIER_API_KEY", "ABSTRACT_API_KEY", "GETPROSPECT_API_KEY", "PROSPEO_API_KEY"):
+        monkeypatch.setenv(var, "x")
+    MyEmailVerifierProvider().verify("a@b.com")
+    AbstractProvider().verify("a@b.com")
+    GetProspectProvider().verify("a@b.com")
+    ProspeoProvider().find("a", "b", "b.com")
+    charged = {p: b["credits"] for p, b in armed.by_provider().items()}
+    assert charged == {"myemailverifier": 1, "abstract": 1, "getprospect": 1, "prospeo": 1}
+
+
+def test_no_active_costlog_means_no_accounting_and_no_crash(monkeypatch):
+    import gtm.email_providers as ep
+
+    ep.set_active_costlog(None)
+    monkeypatch.setattr("gtm.email_providers.requests.get", _ok({"data": {"status": "valid"}}))
+    monkeypatch.setenv("HUNTER_API_KEY", "x")
+    assert HunterProvider().verify("a@b.com") == {"status": "valid", "score": None}

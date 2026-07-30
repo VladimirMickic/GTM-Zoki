@@ -11,6 +11,7 @@ from gtm.run import (
     cmd_draft,
     cmd_enrich,
     cmd_fit,
+    cmd_learn,
     cmd_output,
     cmd_redraft,
     cmd_segment,
@@ -1373,3 +1374,41 @@ def test_cmd_output_says_nothing_about_the_gate_when_every_row_renders(monkeypat
     cmd_output("ignored", dry_run=True)
 
     assert "blocked" not in capsys.readouterr().out
+
+
+def test_cmd_learn_prints_nothing_to_do_when_no_feedback_file(monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "FEEDBACK", tmp_path / "feedback.jsonl")
+    cmd_learn()
+    assert "no feedback yet" in capsys.readouterr().out
+
+
+def test_cmd_learn_separates_user_feedback_from_session_notes(monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+    from gtm.learn import record_feedback
+
+    path = tmp_path / "feedback.jsonl"
+    monkeypatch.setattr(run_mod, "FEEDBACK", path)
+    record_feedback(path, date="2026-07-30", run="r1", company="Cleo", feedback="wrong contacts shipped")
+    record_feedback(path, date="2026-07-30", run="r1", company="-", feedback="smoke test note", origin="session")
+
+    cmd_learn()
+    out = capsys.readouterr().out
+    assert "1 from the user" in out
+    assert "propose ICP/denylist edits from these only" in out
+    assert "wrong contacts shipped" in out
+    assert "1 session/smoke-test notes" in out
+    assert "smoke test note" in out
+
+
+def test_cmd_learn_says_no_edit_should_be_proposed_when_nothing_is_user_sourced(monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+    from gtm.learn import record_feedback
+
+    path = tmp_path / "feedback.jsonl"
+    monkeypatch.setattr(run_mod, "FEEDBACK", path)
+    record_feedback(path, date="2026-07-30", run="r1", company="-", feedback="dev note", origin="session")
+
+    cmd_learn()
+    assert "no ICP/denylist edit should be proposed" in capsys.readouterr().out

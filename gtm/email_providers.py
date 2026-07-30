@@ -31,6 +31,27 @@ def finder_keys_configured() -> bool:
     return any(os.environ.get(var) for var in FINDER_KEY_VARS)
 
 
+# Ambient per-run CostLog, same hook as gtm/contacts.py's serper accounting: the CLI
+# stage arms it once (gtm/run.py::run_costlog) and every vendor call charges itself,
+# rather than threading a costlog through EmailProvider.verify/find and breaking the
+# protocol every adapter implements. None = no accounting (the default; unit tests
+# that fake `requests` and never arm it stay silent).
+_active_costlog = None
+
+
+def set_active_costlog(costlog) -> None:
+    global _active_costlog
+    _active_costlog = costlog
+
+
+def _charge(provider: str) -> None:
+    """One credit for one call ATTEMPTED — every vendor's free tier meters requests,
+    so a 404 miss costs exactly what a hit costs. Called after the API-key check and
+    before the request: an unconfigured vendor makes no call and owes nothing."""
+    if _active_costlog is not None:
+        _active_costlog.record_vendor(provider=provider, stage="emails")
+
+
 class EmailProvider(Protocol):
     name: str
 
@@ -53,6 +74,7 @@ class HunterProvider:
         api_key = os.environ.get("HUNTER_API_KEY")
         if not api_key:  # no key configured — can't answer, let the next provider try
             return None
+        _charge(self.name)
         resp = requests.get(url, params=params, headers={"X-API-KEY": api_key}, timeout=20)
         if resp.status_code in _MISS_STATUS_CODES:
             return None
@@ -98,6 +120,7 @@ class MyEmailVerifierProvider:
         api_key = os.environ.get("MYEMAILVERIFIER_API_KEY")
         if not api_key:  # no key configured — can't answer, let the next provider try
             return None
+        _charge(self.name)
         resp = requests.get(
             MYEMAILVERIFIER_URL, params={"apikey": api_key, "email": email}, timeout=20
         )
@@ -135,6 +158,7 @@ class AbstractProvider:
         api_key = os.environ.get("ABSTRACT_API_KEY")
         if not api_key:  # no key configured — can't answer, let the next provider try
             return None
+        _charge(self.name)
         resp = requests.get(
             ABSTRACT_URL, params={"api_key": api_key, "email": email}, timeout=20
         )
@@ -199,6 +223,7 @@ class GetProspectProvider:
         api_key = os.environ.get("GETPROSPECT_API_KEY")
         if not api_key:  # no key configured — can't answer, let the next provider try
             return None
+        _charge(self.name)
         resp = requests.get(url, params=params, headers={"apiKey": api_key}, timeout=20)
         if resp.status_code != 200:
             return None
@@ -254,6 +279,7 @@ class ProspeoProvider:
         api_key = os.environ.get("PROSPEO_API_KEY")
         if not api_key:  # no key configured — can't answer, let the next provider try
             return None
+        _charge(self.name)
         resp = requests.post(
             PROSPEO_ENRICH_URL,
             json={

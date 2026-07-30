@@ -218,6 +218,18 @@ def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list
                 f"unverified-contact: nothing ties {name or 'this contact'} to "
                 f"{prospect.company} — confirm before sending"
             )
+        # Third ship gate: no draft was ever written for this contact's persona
+        # tier. us-drone-19 re-ran contact discovery after the draft stage and
+        # picked up Dan Lombino, whose tier had no DraftSet — his row shipped with
+        # every copy cell blank and qa_flag="", which reads on the sheet exactly
+        # like "we had nothing to say about him". A draft that is deliberately
+        # blank carries its own explanation already (gtm/draft.py::NO_DRAFT_FLAG),
+        # so only an unexplained blank is flagged.
+        if not draft.initial_subject and not draft.initial_body and not draft.qa_flag:
+            flags.append(
+                f"no-draft: {name or 'this contact'}'s title classified persona tier "
+                f"'{tier}' and the draft stage wrote none for it — re-run draft"
+            )
         # A shared inbox is deliverable and sometimes the only way in, so this warns
         # rather than blanking the copy — whether to send a first-name email to a
         # staffed inbox is a human call, and the flag is how they get to make it.
@@ -255,6 +267,21 @@ def unverified_summary(prospects: list[Prospect], *, config=None) -> int:
         if p.status != "drop"
         for row in build_contact_rows(p, config=config, run_mates=run_mates)
         if "unverified-contact:" in row["qa_flag"]
+    )
+
+
+def no_draft_summary(prospects: list[Prospect], *, config=None) -> int:
+    """How many contact rows carry no email copy because their persona tier has no
+    draft. Third of the three gate counters — the other two mean "we could not
+    render it" and "we do not trust who it is about"; this one means the draft
+    stage simply never ran for that tier."""
+    run_mates = [p.company for p in prospects]
+    return sum(
+        1
+        for p in prospects
+        if p.status != "drop"
+        for row in build_contact_rows(p, config=config, run_mates=run_mates)
+        if "no-draft:" in row["qa_flag"]
     )
 
 

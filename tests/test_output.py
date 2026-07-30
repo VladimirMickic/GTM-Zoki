@@ -455,7 +455,8 @@ def test_build_contact_rows_blank_draft_when_no_matching_or_unknown_tier():
     p = MULTI.model_copy(update={"drafts_by_tier": {}})
     rows = build_contact_rows(p)
     assert all(r["draft_initial_subject"] == "" for r in rows)
-    assert all(r["qa_flag"] == "" for r in rows)
+    # 2026-07-30: a blank draft is no longer silent — the no-draft gate says why.
+    assert all(r["qa_flag"].startswith("no-draft:") for r in rows)
 
 
 def test_build_contact_rows_merges_first_name_per_row():
@@ -737,3 +738,61 @@ def test_unverified_summary_counts_the_blocked_rows():
     p = MULTI.model_copy(update={"contact_verified": "yes; no; no"})
     assert unverified_summary([p]) == 2
     assert unverified_summary([MULTI]) == 0
+
+
+# --- third ship gate: a contact whose persona tier never got a draft ----------
+# us-drone-19 (2026-07-30): Dan Lombino was discovered by a contact re-run AFTER
+# the draft stage had already written drafts for the tiers present at the time.
+# His row shipped with every draft cell blank and qa_flag="" — indistinguishable
+# from "we looked and had nothing to say".
+
+
+def test_contact_whose_tier_has_no_draft_is_flagged_not_silently_blank():
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {"c-suite": MULTI.drafts_by_tier["c-suite"]},
+    })
+    rows = build_contact_rows(p)
+    assert rows[0]["qa_flag"] == "passed"          # CEO — c-suite draft exists
+    ic_row = rows[2]                               # Field Technician -> "ic"
+    assert ic_row["draft_initial_subject"] == ""
+    assert "no-draft:" in ic_row["qa_flag"]
+    assert "ic" in ic_row["qa_flag"]
+    assert "Steven Butler" in ic_row["qa_flag"]
+
+
+def test_no_draft_flag_does_not_fire_when_the_unknown_tier_covers_the_contact():
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {"unknown": DraftSet(initial_subject="Generic", initial_body="Hi.")},
+    })
+    assert all("no-draft:" not in r["qa_flag"] for r in build_contact_rows(p))
+
+
+def test_no_draft_flag_does_not_fire_when_the_draft_already_says_why_it_is_blank():
+    # The talking-points-only case (gtm/draft.py::NO_DRAFT_FLAG) is a deliberate
+    # blank with its own explanation — a second flag would just be noise.
+    from gtm.draft import NO_DRAFT_FLAG
+
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {
+            "c-suite": DraftSet(talking_points="thin", needs_research=True, qa_flag=NO_DRAFT_FLAG),
+            "ic": MULTI.drafts_by_tier["ic"],
+        }
+    })
+    assert "no-draft:" not in build_contact_rows(p)[0]["qa_flag"]
+
+
+def test_no_draft_flag_composes_with_the_other_gates():
+    p = MULTI.model_copy(update={"drafts_by_tier": {}, "contact_verified": "no; no; no"})
+    flag = build_contact_rows(p)[0]["qa_flag"]
+    assert "unverified-contact:" in flag
+    assert "no-draft:" in flag
+
+
+def test_no_draft_summary_counts_the_blocked_rows():
+    from gtm.output import no_draft_summary
+
+    p = MULTI.model_copy(update={
+        "drafts_by_tier": {"c-suite": MULTI.drafts_by_tier["c-suite"]},
+    })
+    assert no_draft_summary([p]) == 1   # the ic contact only
+    assert no_draft_summary([MULTI]) == 0

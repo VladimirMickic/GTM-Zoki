@@ -61,3 +61,47 @@ def test_summary_line_reads_dollars_for_openai_credits_for_serper(tmp_path):
 
 def test_summary_line_empty_when_nothing_recorded(tmp_path):
     assert CostLog(tmp_path / "cost.jsonl").summary_line() == "no spend recorded"
+
+
+# --- token-only providers (Claude) and vendor credits -------------------------
+# 2026-07-30 (user): every run must report openai spend, serper credits, Claude
+# tokens AND email-provider spend. The first two were already here; a run's Claude
+# judgment tokens and every email vendor call were invisible.
+
+
+def test_summary_line_renders_claude_tokens(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record(stage="fit", model="claude", provider="claude",
+               tokens_in=1_240_000, tokens_out=18_400, cost_usd=0.0)
+    assert log.summary_line() == "claude:1.2M in / 18.4k out"
+
+
+def test_summary_line_keeps_dollars_and_credits_and_adds_tokens(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record(stage="extract", model="gpt-4o-mini", tokens_in=1000, tokens_out=200, cost_usd=0.0165)
+    log.record_serper(credits=59)
+    log.record(stage="judgment", model="claude", provider="claude",
+               tokens_in=940, tokens_out=120, cost_usd=0.0)
+    log.record_vendor(provider="hunter", stage="emails", credits=12)
+    line = log.summary_line()
+    assert "openai:$0.0165" in line
+    assert "serper:59 credits" in line
+    assert "claude:940 in / 120 out" in line
+    assert "hunter:12 credits" in line
+
+
+def test_record_vendor_logs_one_credit_by_default(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record_vendor(provider="prospeo", stage="emails")
+    entry = log._entries()[0]
+    assert entry["provider"] == "prospeo"
+    assert entry["credits"] == 1
+    assert entry["cost_usd"] == 0.0
+
+
+def test_by_provider_carries_tokens(tmp_path):
+    log = CostLog(tmp_path / "cost.jsonl")
+    log.record(stage="judgment", model="claude", provider="claude",
+               tokens_in=10, tokens_out=3, cost_usd=0.0)
+    assert log.by_provider()["claude"]["tokens_in"] == 10
+    assert log.by_provider()["claude"]["tokens_out"] == 3
