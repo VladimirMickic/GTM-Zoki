@@ -37,7 +37,11 @@ First prospect: **Teal Drones** (tealdrones.com).
    social hosts go straight to Apify). Scrapling dropped — see `docs/tools/scrapers.md`.
 3. **Extract** — `gpt-4o-mini`: markdown → structured drone fields (one place, scraper-agnostic).
 4. **Fit** — Claude scores 0–100 vs `company/ICP.md`; hard disqualifiers.
-5. **Contacts + Enrich** (passers only) — Serper `site:linkedin.com/in` + team scrape (names/titles/LinkedIn, no email yet); `company-research` find-profiles + find-news; Serper LinkedIn/Reddit.
+5. **Contacts + Enrich** (passers only) — all Serper + `gpt-4o-mini`, no skill in the loop:
+   `gtm/contacts.py` (`site:linkedin.com/in` + team scrape → names/titles/LinkedIn, ranked,
+   employment-verified, no email yet), `gtm/enrich.py` (company LinkedIn, community signals,
+   headcount, news). The `company-research` skill is a standalone research tool, NOT called
+   by this stage — don't assume the pipeline runs it.
 6. **Output** — CSV → Google Sheet (service account) + HubSpot (company/contact upsert,
    `gtm/hubspot.py`, gated on `HUBSPOT_SERVICE_KEY`).
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
@@ -88,10 +92,15 @@ Format the closing line exactly as: `Cost — openai:$0.0412 · serper:15 credit
   Fallback-scraper keys optional/later.
 
 ## Skills (local)
-company-research (enrichment) · prospect-research · reddit-find · cold-email (manual one-off
-draft; pipeline drafts automatically via `gtm/draft.py`) ·
-agent-browser (browser fallback) · youtube-transcript · driven-pipeline (run the
-full pipeline end-to-end with only 2 human checkpoints).
+driven-pipeline (run the full pipeline end-to-end with only 2 human checkpoints) ·
+company-research (standalone company research; not called by the pipeline) · reddit-find ·
+agent-browser (browser fallback) · youtube-transcript.
+
+**No skill re-implements a pipeline stage.** `cold-email` and `prospect-research` were
+deleted 2026-07-30: both had silently drifted from the modules they mirrored (wrong token
+syntax, stale rank weights, none of the ship gates) and both were already superseded by
+`gtm.run redraft` / `gtm.run enrich`. If a manual one-off is needed, run the CLI stage on a
+one-company run — don't write a second copy of the rules in Markdown.
 
 ## Structure
 - `gtm/` — pipeline code (module per stage, added per slice)

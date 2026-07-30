@@ -56,8 +56,13 @@ the whole run. Example brief: `data/runs/teal-demo/brief.md`.
 - Have: OPENAI_API_KEY, SERPER_API_KEY. Fallback-scraper keys optional/later.
 
 ## Skills (local)
-company-research (enrichment) · prospect-research · reddit-find · cold-email (later) ·
+driven-pipeline (run the full pipeline end-to-end with only 2 human checkpoints) ·
+company-research (standalone company research; not called by the pipeline) · reddit-find ·
 agent-browser (browser fallback) · youtube-transcript.
+
+**No skill re-implements a pipeline stage.** `cold-email` and `prospect-research` were
+deleted 2026-07-30 — both had drifted from the modules they mirrored and were superseded by
+`gtm.run redraft` / `gtm.run enrich`. Run the CLI stage on a one-company run instead.
 
 ## Structure
 - `gtm/` — pipeline code (module per stage, added per slice)
