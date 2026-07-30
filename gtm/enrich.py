@@ -19,7 +19,6 @@ from gtm.extract import MODEL, PRICE_IN, PRICE_OUT
 from gtm.schema import Prospect
 
 MAX_NEWS = 5
-SNIPPET_WORDS = 25
 # A signal older than this is context, not a reason to email today. Everything in
 # run test-batch-1 was 1-2 years old and still got written up as fresh news.
 RECENCY_MONTHS = 12
@@ -47,8 +46,7 @@ def find_company_linkedin(company: str, *, search=serper_search) -> str:
 
 def _news_line(r: dict) -> str:
     title, link = r.get("title", ""), r.get("link", "")
-    words = r.get("snippet", "").split()
-    snippet = " ".join(words[:SNIPPET_WORDS]) + (" …" if len(words) > SNIPPET_WORDS else "")
+    snippet = r.get("snippet", "").strip()
     return f"{title} — {snippet} ({link})" if snippet else f"{title} ({link})"
 
 

@@ -95,14 +95,14 @@ def test_news_capped_at_five():
     assert news[0] == "Teal Drones wins US Army SRR Tranche 2 — contract award (https://example.com/srr)"
 
 
-def test_find_news_trims_long_snippets_and_survives_missing_snippet():
+def test_find_news_keeps_full_snippet_and_survives_missing_snippet():
     long_snip = " ".join(f"w{i}" for i in range(40))
     results = [
         {"title": "Long", "link": "https://x.com/a", "snippet": long_snip},
         {"title": "NoSnip", "link": "https://x.com/b"},
     ]
     news = find_news("X", search=lambda q, num=10: results)
-    assert "w24 …" in news[0] and "w25" not in news[0]  # trimmed to 25 words
+    assert "w39" in news[0]                             # full snippet kept, not trimmed
     assert news[1] == "NoSnip (https://x.com/b)"        # no dangling " — "
 
 
