@@ -40,6 +40,10 @@ thinner story, so a long email there reads as padding.
 
 Tier 3 (`drop`) is never drafted.
 
+The `~` is real — these are targets, not byte limits, and `gtm/draft.py::check_body_length`
+enforces them with 20% slack either side. It exists to catch drift (prompt-only caps drift
+upward across a batch), not to churn a 357-character body against a "~350" target.
+
 ## Email structure (per email)
 
 **Block 1 — opener.** `{{first_name}},` on its own line, then one line naming their real
@@ -119,6 +123,20 @@ It technically satisfies every rule above and still reads like a bot: no pain bl
 reason to care, a zero-cost ask. v1 and v2 must differ in **structure**, not just wording —
 one leads with the congratulation, the other leads with a question about their current setup.
 Two persona tiers at the same company must never receive the same sentence skeleton.
+
+## No repeated sentences across the batch
+(locked 2026-07-29, enforced by `gtm/draft.py::check_batch_repetition`)
+
+**No sentence may appear verbatim in two different companies' drafts in the same run.** Not
+the value line, not the social-proof line, not the close. Every prospect has its own
+`outreach_angle` and `segment` — an identical sentence in two of them means the angle was
+never used, and the rows sit next to each other in the sheet where a reader sees it instantly.
+Run us-drone-19 shipped *"{{reference_customer}} runs {{case_line}} the same way."* in 9 of 10
+bodies and the same five-word close in 5 of 10.
+
+The negative-CTA close is a **shape, not a script**: "Would it be a bad idea…" names the form,
+and each company's close still has to end on that company's own specifics. Copying the
+example emails' closes word-for-word across a batch is the failure this rule exists to stop.
 
 ## Specificity (no vague value-prop claims)
 Every value-prop claim must name a concrete mechanism or spec difference — a drop-test rating

@@ -5,6 +5,8 @@ from gtm.draft import (
     QAResult,
     build_draft_prompt,
     build_redraft_prompt,
+    check_batch_repetition,
+    check_body_length,
     check_pain_grounding,
     check_reference_customer,
     check_spec_jargon,
@@ -923,3 +925,150 @@ def test_draft_prompt_bans_the_codes_and_supplies_the_plain_language_substitute(
     assert "sealed against water and dust" in prompt
     # The banned-skeleton example must not itself model the banned code.
     assert "We build MIL-STD cases sized to it" not in prompt
+
+
+# --- cross-company repetition (2026-07-29: the gap that made us-drone-19 read machine-made) --
+
+_SHARED_LINE = "{{reference_customer}} runs our {{case_line}} line the same way."
+
+
+def _batch_body(opener, value, close="Bad idea to grab 15 minutes and walk the numbers?"):
+    return (
+        "{{first_name}},\n\n"
+        f"{opener}\n\n"
+        f"{value}\n\n"
+        f"{close}\n\n"
+        "{{sender_name}}"
+    )
+
+
+def test_check_batch_repetition_flags_a_sentence_reused_by_another_company():
+    cleo = Prospect(company="Cleo Robotics", website="https://cleorobotics.com", drafts_by_tier={
+        "c-suite": _tiered("who tools the travel kit?", _batch_body(
+            "The Dronut ships in its own enclosure.",
+            f"We build that as a line item instead. {_SHARED_LINE}",
+            close="Bad idea to see whether the per-unit math works for the Dronut?",
+        )),
+    })
+    asylon = Prospect(company="Asylon", website="https://asylonrobotics.com", drafts_by_tier={
+        "c-suite": _tiered("congrats on the Air Force award", _batch_body(
+            "Saw the Phase Three award — congrats.",
+            f"Your dock is built for the mission; we take the tooling. {_SHARED_LINE}",
+            close="Worth fifteen minutes before the next DroneDog batch ships?",
+        )),
+    })
+    flag = check_batch_repetition(cleo, cleo.drafts_by_tier["c-suite"], [cleo, asylon])
+    assert "Asylon" in flag
+    assert "runs our" in flag  # quotes the offending sentence back for the redraft
+    # Symmetric: both sides need rewriting, so both get flagged.
+    assert "Cleo Robotics" in check_batch_repetition(
+        asylon, asylon.drafts_by_tier["c-suite"], [cleo, asylon]
+    )
+
+
+def test_check_batch_repetition_catches_a_shared_close_not_only_a_shared_value_line():
+    # The negative-CTA is a shape, not a script — the same close across two companies is
+    # exactly what made 5 of 10 us-drone-19 bodies interchangeable.
+    a = Prospect(company="A Corp", website="https://a.com", drafts_by_tier={
+        "c-suite": _tiered("s1", _batch_body(
+            "A stages its heavy-lift rig from four separate bags.",
+            "One foam-fit kit seats the airframe and its payload together.")),
+    })
+    b = Prospect(company="B Corp", website="https://b.com", drafts_by_tier={
+        "c-suite": _tiered("s2", _batch_body(
+            "B tools a sheet-metal dock shell in house today.",
+            "Handing that line to us gives your engineers their week back.")),
+    })
+    flag = check_batch_repetition(a, a.drafts_by_tier["c-suite"], [a, b])
+    assert "15 minutes" in flag
+
+
+def test_check_batch_repetition_ignores_the_same_company_and_the_mandated_lines():
+    # Two tiers at ONE company are check_tier_distinctness's job, which deliberately
+    # tolerates a shared mandated opener/close. This guard must not double-flag them.
+    body = _batch_body("Same opener.", f"Same value line. {_SHARED_LINE}")
+    p = Prospect(company="Harris Aerial", website="https://harrisaerial.com", drafts_by_tier={
+        "director": _tiered("s1", body),
+        "ic": _tiered("s2", body),
+    })
+    assert check_batch_repetition(p, p.drafts_by_tier["director"], [p]) == ""
+
+
+def test_check_batch_repetition_allows_short_shared_idiom():
+    # "Worth 15 minutes?" is 3 words — barring every short phrase would make two drafts
+    # unable to share ordinary English.
+    a_body = "{{first_name}},\n\nA ships its rig in four bags.\n\nWorth 15 minutes?\n\n{{sender_name}}"
+    b_body = "{{first_name}},\n\nB tools a dock shell in house.\n\nWorth 15 minutes?\n\n{{sender_name}}"
+    a = Prospect(company="A Corp", website="https://a.com", drafts_by_tier={"c-suite": _tiered("s1", a_body)})
+    b = Prospect(company="B Corp", website="https://b.com", drafts_by_tier={"c-suite": _tiered("s2", b_body)})
+    assert check_batch_repetition(a, a.drafts_by_tier["c-suite"], [a, b]) == ""
+
+
+def test_check_batch_repetition_compares_the_alt_version_too():
+    shared = "We build the enclosure you currently tool in house, as one line item."
+    a = Prospect(company="A Corp", website="https://a.com", drafts_by_tier={
+        "c-suite": DraftSet(initial_subject="s1", initial_body="{{first_name}},\n\nUnique A opener line.\n\n{{sender_name}}",
+                            initial_body_alt=f"{{{{first_name}}}},\n\n{shared}\n\n{{{{sender_name}}}}"),
+    })
+    b = Prospect(company="B Corp", website="https://b.com", drafts_by_tier={
+        "c-suite": DraftSet(initial_subject="s2", initial_body=f"{{{{first_name}}}},\n\n{shared}\n\n{{{{sender_name}}}}"),
+    })
+    assert "B Corp" in check_batch_repetition(a, a.drafts_by_tier["c-suite"], [a, b])
+
+
+def test_check_batch_repetition_is_clean_when_every_company_carries_its_own_angle():
+    a = Prospect(company="A Corp", website="https://a.com", drafts_by_tier={
+        "c-suite": _tiered("s1", _batch_body("A ships heavy-lift rigs in improvised crates.",
+                                             "We size one repeatable kit to that airframe.")),
+    })
+    b = Prospect(company="B Corp", website="https://b.com", drafts_by_tier={
+        "c-suite": DraftSet(initial_subject="s2", initial_body=(
+            "{{first_name}},\n\nB tools its own dock enclosure today.\n\n"
+            "Handing that manufacturing line to us frees your engineers.\n\n"
+            "Open to comparing the per-unit math on a call?\n\n{{sender_name}}")),
+    })
+    assert check_batch_repetition(a, a.drafts_by_tier["c-suite"], [a, b]) == ""
+
+
+# --- body length band (enforced with slack; the "~" in the guide is deliberate) ------------
+
+def _body_of(n):
+    return "{{first_name}},\n\n" + ("word " * ((n // 5) + 1))[:n] + "\n\n{{sender_name}}"
+
+
+def test_check_body_length_flags_runaway_drift_past_the_ceiling():
+    p = Prospect(company="A Corp", website="https://a.com", status="keep")
+    flag = check_body_length(p, _tiered("s", _body_of(700)))
+    assert "~250-350" in flag and "padding" in flag
+
+
+def test_check_body_length_tolerates_the_bands_approximate_edge():
+    # us-drone-19's Tier-2 bodies ran 357-372 against a "~350" target. That is inside the
+    # guide's own "~", so the guard must not churn them.
+    p = Prospect(company="A Corp", website="https://a.com", status="keep")
+    for n in (357, 372, 340):
+        assert check_body_length(p, _tiered("s", _body_of(n))) == "", n
+
+
+def test_check_body_length_flags_a_body_too_thin_for_the_structure():
+    p = Prospect(company="A Corp", website="https://a.com", status="keep")
+    assert "no room" in check_body_length(p, _tiered("s", _body_of(120)))
+
+
+def test_check_body_length_uses_the_no_pain_band_for_a_priority_with_no_pain_evidence():
+    # A priority prospect with no researched pain writes 3 blocks (~250-400), not 4
+    # (~450-700) — scoring it against the 4-block band would flag every correct draft.
+    no_pain = Prospect(company="Cleo Robotics", website="https://cleorobotics.com", status="priority")
+    assert check_body_length(no_pain, _tiered("s", _body_of(360))) == ""
+    assert "~250-400" in check_body_length(no_pain, _tiered("s", _body_of(600)))
+    with_pain = Prospect(
+        company="Teal", website="https://tealdrones.com", status="priority",
+        community_signals=["operators complain the stock bag sags"],
+    )
+    assert check_body_length(with_pain, _tiered("s", _body_of(600))) == ""
+
+
+def test_check_body_length_checks_both_versions():
+    p = Prospect(company="A Corp", website="https://a.com", status="keep")
+    draft = DraftSet(initial_subject="s", initial_body=_body_of(300), initial_body_alt=_body_of(800))
+    assert "v2" in check_body_length(p, draft)

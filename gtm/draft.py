@@ -323,6 +323,102 @@ def check_spec_jargon(draft: DraftSet) -> str:
     return ""
 
 
+# 2026-07-29 (user: "doesn't seem convincing"): check_tier_distinctness only ever compares
+# tiers INSIDE one company, so cross-company reuse was invisible to every guard. Run
+# us-drone-19 shipped the sentence "{{reference_customer}} runs {{case_line}} the same way."
+# in 9 of 10 bodies and the same five-word close in 5 of 10 — every claim true, every
+# within-company check clean, and the batch still reads machine-made when the rows sit next
+# to each other in the sheet. Each company has its own outreach_angle and segment; an
+# identical sentence across two of them means the angle was never used.
+_MIN_SHARED_SENTENCE_WORDS = 6  # below this, a match is idiom ("Worth 15 minutes?"), not reuse
+
+
+def _sentences(body: str) -> list[str]:
+    """Body split into normalized sentences, mandated boilerplate dropped. Comparison unit
+    for cross-company reuse: the us-drone-19 duplicate sentence sat at the END of its
+    paragraph, so _paragraph_skeletons (which reads the opening words) could never see it."""
+    out = []
+    for para in body.split("\n\n"):
+        para = para.strip()
+        if not para or para in _MANDATED_LINES:
+            continue
+        for sent in re.split(r"(?<=[.?!])\s+", para):
+            words = re.sub(r"[^\w\s{}]", " ", sent.lower()).split()
+            if len(words) >= _MIN_SHARED_SENTENCE_WORDS:
+                out.append(" ".join(words))
+    return out
+
+
+def check_batch_repetition(p: Prospect, draft: DraftSet, others: list[Prospect]) -> str:
+    """Deterministic guard: no sentence may be reused verbatim in another company's draft
+    in the same run.
+
+    Scoped to OTHER companies — two tiers at one company are check_tier_distinctness's job,
+    and it deliberately tolerates a shared mandated opener/close there. Across companies
+    there is no such excuse: the negative-CTA close is a shape, not a script, and the value
+    line has to carry that company's own angle.
+
+    Returns "" when clean, else the flag text (same contract as check_reference_customer).
+    """
+    mine = set(_sentences(draft.initial_body)) | set(_sentences(draft.initial_body_alt))
+    if not mine:
+        return ""
+    for other in others:
+        if other.company == p.company:
+            continue
+        for other_tier, od in other.drafts_by_tier.items():
+            theirs = set(_sentences(od.initial_body)) | set(_sentences(od.initial_body_alt))
+            shared = sorted(mine & theirs)
+            if shared:
+                return (
+                    f'reuses a sentence verbatim from {other.company} [{other_tier}]: '
+                    f'"{shared[0]}" — every company in this run has its own outreach_angle, '
+                    f"so rewrite the line to carry {p.company}'s"
+                )
+    return ""
+
+
+# Length is set by tier (see _TIER_SHAPE) with a deliberate "~" — the bands are targets, not
+# byte limits, and flagging a 357-character body against a "~350" target is churn. This
+# ceiling exists only to catch runaway drift, which is what unenforced prompt-only caps do
+# over a batch: 5 of 8 Tier-2 bodies on us-drone-19 landed above their band.
+_LENGTH_SLACK = 0.20
+_TIER_BAND = {  # (low, high) character targets, keyed the same way _TIER_SHAPE is
+    "priority": (450, 700),
+    "priority-no-pain": (250, 400),
+    "keep": (250, 350),
+}
+
+
+def check_body_length(p: Prospect, draft: DraftSet) -> str:
+    """Deterministic guard for the voice guide's "Length by tier" table, enforced with
+    _LENGTH_SLACK either side so the table's "~" still means approximately.
+
+    Returns "" when clean, else the flag text (same contract as check_reference_customer).
+    """
+    if p.status == "priority" and not has_pain_source(p):
+        key = "priority-no-pain"
+    else:
+        key = p.status if p.status in _TIER_BAND else "priority"
+    low, high = _TIER_BAND[key]
+    floor, ceiling = int(low * (1 - _LENGTH_SLACK)), int(high * (1 + _LENGTH_SLACK))
+    for label, body in (("v1", draft.initial_body), ("v2", draft.initial_body_alt)):
+        if not body:
+            continue
+        n = len(body)
+        if n > ceiling:
+            return (
+                f"{label} body is {n} characters — {key} targets ~{low}-{high}, and past "
+                f"{ceiling} it is padding; cut to the band"
+            )
+        if n < floor:
+            return (
+                f"{label} body is {n} characters — {key} targets ~{low}-{high}; under "
+                f"{floor} there is no room for the structure the guide requires"
+            )
+    return ""
+
+
 def build_draft_prompt(
     voice_guide: str, p: Prospect, tier: str, sibling_tiers: list[str] | None = None
 ) -> str:
@@ -458,8 +554,9 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
    NEVER a hardcoded company name (AeroVault is a demo company with no customers, and naming
    another prospect from this run as a customer is the exact failure this token prevents).
 {pain_block}{close_num}. **Close** — ONE low-pressure closed-ended ask, negative-CTA preferred ("Would it be a bad
-   idea for us to grab 15 minutes...?"). A single genuine question may precede it. Never
-   stack asks. Then {{{{sender_name}}}} on its own line, nothing after.
+   idea for us to grab 15 minutes...?"). That is a SHAPE, not a script: end on something
+   specific to {p.company}, never the example's words verbatim. A single genuine question may
+   precede it. Never stack asks. Then {{{{sender_name}}}} on its own line, nothing after.
 
 ### Format (self-enforce — do not exceed)
 - This prospect is {band}: write {blocks}, body {length}.
@@ -475,6 +572,9 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
   look?". It satisfies every other rule and still reads like a bot. v1 and v2 must differ in
   STRUCTURE, not just wording: one leads with the congratulation, the other with a question
   about their current setup.
+- NO SENTENCE MAY REPEAT ACROSS COMPANIES in this run — not the value line, not the social
+  proof line, not the close. {p.company} has its own outreach_angle; if a sentence would work
+  unchanged for another prospect, it isn't carrying that angle. Write it fresh.
 - No banned phrases (see voice guide).{sibling_block}{no_pain_rule}"""
         reply_schema = (
             f'{{"{p.company}": {{"{tier}": {{"pain_points": "...", "talking_points": "...", '

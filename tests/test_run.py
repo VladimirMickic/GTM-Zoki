@@ -216,8 +216,8 @@ def test_merge_drafts_writes_v1_to_surfaced_fields_v2_to_alt_fields():
                 "pain_points": "damaged units eat into margin",
                 "talking_points": "MIL-STD-810H drop rating",
                 "draft_initial": {
-                    "v1": {"subject": "Case built for the Teal 2?", "body": "hook v1"},
-                    "v2": {"subject": "US-made case, Teal-sized", "body": "hook v2"},
+                    "v1": {"subject": "Case built for the Teal 2?", "body": _QA_BODY},
+                    "v2": {"subject": "US-made case, Teal-sized", "body": _QA_BODY_ALT},
                 },
             }
         }
@@ -227,9 +227,9 @@ def test_merge_drafts_writes_v1_to_surfaced_fields_v2_to_alt_fields():
     assert draft.pain_points == "damaged units eat into margin"
     assert draft.talking_points == "MIL-STD-810H drop rating"
     assert draft.initial_subject == "Case built for the Teal 2?"
-    assert draft.initial_body == "hook v1"
+    assert draft.initial_body == _QA_BODY
     assert draft.initial_subject_alt == "US-made case, Teal-sized"
-    assert draft.initial_body_alt == "hook v2"
+    assert draft.initial_body_alt == _QA_BODY_ALT
     assert draft.needs_research is False
 
 
@@ -261,8 +261,8 @@ def test_merge_drafts_multiple_tiers_land_in_separate_draft_sets():
     prospects = [Prospect(company="AeroVironment", website="https://avinc.com", status="priority")]
     raw = {
         "AeroVironment": {
-            "c-suite": {"draft_initial": {"v1": {"subject": "C-suite subject", "body": "b"}}},
-            "director": {"draft_initial": {"v1": {"subject": "Director subject", "body": "b"}}},
+            "c-suite": {"draft_initial": {"v1": {"subject": "C-suite subject", "body": _QA_BODY}}},
+            "director": {"draft_initial": {"v1": {"subject": "Director subject", "body": _QA_BODY}}},
         }
     }
     merge_drafts(prospects, raw)
@@ -275,10 +275,10 @@ def test_merge_drafts_preserves_qa_flag_on_existing_tier_content_update():
     # NOT reset its qa_flag — cmd_redraft's "already checked" skip logic depends
     # on the flag surviving until its own QA loop overwrites it.
     prospects = [Prospect(company="Teal Drones", website="https://tealdrones.com", status="priority")]
-    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Old", "body": "b"}}}}})
+    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Old", "body": _QA_BODY}}}}})
     prospects[0].drafts_by_tier["c-suite"].qa_flag = "unsupported claim"
 
-    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Fixed", "body": "b2"}}}}})
+    merge_drafts(prospects, {"Teal Drones": {"c-suite": {"draft_initial": {"v1": {"subject": "Fixed", "body": _QA_BODY_ALT}}}}})
 
     draft = prospects[0].drafts_by_tier["c-suite"]
     assert draft.initial_subject == "Fixed"
@@ -674,7 +674,7 @@ def test_cmd_draft_flags_unsupported_claim_and_raises_redraft_checkpoint(monkeyp
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
             "c-suite": {
-                "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": _QA_BODY}, "v2": {"subject": "s2", "body": _QA_BODY_ALT}},
             }
         }
     }))
@@ -711,7 +711,7 @@ def test_cmd_draft_qa_failure_logs_and_skips_not_crashes(monkeypatch, tmp_path):
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
             "c-suite": {
-                "draft_initial": {"v1": {"subject": "s", "body": "b"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_initial": {"v1": {"subject": "s", "body": _QA_BODY}, "v2": {"subject": "s2", "body": _QA_BODY_ALT}},
             }
         }
     }))
@@ -742,7 +742,7 @@ def test_cmd_redraft_merges_and_finalizes_qa_passed(monkeypatch, tmp_path):
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
             "c-suite": {
-                "draft_initial": {"v1": {"subject": "Fixed subject", "body": "fixed hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_initial": {"v1": {"subject": "Fixed subject", "body": _QA_BODY}, "v2": {"subject": "s2", "body": _QA_BODY_ALT}},
             }
         }
     }))
@@ -769,7 +769,7 @@ def test_cmd_redraft_keeps_flag_text_if_still_failing_after_retry(monkeypatch, t
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
             "c-suite": {
-                "draft_initial": {"v1": {"subject": "Still bad", "body": "still bad hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_initial": {"v1": {"subject": "Still bad", "body": _QA_BODY}, "v2": {"subject": "s2", "body": _QA_BODY_ALT}},
             }
         }
     }))
@@ -912,7 +912,7 @@ def test_cmd_segment_then_cmd_draft_resumes_cleanly(monkeypatch, tmp_path):
     drafts_path.write_text(json.dumps({
         "Teal Drones": {
             "unknown": {
-                "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": "hook"}, "v2": {"subject": "s2", "body": "b2"}},
+                "draft_initial": {"v1": {"subject": "Case built for the Teal 2?", "body": _QA_BODY}, "v2": {"subject": "s2", "body": _QA_BODY_ALT}},
             }
         }
     }))
@@ -1153,6 +1153,21 @@ def test_cmd_enrich_never_derives_competitor_from_community_signals(monkeypatch,
     assert "displacement" not in out
 
 
+_QA_BODY = (
+    "{{first_name}},\n\nSaw {{company_name}}'s {{trigger_event}} — congrats.\n\n"
+    "We build transport cases with foam cut to one airframe, so the aircraft, controller "
+    "and batteries each seat in their own cavity. {{reference_customer}} runs our "
+    "{{case_line}} line across their lineup.\n\nBad idea to spend 15 minutes on it?\n\n"
+    "{{sender_name}}"
+)
+_QA_BODY_ALT = (
+    "{{first_name}},\n\nCurious what {{company_name}} ships {{airframe_name}} in today.\n\n"
+    "We're AeroVault — US-made, foam-fit transport cases built around one airframe at a "
+    "time, so a tech opens the case and everything sits where it should.\n\n"
+    "Worth a short call to see if it is relevant?\n\n{{sender_name}}"
+)
+
+
 _FABRICATED_BODY = (
     "{{first_name}},\n\nSaw {{company_name}}'s launch — congrats.\n\n"
     "{{airframe_name}} travels in a tough portable box today — which surfaces later as a "
@@ -1180,7 +1195,7 @@ def test_cmd_draft_flags_fabricated_pain_before_paying_for_qa(monkeypatch, tmp_p
             "c-suite": {
                 "draft_initial": {
                     "v1": {"subject": "transport for the new Xplorer", "body": _FABRICATED_BODY},
-                    "v2": {"subject": "s2", "body": "b2"},
+                    "v2": {"subject": "s2", "body": _QA_BODY_ALT},
                 },
             }
         }
@@ -1221,7 +1236,7 @@ def test_cmd_redraft_rechecks_pain_grounding(monkeypatch, tmp_path):
             "c-suite": {
                 "draft_initial": {
                     "v1": {"subject": "transport for the new Xplorer", "body": _FABRICATED_BODY},
-                    "v2": {"subject": "s2", "body": "b2"},
+                    "v2": {"subject": "s2", "body": _QA_BODY_ALT},
                 },
             }
         }
