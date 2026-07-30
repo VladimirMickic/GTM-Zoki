@@ -68,6 +68,125 @@ def test_why_fit_bands_and_unscored():
     assert Prospect(company="X", website="https://x.com").why_fit == "Unscored"
 
 
+# --- 2026-07-29 (user, live-Sheet review): "why_fit / fit_reason / buying_signals /
+# key_news feel weak and vague". Root cause was not the analysis — it was this file
+# trimming the decisive part out of every one of those cells on the way to the Sheet.
+
+
+def test_buying_signal_trim_keeps_source_and_recency_marker():
+    # THE bug. _trim_keep_source only protected a trailing "(source)" when the string
+    # ended with ")". Every buying signal ends with a "[stale]"/"[undated]" recency
+    # marker instead, so the guard never fired and plain _trim ate the source, the
+    # date AND the marker — the three tokens a reader actually decides on.
+    from gtm.schema import _ENTRY_MAX_CHARS, _trim_keep_source
+
+    s = (
+        "Awarded a $2.5M contract by the US Army's RCCTO (Rapid Capabilities and Critical "
+        "Technologies Office) to deliver prototype Tactical Dronut drones — real defense "
+        "procurement, not a proposal (dronelife, 2022-12-14) [stale]"
+    )
+    out = _trim_keep_source(s, _ENTRY_MAX_CHARS)
+    assert out.endswith("(dronelife, 2022-12-14) [stale]")
+    assert "…" in out  # still trimmed, just not through the source
+    assert out.startswith("Awarded a $2.5M contract")
+
+
+def test_short_signal_with_marker_is_untouched():
+    from gtm.schema import _ENTRY_MAX_CHARS, _trim_keep_source
+
+    s = "Joined the DIU Blue UAS Cleared List (Instagram/harris_aerial) [undated]"
+    assert _trim_keep_source(s, _ENTRY_MAX_CHARS) == s
+
+
+def test_plain_entry_without_source_or_marker_trims_as_before():
+    from gtm.schema import _trim_keep_source
+
+    assert _trim_keep_source("alpha bravo charlie delta", 12) == "alpha bravo…"
+
+
+def test_fit_reason_keeps_every_rubric_line_on_the_sheet():
+    # The old whole-string 400-char cap cut from the END, and Displacement is the
+    # LAST rubric line — the one the entire outreach angle is built on. Cleo's live
+    # cell stopped at "commercial product line ex…", hiding both Procurement and
+    # Displacement. Trim per line instead: every dimension and its score survives.
+    reason = (
+        "Physical fit 28/30 — published dims (7.5in diameter x 4.5in H, 520g), comfortably inside AV-Micro (13x9x6in)\n"
+        "Field-deployed 18/25 — confined-space/industrial inspection (pipes, tanks, disaster sites), real field use but indoor-only, not tactical/outdoor\n"
+        "Volume/price 6/15 — commercial product line exists, no funding or unit-volume evidence found\n"
+        "Procurement & compliance 13/15 — us_made_ndaa true (stated \"manufactured in the USA\")\n"
+        "Displacement 14/15 — in-house enclosure: \"ships in a case built by the manufacturer itself\""
+    )
+    p = Prospect(company="Cleo", website="https://c.com", fit_score=79, status="priority", fit_reason=reason)
+    cell = p.to_sheet_row()[SHEET_COLUMNS.index("fit_reason")]
+    for dimension in ("Physical fit 28/30", "Field-deployed 18/25", "Volume/price 6/15",
+                      "Procurement & compliance 13/15", "Displacement 14/15"):
+        assert dimension in cell, f"{dimension} missing from the sheet cell"
+    assert len(cell.splitlines()) == 5
+
+
+def test_fit_reason_still_trims_a_runaway_line():
+    p = Prospect(company="X", website="https://x.com", fit_reason="Physical fit 28/30 — " + "word " * 80)
+    cell = p.to_sheet_row()[SHEET_COLUMNS.index("fit_reason")]
+    assert cell.startswith("Physical fit 28/30 —")
+    assert cell.endswith("…")
+
+
+def test_why_fit_leads_with_the_airframe_and_the_displacement_finding():
+    # why_fit used to be band + case line + a verbatim copy of buying_signals[0] —
+    # i.e. the score column restated, plus a duplicate of a cell two columns right.
+    # It never named the airframe it was sized against or why we can displace.
+    p = Prospect(
+        company="Cleo Robotics", website="https://cleorobotics.com", fit_score=79, status="priority",
+        drone_models=["Dronut DD1", "Dronut X1 Pro"],
+        drone_dimensions=["Dronut DD1: 7.5 in diameter x 4.5 in H"],
+        best_case_line="AV-Micro",
+        inhouse_case="OEM-built case",
+        buying_signals=["Awarded a $2.5M contract by the US Army's RCCTO — real procurement (dronelife, 2022-12-14) [stale]"],
+    )
+    wf = p.why_fit
+    assert wf.startswith("Strong fit (79/100)")
+    assert "Dronut DD1: 7.5 in diameter x 4.5 in H" in wf
+    assert "AV-Micro" in wf
+    assert "builds own case" in wf         # displacement beats the news headline
+    assert "OEM-built" not in wf           # the label's attribution isn't said twice
+    assert "size unconfirmed" not in wf    # dims ARE published here
+    assert "RCCTO" not in wf               # no longer duplicates the buying_signals cell
+
+
+def test_why_fit_falls_back_to_the_top_signal_without_displacement_evidence():
+    p = Prospect(
+        company="Harris Aerial", website="https://harrisaerial.com", fit_score=62, status="keep",
+        drone_models=["Carrier HX8"], best_case_line="AV-Convoy",
+        buying_signals=["Officially joined the DIU's Blue UAS Cleared List — DoD certification (Instagram) [undated]"],
+    )
+    wf = p.why_fit
+    assert "Carrier HX8" in wf             # model name even with no published dims
+    assert "AV-Convoy" in wf
+    # ...but flagged: Harris scored Physical fit 8/30 and best_case_line is a guess.
+    # Without this a rep reads the arrow as a measured match and names the wrong line.
+    assert "AV-Convoy (size unconfirmed)" in wf
+    assert "Officially joined the DIU's Blue UAS Cleared List" in wf
+
+
+def test_why_fit_names_a_competitor_when_there_is_one():
+    p = Prospect(
+        company="X", website="https://x.com", fit_score=70, status="priority",
+        best_case_line="AV-Ops", competitor="Pelican 1520",
+    )
+    assert "Pelican 1520" in p.why_fit
+
+
+def test_us_made_ndaa_unknown_is_not_a_blank_cell():
+    # A blank cell reads "nobody checked". Asylon WAS checked; the answer was unknown.
+    # Those are different states and the Sheet must not collapse them.
+    unknown = Prospect(company="Asylon", website="https://a.com")
+    assert unknown.to_sheet_row()[SHEET_COLUMNS.index("us_made_ndaa")] == "unknown"
+    yes = Prospect(company="X", website="https://x.com", us_made_ndaa=True)
+    assert yes.to_sheet_row()[SHEET_COLUMNS.index("us_made_ndaa")] == "yes"
+    no = Prospect(company="Y", website="https://y.com", us_made_ndaa=False)
+    assert no.to_sheet_row()[SHEET_COLUMNS.index("us_made_ndaa")] == "no"
+
+
 def test_unscored_fit_renders_blank_not_slash_100():
     p = Prospect(company="X", website="https://x.com")
     row = p.to_sheet_row()

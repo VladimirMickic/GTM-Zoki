@@ -1,6 +1,7 @@
 """The Prospect schema — the contract every pipeline stage reads and writes."""
 from __future__ import annotations
 
+import re
 from typing import Optional
 
 from pydantic import BaseModel
@@ -45,7 +46,17 @@ _STATUS_TIER = {"priority": "1", "keep": "2", "drop": "3"}
 _LONG_LIST_COLS = ("key_news", "buying_signals", "community_signals")
 _LIST_MAX_ITEMS = 3  # top-N entries per long-list cell
 _ENTRY_MAX_CHARS = 180  # per entry
-_FIT_REASON_MAX_CHARS = 400
+# 2026-07-29 (user, reviewing the live Sheet: "fit_reason feels weak and vague"):
+# fit_reason is a 5-line rubric dump and the old whole-string 400-char cap cut from
+# the END — so Displacement, the LAST line and the one the outreach angle is built
+# on, never reached the Sheet at all. Cleo's live cell stopped mid-word at
+# "commercial product line ex…", showing the two weakest dimensions and hiding the
+# two decisive ones. Budget per line instead: every dimension keeps its score.
+_FIT_REASON_LINE_MAX_CHARS = 150
+
+# A trailing recency marker written by gtm/enrich.py's signal-dating logic:
+# "[stale]", "[undated]". Short and bracketed, so it can't collide with prose.
+_RECENCY_MARKER_RE = re.compile(r"\s*(\[[^\[\]]{1,20}\])\s*$")
 
 
 def _trim(s: str, n: int) -> str:
@@ -54,18 +65,38 @@ def _trim(s: str, n: int) -> str:
     return s if len(s) <= n else s[:n].rsplit(" ", 1)[0].rstrip() + "…"
 
 
+def _trim_lines(s: str, n: int) -> str:
+    """Trim each line to n chars, keeping every line. For cells whose value is a
+    fixed set of labelled lines (fit_reason's rubric) where dropping a whole line
+    loses a score, not just some prose."""
+    return "\n".join(_trim(line, n) for line in s.strip().splitlines() if line.strip())
+
+
 def _trim_keep_source(s: str, n: int) -> str:
-    """Like _trim, but for "<text> (<url>)" entries (gtm/enrich.py::_news_line):
-    trims the text, never the trailing "(url)" — a cut source link is why the
-    2026-07-24 community-signals feedback read as "no sources" (the sheet cell
-    was silently eating the parenthetical)."""
+    """Like _trim, but protects the two suffixes that carry the decision:
+    the "(source, date)" parenthetical and a trailing "[stale]"/"[undated]" marker.
+    Only the free text in front of them is trimmed.
+
+    2026-07-24 fix: a cut source link is why community signals read as "no sources".
+    2026-07-29 fix: the ")"-suffix test silently failed to fire on buying_signals,
+    which end with the recency MARKER, not the parenthetical — so on every signal
+    long enough to trim, plain _trim ate the source, the date and the marker
+    together. That is the whole of the "buying_signals feel vague" report: the
+    Sheet was deleting exactly the tokens a reader judges a signal by."""
     s = s.strip()
+    marker = ""
+    m = _RECENCY_MARKER_RE.search(s)
+    if m:
+        marker = " " + m.group(1)
+        s = s[: m.start()].rstrip()
+    source = ""
     if s.endswith(")") and " (" in s:
-        text, _, source = s[:-1].rpartition(" (")
-        source = f" ({source})"
-        budget = max(n - len(source), 0)
-        return (text if len(text) <= budget else text[:budget].rsplit(" ", 1)[0].rstrip() + "…") + source
-    return _trim(s, n)
+        text, _, src = s[:-1].rpartition(" (")
+        source, s = f" ({src})", text
+    budget = max(n - len(source) - len(marker), 0)
+    if len(s) > budget:
+        s = s[:budget].rsplit(" ", 1)[0].rstrip() + "…"
+    return s + source + marker
 
 
 class DraftSet(BaseModel):
@@ -161,13 +192,52 @@ class Prospect(BaseModel):
     def why_fit(self) -> str:
         """One-line scannable summary for the Companies tab, so a reader gets the
         gist without opening the long fit_reason/buying_signals/key_news cells.
-        Derived (not stored, like `tier`): band + score · case line · top signal."""
+        Derived (not stored, like `tier`).
+
+        2026-07-29 rewrite (user: "why_fit feels weak and vague"). It used to read
+        band + case line + a verbatim copy of buying_signals[0] — the score column
+        restated, then a duplicate of a cell two columns to the right. It never named
+        the airframe we sized against, and never said why this company is displaceable,
+        which is the actual answer to "why does this fit". Now:
+
+            <band (score)> · <airframe + dims → our case line> · <displacement finding>
+
+        The displacement segment falls back to the top buying signal only when there
+        is no inhouse_case/competitor to report, so the duplication is the exception.
+
+        Deliberately NOT included: "IP67 / MIL-STD-810H". Those are AeroVault's own
+        specs, identical on every row, so they carry zero per-row information here —
+        they stay in talking_points, where a rep needs the exact codes for the call
+        (and stay banned from email bodies by gtm/draft.py::check_spec_jargon)."""
         band = {"1": "Strong fit", "2": "Possible fit", "3": "Dropped"}.get(self.tier, "Unscored")
         head = f"{band} ({self.fit_score}/100)" if self.fit_score is not None else band
         parts = [head]
-        if self.best_case_line:
-            parts.append(f"{self.best_case_line} case")
-        if self.buying_signals:
+
+        # Prefer the dimension string: gtm/extract.py writes it as "<model>: <dims>",
+        # so it already names the airframe and adds the measurement fit was scored on.
+        airframe = self.drone_dimensions[0] if self.drone_dimensions else (
+            self.drone_models[0] if self.drone_models else ""
+        )
+        airframe = _trim(airframe, 70)
+        # No published dimensions means the case line was inferred from weight or from
+        # nothing at all (Harris Aerial: Physical fit 8/30, yet best_case_line still
+        # says AV-Convoy). Say so here, or a rep reads the arrow as a measured match
+        # and names a line on the call that the airframe may not fit.
+        unconfirmed = "" if self.drone_dimensions else " (size unconfirmed)"
+        if airframe and self.best_case_line:
+            parts.append(f"{airframe} → {self.best_case_line}{unconfirmed}")
+        elif self.best_case_line:
+            parts.append(f"{self.best_case_line} case{unconfirmed}")
+        elif airframe:
+            parts.append(airframe)
+
+        if self.inhouse_case:
+            # The label already carries the "OEM-" attribution; "builds own" repeats it.
+            what = self.inhouse_case.replace("OEM-built ", "").replace("OEM-supplied ", "")
+            parts.append(f"builds own {what}")
+        elif self.competitor:
+            parts.append(f"currently {self.competitor}")
+        elif self.buying_signals:
             # leading clause of the top buying signal, before the em-dash rationale
             # or the parenthetical source; trimmed so the cell stays one glance.
             top = self.buying_signals[0].split(" — ")[0].split(" (")[0].strip()
@@ -182,13 +252,16 @@ class Prospect(BaseModel):
         for col in SHEET_COLUMNS:
             v = getattr(self, col)
             if v is None:
-                row.append("")
+                # 2026-07-29: an NDAA answer of None means "we checked and could not
+                # tell" — a blank cell reads "nobody checked". Different states, and
+                # the compliance column is one a reader acts on, so say which it is.
+                row.append("unknown" if col == "us_made_ndaa" else "")
             elif col == "fit_score":
                 row.append(f"{v}/100")
             elif isinstance(v, bool):
                 row.append("yes" if v else "no")
             elif col == "fit_reason":
-                row.append(_trim(str(v), _FIT_REASON_MAX_CHARS))
+                row.append(_trim_lines(str(v), _FIT_REASON_LINE_MAX_CHARS))
             elif isinstance(v, list):
                 if col in _LONG_LIST_COLS:
                     # long-form cells: top-N entries, each trimmed, one per line

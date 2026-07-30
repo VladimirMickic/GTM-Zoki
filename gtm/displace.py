@@ -30,7 +30,40 @@ _INHOUSE_PATTERNS: tuple[tuple[re.Pattern[str], str], ...] = (
     (
         re.compile(
             r"\b(?:our own|its own|their own|in[\s-]house|proprietary|self[\s-]tooled|custom[\s-]molded|"
-            r"custom[\s-]moulded|purpose[\s-]built)\b[^.]{0,60}?\b(?:case|enclosure|housing|container|box)\b",
+            r"custom[\s-]moulded|purpose[\s-]built)\b[^.]{0,60}?\b(?:case|enclosure|housing|shell|container|box)\b",
+            re.IGNORECASE,
+        ),
+        "OEM-built case",
+    ),
+    # 2026-07-29 (us-drone-19 postmortem): the possessive-first pattern above missed
+    # BOTH self-building companies in the run while Fit scored them Displacement
+    # 14/15 by reading the same evidence string. Two shapes it cannot see:
+    #
+    #   "a case built by the manufacturer itself"  — possessive AFTER the noun
+    #   "built in a ... sheet metal shell"         — "shell" wasn't a housing noun
+    #
+    # A miss here is silent and costs the whole angle: no inhouse_case means
+    # gtm/segment.py never assigns the displacement segment and gtm/draft.py's
+    # displacement pitch block never fires.
+    #
+    # Build-verb then housing noun. "fit" is excluded from the gap so that
+    # "built to fit in a case" (says nothing about who made the case) stays a miss.
+    (
+        re.compile(
+            r"\b(?:build|builds|built|manufactur\w+|fabricat\w+|tool|tools|tooled|mold\w*|mould\w*)\b"
+            r"(?:(?!\bfit\b)[^.]){0,60}?"
+            r"\b(?:case|enclosure|housing|shell|container|box)\b",
+            re.IGNORECASE,
+        ),
+        "OEM-built case",
+    ),
+    # Housing noun, then the attribution trailing it ("... built by the manufacturer
+    # itself", "... is manufactured in-house").
+    (
+        re.compile(
+            r"\b(?:case|enclosure|housing|shell|container|box)\b[^.]{0,40}?"
+            r"\b(?:built|manufactured|made|produced|fabricated|tooled)\b[^.]{0,30}?"
+            r"\b(?:in[\s-]house|internally|itself|themselves|ourselves|by us)\b",
             re.IGNORECASE,
         ),
         "OEM-built case",

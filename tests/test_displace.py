@@ -101,6 +101,47 @@ def test_detect_inhouse_case_no_match_on_payload_sentence():
     assert detect_inhouse_case("The Sparrow drone is backpack-portable and can carry a 5 lb. payload.") == ""
 
 
+# 2026-07-29 (us-drone-19 postmortem): detect_inhouse_case returned "" for BOTH
+# self-building companies in the run, while Fit independently scored them
+# Displacement 14/15. The consequence is silent and expensive — no inhouse_case
+# means gtm/segment.py never assigns the displacement segment and gtm/draft.py's
+# displacement pitch block never fires, so the highest-value angle only ever
+# reaches the email if a human writes it into outreach_angle by hand.
+
+
+def test_detect_inhouse_case_built_by_the_manufacturer_itself():
+    # Cleo Robotics, live case_evidence. "built by the manufacturer itself" is the
+    # same claim as "their own case" with the possessive moved after the noun.
+    assert detect_inhouse_case(
+        'The system ships in a case built by the manufacturer itself, stated as '
+        '"Proudly engineered and manufactured in the USA."'
+    ) == "OEM-built case"
+
+
+def test_detect_inhouse_case_built_in_house_after_the_noun():
+    assert detect_inhouse_case("The transport case is manufactured in-house") == "OEM-built case"
+
+
+def test_detect_inhouse_case_sheet_metal_shell_is_an_enclosure():
+    # Asylon, live case_evidence. "shell" was missing from the housing-noun list, so
+    # a weatherproof metal enclosure the OEM tools itself read as no evidence at all.
+    assert detect_inhouse_case(
+        "Asylon's drone station technology is built in a weather-proof, stable sheet "
+        "metal shell, manufactured with Xometry."
+    ) == "OEM-built case"
+
+
+def test_detect_inhouse_case_generic_transport_case_is_still_no_evidence():
+    # Harris Aerial, live case_evidence — a genuine miss that must STAY a miss.
+    # "designed to fit in a standard transport case" says nothing about who built it.
+    assert detect_inhouse_case('The drones are designed to fit in a "standard transport case."') == ""
+
+
+def test_detect_inhouse_case_built_by_a_named_competitor_still_defers():
+    # The new "built by ..." route must not swallow a third-party build.
+    assert detect_inhouse_case("ships in a case built by Pelican for us") == ""
+
+
 def test_detect_inhouse_case_empty_evidence():
     assert detect_inhouse_case("") == ""
 

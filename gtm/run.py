@@ -259,6 +259,24 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
             p.community_signals = s.get("community_signals", p.community_signals)
 
 
+def missing_trigger_phrase(prospects: list[Prospect]) -> list[str]:
+    """Passers that have buying_signals but no trigger_phrase, in run order.
+
+    2026-07-29: 2 of 3 companies in us-drone-19 left the signals stage with an empty
+    trigger_phrase and nothing anywhere said so. It is not a harmless blank —
+    gtm/render.py::_trigger_event reads it verbatim, so an empty phrase leaves
+    {{trigger_event}} unrendered and the ship gate in gtm/output.py blanks the whole
+    contact row. Signals is the last stage where fixing it is free, so it warns here.
+
+    A company with NO buying_signals is excluded: there is nothing to build a phrase
+    from, so its empty value is honest rather than a silent miss."""
+    return [
+        p.company
+        for p in prospects
+        if p.status in ("priority", "keep") and p.buying_signals and not p.trigger_phrase
+    ]
+
+
 def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
     for p in prospects:
         tiers = raw.get(p.company)
@@ -400,6 +418,14 @@ def cmd_signals(run: str, signals_json: str) -> None:
         merge_signals(prospects, json.loads(Path(signals_json).read_text()))
         save_state(prospects, run_dir(run))
         print("signals merged for", sum(1 for p in prospects if p.outreach_angle), "prospects")
+        blank = missing_trigger_phrase(prospects)
+        if blank:
+            print(
+                f"warning: no trigger_phrase for {', '.join(blank)} — "
+                "{{trigger_event}} cannot render, and any draft that uses it will be "
+                "blanked at output. Add a short noun phrase per company to the signals "
+                "JSON and re-run this stage."
+            )
 
 
 def cmd_segment(run: str) -> None:

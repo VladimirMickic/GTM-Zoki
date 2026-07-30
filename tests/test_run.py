@@ -173,6 +173,39 @@ def test_merge_signals_omitting_community_signals_preserves_candidates():
     assert ps[0].community_signals == ['"unfiltered candidate quote" (reddit.com)']
 
 
+# 2026-07-29: 2 of 3 companies in us-drone-19 came out of signals with an empty
+# trigger_phrase and nothing said so. A missing phrase is not harmless — it leaves
+# {{trigger_event}} unrendered at output, which blocks the whole contact row. The
+# signals stage is where it is still cheap to fix, so it has to be loud there.
+
+
+def test_missing_trigger_phrase_reports_passers_with_signals_but_no_phrase():
+    from gtm.run import missing_trigger_phrase
+
+    ps = [
+        Prospect(company="Cleo", website="https://c.com", status="priority",
+                 buying_signals=["won an award"], trigger_phrase=""),
+        Prospect(company="Asylon", website="https://a.com", status="keep",
+                 buying_signals=["won an award"], trigger_phrase="Air Force Phase Three award"),
+    ]
+    assert missing_trigger_phrase(ps) == ["Cleo"]
+
+
+def test_missing_trigger_phrase_ignores_drops_and_companies_with_no_signals():
+    from gtm.run import missing_trigger_phrase
+
+    ps = [
+        # dropped: never drafted, so the empty phrase costs nothing
+        Prospect(company="Dropped", website="https://d.com", status="drop",
+                 buying_signals=["won an award"], trigger_phrase=""),
+        # no signals at all: there is nothing to build a trigger phrase FROM, so
+        # this is an honest empty, not a silent miss
+        Prospect(company="NoSignals", website="https://n.com", status="priority",
+                 buying_signals=[], trigger_phrase=""),
+    ]
+    assert missing_trigger_phrase(ps) == []
+
+
 def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
     # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row
     from gtm.run import known_domains, save_state

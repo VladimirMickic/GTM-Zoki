@@ -67,6 +67,15 @@ python -m gtm.run learn                            # show feedback for ICP/denyl
 Failures are logged to `data/errors.log` and that company is skipped (`status="error"`) — never
 the whole run. Example brief: `data/runs/teal-demo/brief.md`.
 
+### ALWAYS report the run cost — no exceptions
+Every stage command prints `cost this run — <provider>:$x · <provider>:N credits`
+(`gtm/costlog.py::CostLog.summary_line`). **The last line of any reply that ran one or more
+pipeline stages MUST be that total.** Not "if it seems relevant", not "if the user asks" —
+always, including partial runs, dry runs, aborted runs, and single-stage reruns. The user has
+asked for this three times; forgetting it again is a defect, not a style choice.
+Read it back with: `python -c "from gtm.costlog import CostLog; print(CostLog('data/runs/<run>/costs.jsonl').summary_line())"`
+Format the closing line exactly as: `Cost — openai:$0.0412 · serper:15 credits`
+
 ## Credentials still needed
 - **Google service-account JSON** (for Sheets, stage 6) — asked when we build it.
 - Have: OPENAI_API_KEY, SERPER_API_KEY. Fallback-scraper keys optional/later.
