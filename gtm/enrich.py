@@ -456,6 +456,124 @@ def enrich(p: Prospect, *, search=serper_search, client=None, costlog=None) -> P
     return p
 
 
+_SIGNAL_DATE_PROMPT = """From the search results below, find the specific date the event
+described actually happened for {company}: "{claim}"
+
+Return ISO format: YYYY-MM-DD if a full date is given, YYYY-MM if only month/year is known,
+or "" if nothing here dates this specific event. Do not return a date for a different event
+about {company} that merely shares a topic — only a date clearly tied to this claim counts."""
+
+
+class _SignalDate(BaseModel):
+    date: str
+
+
+def _parse_iso_partial(s: str) -> date | None:
+    """YYYY-MM-DD or YYYY-MM -> a date (day defaults to 1). None if unparseable —
+    a model that ignores the requested format must not crash the pass, just miss."""
+    from datetime import datetime
+
+    for fmt in ("%Y-%m-%d", "%Y-%m"):
+        try:
+            return datetime.strptime(s.strip(), fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _months_between(earlier: date, later: date) -> int:
+    return (later.year - earlier.year) * 12 + (later.month - earlier.month)
+
+
+def _insert_dated(line: str, iso: str) -> str:
+    """Splice a found date into the line's trailing "(source)" parenthetical —
+    "(TechCrunch)" -> "(TechCrunch, dated 2026-03)" — or append one if the line
+    has no parenthetical at all."""
+    if line.endswith(")") and " (" in line:
+        head, _, tail = line[:-1].rpartition(" (")
+        return f"{head} ({tail}, dated {iso})"
+    return f"{line} (dated {iso})"
+
+
+def date_undated_signal(
+    company: str, claim: str, *, search=serper_search, client=None, costlog=None
+) -> str:
+    """One follow-up Serper search + gpt-4o-mini extraction attempt to pin down a
+    date for a single [undated] buying-signal claim. Returns an ISO date/month
+    string, or "" if no result dates this specific event — the caller must leave
+    the signal marked [undated] rather than invent a date."""
+    results = search(f'"{company}" {claim}', num=5)
+    if costlog is not None:
+        costlog.record_serper(stage="signal_dating")
+    if not results:
+        return ""
+    if client is None:
+        from dotenv import load_dotenv
+        from openai import OpenAI
+
+        load_dotenv()
+        client = OpenAI()
+
+    serp_text = "\n".join(
+        f"- {r.get('title', '')} | {r.get('snippet', '')} | {r.get('link', '')}" for r in results
+    )
+    completion = client.chat.completions.parse(
+        model=MODEL,
+        messages=[
+            {"role": "system", "content": _SIGNAL_DATE_PROMPT.format(company=company, claim=claim)},
+            {"role": "user", "content": serp_text},
+        ],
+        response_format=_SignalDate,
+    )
+    if costlog is not None:
+        u = completion.usage
+        costlog.record(
+            stage="signal_dating",
+            model=MODEL,
+            tokens_in=u.prompt_tokens,
+            tokens_out=u.completion_tokens,
+            cost_usd=u.prompt_tokens * PRICE_IN + u.completion_tokens * PRICE_OUT,
+        )
+    parsed = completion.choices[0].message.parsed
+    return parsed.date.strip() if parsed and parsed.date else ""
+
+
+def redate_undated_signals(
+    p: Prospect, *, search=serper_search, client=None, costlog=None, today: date | None = None
+) -> int:
+    """Mutates p.buying_signals in place: every line ending [undated] gets one
+    follow-up dating attempt (date_undated_signal). A date found replaces the
+    marker with the real date, plus [stale] if it's older than RECENCY_MONTHS —
+    a line where nothing was found is left exactly as Claude wrote it, still
+    [undated]. Returns how many lines were successfully dated.
+
+    This is the gap flagged 2026-07-29: undated signals got a marker and nothing
+    else, permanently — there was no attempt to actually find out when they
+    happened, even though the marker itself is a strong signal something IS
+    dateable (the trigger_phrase/draft-opener rules exist because of it).
+    """
+    now = today or date.today()
+    dated_count = 0
+    updated = []
+    for line in p.buying_signals:
+        if not line.rstrip().endswith("[undated]"):
+            updated.append(line)
+            continue
+        base = line.rstrip()[: -len("[undated]")].rstrip()
+        found = date_undated_signal(p.company, base, search=search, client=client, costlog=costlog)
+        parsed = _parse_iso_partial(found) if found else None
+        if parsed is None:
+            updated.append(line)
+            continue
+        dated_line = _insert_dated(base, found)
+        if _months_between(parsed, now) > RECENCY_MONTHS:
+            dated_line += " [stale]"
+        updated.append(dated_line)
+        dated_count += 1
+    p.buying_signals = updated
+    return dated_count
+
+
 def build_signal_prompt(p: Prospect, *, today: date | None = None) -> str:
     now = today or date.today()
     return f"""From the evidence below, synthesize for {p.company}:

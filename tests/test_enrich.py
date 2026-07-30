@@ -1,13 +1,16 @@
 """S5 — enrichment: Serper-sourced raw signals + Claude synthesis prompt."""
 from gtm.enrich import (
     _Headcount,
+    _SignalDate,
     _SignalList,
     build_signal_prompt,
+    date_undated_signal,
     enrich,
     find_community_signals,
     find_company_linkedin,
     find_headcount,
     find_news,
+    redate_undated_signals,
 )
 from gtm.schema import Prospect
 
@@ -756,3 +759,189 @@ def test_signal_prompt_defaults_to_today_when_no_date_is_passed():
 
     p = Prospect(company="X", website="https://x.com")
     assert date.today().isoformat() in build_signal_prompt(p)
+
+
+# --- trigger dating: item 3, 2026-07-30 — [undated] signals never got a follow-up
+# search to actually find out when they happened. date_undated_signal is the one
+# search+extract call; redate_undated_signals applies it across a prospect's list.
+
+def test_date_undated_signal_returns_the_date_the_model_found():
+    hits = [{"title": "Teal wins award", "link": "https://x.com/a", "snippet": "announced March 2026"}]
+    found = date_undated_signal(
+        "Teal Drones", "Won Army SRR contract", search=lambda q, num=10: hits,
+        client=FakeClient(_SignalDate(date="2026-03")),
+    )
+    assert found == "2026-03"
+
+
+def test_date_undated_signal_returns_empty_when_model_finds_nothing():
+    hits = [{"title": "unrelated", "link": "https://x.com/a", "snippet": "no date here"}]
+    found = date_undated_signal(
+        "Teal Drones", "Won Army SRR contract", search=lambda q, num=10: hits,
+        client=FakeClient(_SignalDate(date="")),
+    )
+    assert found == ""
+
+
+def test_date_undated_signal_skips_the_model_call_when_search_is_empty():
+    calls = []
+
+    class ExplodingClient:
+        chat = completions = None
+
+        def __getattr__(self, name):
+            raise AssertionError("client must not be touched when search returned nothing")
+
+    found = date_undated_signal(
+        "Teal Drones", "Won Army SRR contract", search=lambda q, num=10: [],
+        client=ExplodingClient(),
+    )
+    assert found == ""
+
+
+def test_date_undated_signal_charges_serper_even_on_a_miss():
+    from gtm.costlog import CostLog
+
+    class FakeCostLog(CostLog):
+        def __init__(self):
+            self.records = []
+
+        def record(self, **kwargs):
+            self.records.append(kwargs)
+
+    cl = FakeCostLog()
+    date_undated_signal(
+        "Teal Drones", "Won Army SRR contract", search=lambda q, num=10: [],
+        client=FakeClient(_SignalDate(date="")), costlog=cl,
+    )
+    assert len(cl.records) == 1
+    assert cl.records[0]["provider"] == "serper"
+
+
+def test_date_undated_signal_logs_openai_cost_on_a_hit():
+    from gtm.costlog import CostLog
+
+    class FakeCostLog(CostLog):
+        def __init__(self):
+            self.records = []
+
+        def record(self, **kwargs):
+            self.records.append(kwargs)
+
+        def record_serper(self, **kwargs):
+            self.records.append({"provider": "serper", **kwargs})
+
+    cl = FakeCostLog()
+    hits = [{"title": "t", "link": "https://x.com/a", "snippet": "s"}]
+    date_undated_signal(
+        "Teal Drones", "Won Army SRR contract", search=lambda q, num=10: hits,
+        client=FakeClient(_SignalDate(date="2026-03")), costlog=cl,
+    )
+    openai_records = [r for r in cl.records if r.get("model") == "gpt-4o-mini"]
+    assert len(openai_records) == 1
+    assert openai_records[0]["stage"] == "signal_dating"
+
+
+def test_redate_undated_signals_ignores_lines_that_are_not_undated():
+    from datetime import date
+
+    p = Prospect(
+        company="Teal Drones",
+        website="https://tealdrones.com",
+        buying_signals=[
+            "Won Army SRR contract — validates gov demand (TechCrunch, 2026-05) ",
+            "Old funding round — context only (PR Newswire, 2020-01) [stale]",
+        ],
+    )
+    before = list(p.buying_signals)
+    dated = redate_undated_signals(
+        p, search=lambda q, num=10: (_ for _ in ()).throw(AssertionError("must not search")),
+        client=None, today=date(2026, 7, 30),
+    )
+    assert dated == 0
+    assert p.buying_signals == before
+
+
+def test_redate_undated_signals_inserts_a_found_date_and_drops_the_marker():
+    from datetime import date
+
+    p = Prospect(
+        company="Teal Drones",
+        website="https://tealdrones.com",
+        buying_signals=["Won Army SRR contract — validates gov demand (TechCrunch) [undated]"],
+    )
+    hits = [{"title": "t", "link": "https://x.com/a", "snippet": "March 2026"}]
+    dated = redate_undated_signals(
+        p, search=lambda q, num=10: hits, client=FakeClient(_SignalDate(date="2026-03")),
+        today=date(2026, 7, 30),
+    )
+    assert dated == 1
+    assert p.buying_signals == [
+        "Won Army SRR contract — validates gov demand (TechCrunch, dated 2026-03)"
+    ]
+
+
+def test_redate_undated_signals_marks_a_found_old_date_stale():
+    from datetime import date
+
+    p = Prospect(
+        company="Teal Drones",
+        website="https://tealdrones.com",
+        buying_signals=["Old award — still relevant context (TechCrunch) [undated]"],
+    )
+    dated = redate_undated_signals(
+        p, search=lambda q, num=10: [{"title": "t", "link": "https://x.com/a", "snippet": "s"}],
+        client=FakeClient(_SignalDate(date="2024-01")), today=date(2026, 7, 30),
+    )
+    assert dated == 1
+    assert p.buying_signals[0].endswith("(TechCrunch, dated 2024-01) [stale]")
+
+
+def test_redate_undated_signals_leaves_the_marker_when_nothing_is_found():
+    from datetime import date
+
+    p = Prospect(
+        company="Teal Drones",
+        website="https://tealdrones.com",
+        buying_signals=["Mentioned in a roundup — weak signal (blog.example.com) [undated]"],
+    )
+    dated = redate_undated_signals(
+        p, search=lambda q, num=10: [], client=FakeClient(_SignalDate(date="")),
+        today=date(2026, 7, 30),
+    )
+    assert dated == 0
+    assert p.buying_signals == [
+        "Mentioned in a roundup — weak signal (blog.example.com) [undated]"
+    ]
+
+
+def test_redate_undated_signals_appends_a_parenthetical_when_the_line_has_none():
+    from datetime import date
+
+    p = Prospect(
+        company="Teal Drones",
+        website="https://tealdrones.com",
+        buying_signals=["Some claim with no source at all [undated]"],
+    )
+    dated = redate_undated_signals(
+        p, search=lambda q, num=10: [{"title": "t", "link": "https://x.com/a", "snippet": "s"}],
+        client=FakeClient(_SignalDate(date="2026-06")), today=date(2026, 7, 30),
+    )
+    assert dated == 1
+    assert p.buying_signals == ["Some claim with no source at all (dated 2026-06)"]
+
+
+def test_redate_undated_signals_ignores_a_date_the_model_cannot_parse():
+    from datetime import date
+
+    p = Prospect(
+        company="Teal Drones",
+        website="https://tealdrones.com",
+        buying_signals=["Vague claim (source) [undated]"],
+    )
+    dated = redate_undated_signals(
+        p, search=lambda q, num=10: [{"title": "t", "link": "https://x.com/a", "snippet": "s"}],
+        client=FakeClient(_SignalDate(date="not a date")), today=date(2026, 7, 30),
+    )
+    assert dated == 0
+    assert p.buying_signals == ["Vague claim (source) [undated]"]
