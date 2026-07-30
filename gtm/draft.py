@@ -293,6 +293,36 @@ def check_pain_grounding(p: Prospect, draft: DraftSet) -> str:
     return ""
 
 
+# 2026-07-29 (user): the spec codes are confusing in a cold email. A founder reading
+# "IP67 / MIL-STD-810H" gets a certification string, not a picture of their drone
+# surviving a truck bed — and 8 of the 10 us-drone-19 bodies carried it in the same
+# position, which is what made the batch read like spec-sheet copy-paste. The specs
+# stay true and stay in talking_points (a rep needs them on the call) and in
+# company/ICP.md; they just never appear in a body or subject line.
+_SPEC_JARGON_RE = re.compile(r"\bIP\s?-?6[5-8]\b|\bMIL[-\s]?(?:STD|SPEC)[-\s]?\w*", re.IGNORECASE)
+
+
+def check_spec_jargon(draft: DraftSet) -> str:
+    """Deterministic guard for the voice guide's "No spec codes in the body" rule.
+
+    Scans subjects and bodies only — talking_points are internal call prep and keep the
+    exact codes. Returns "" when clean, else the flag text (same contract as
+    check_reference_customer).
+    """
+    text = (
+        f"{draft.initial_subject}\n{draft.initial_subject_alt}\n"
+        f"{draft.initial_body}\n{draft.initial_body_alt}"
+    )
+    hits = sorted({m.group(0).strip() for m in _SPEC_JARGON_RE.finditer(text)})
+    if hits:
+        return (
+            f"uses spec codes in the email ({', '.join(hits)}) — a cold reader decodes "
+            f"nothing from them; say what the spec does instead (\"sealed against water "
+            f"and dust\", \"drop- and vibration-tested for transport\")"
+        )
+    return ""
+
+
 def build_draft_prompt(
     voice_guide: str, p: Prospect, tier: str, sibling_tiers: list[str] | None = None
 ) -> str:
@@ -420,8 +450,11 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
 
 {opener_block}
 2. **What we build** — foam-fitted to one airframe (aircraft + controller + batteries +
-   payload seated together), IP67 / MIL-STD-810H, US-made. Name a mechanism or spec, never a
-   bare comparative. Social proof goes here, as the literal token {{{{reference_customer}}}} —
+   payload seated together), sealed against water and dust, drop- and vibration-tested for
+   transport, US-made. Name a mechanism or what a spec DOES, never a bare comparative, and
+   never the spec CODES: "IP67", "IP68", "MIL-STD-810H", "MIL-SPEC" are BANNED in the subject
+   and body (they mean nothing to a cold reader) — they belong in talking_points only.
+   Social proof goes here, as the literal token {{{{reference_customer}}}} —
    NEVER a hardcoded company name (AeroVault is a demo company with no customers, and naming
    another prospect from this run as a customer is the exact failure this token prevents).
 {pain_block}{close_num}. **Close** — ONE low-pressure closed-ended ask, negative-CTA preferred ("Would it be a bad
@@ -438,7 +471,7 @@ Draft ONE email (no follow-up), 2 versions. Match the voice guide's example emai
 - Variables (double-brace): {{{{first_name}}}}, {{{{company_name}}}}, {{{{airframe_name}}}},
   {{{{trigger_event}}}}, {{{{case_line}}}}, {{{{reference_customer}}}}, {{{{sender_name}}}}.
 - BANNED SKELETON — do not write the compressed one-liner shape
-  "{{{{first_name}}}} — saw {{{{trigger_event}}}}. We build MIL-STD cases sized to it. Worth a quick
+  "{{{{first_name}}}} — saw {{{{trigger_event}}}}. We build rugged cases sized to it. Worth a quick
   look?". It satisfies every other rule and still reads like a bot. v1 and v2 must differ in
   STRUCTURE, not just wording: one leads with the congratulation, the other with a question
   about their current setup.

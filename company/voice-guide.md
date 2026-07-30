@@ -54,8 +54,21 @@ observation or a genuine question — *"Your {{airframe_name}} kit travels a lot
 most — how is it packed today?"* Stale signals still inform the pitch; they just never lead.
 
 **Block 2 — what we build.** Concrete and specific: foam-fitted to one airframe (aircraft +
-controller + batteries + payload seated together), IP67 / MIL-STD-810H, made in the US.
-Name a mechanism or spec, never a bare comparative. Social proof goes here (see below).
+controller + batteries + payload seated together), sealed against water and dust, drop- and
+vibration-tested for transport, made in the US. Name a mechanism or what a spec *does*, never
+a bare comparative — and never a spec **code** (see below). Social proof goes here (see below).
+
+**No spec codes in the email** (locked 2026-07-29, enforced by `gtm/draft.py::check_spec_jargon`).
+`IP67`, `IP68`, `MIL-STD-810H`, `MIL-SPEC` are banned from every subject line and body. They are
+true (see `company/ICP.md`) and they stay in `talking_points` — a rep needs them on the call —
+but a cold reader decodes nothing from a certification string, and repeating the same code in
+the same sentence position across a batch is what makes a batch read like spec-sheet
+copy-paste (8 of 10 bodies on run us-drone-19). Say what the spec buys them instead:
+
+| Instead of | Write |
+|---|---|
+| IP67 | sealed against water and dust · rain and dust stay out |
+| MIL-STD-810H | drop- and vibration-tested for transport · survives a truck bed and a cargo hold |
 
 **Block 3 — the pain (Tier 1 only).** The consequence *they* feel, tailored to the contact's
 persona tier — see "Persona tailoring". Ground it in `community_signals` or `competitor_weaknesses` — those are the only two fields
@@ -100,7 +113,7 @@ No hedge-padding: "just wanted to", "I was wondering if maybe".
 ## Banned skeleton
 Do not write the compressed one-liner shape:
 
-> ~~"{{first_name}} — saw {{trigger_event}}. We build MIL-STD cases sized to it. Worth a quick look?"~~
+> ~~"{{first_name}} — saw {{trigger_event}}. We build rugged cases sized to it. Worth a quick look?"~~
 
 It technically satisfies every rule above and still reads like a bot: no pain block, no
 reason to care, a zero-cost ask. v1 and v2 must differ in **structure**, not just wording —
@@ -108,9 +121,10 @@ one leads with the congratulation, the other leads with a question about their c
 Two persona tiers at the same company must never receive the same sentence skeleton.
 
 ## Specificity (no vague value-prop claims)
-Every value-prop claim must name a concrete mechanism or spec difference — a MIL-STD-810H
-drop-test rating, an exact dimension, a cited competitor weakness (`competitor_weaknesses`,
-from `gtm/displace.py`'s research step), or a real operator complaint (`community_signals`).
+Every value-prop claim must name a concrete mechanism or spec difference — a drop-test rating
+in plain words (not its code), an exact dimension, a cited competitor weakness
+(`competitor_weaknesses`, from `gtm/displace.py`'s research step), or a real operator
+complaint (`community_signals`).
 Never a bare comparative with nothing behind it: banned — "protects better", "keeps your gear
 safe", "built for reliability" — unless immediately followed by the specific fact that backs it.
 
@@ -166,8 +180,8 @@ templates to fill — every real draft carries that prospect's own signals.
 > Saw {{company_name}}'s {{trigger_event}} — congrats.
 >
 > We build custom transport cases for sUAS manufacturers — foam-fitted to one airframe,
-> IP67 / MIL-STD-810H, made in the US. {{reference_customer}} runs our {{case_line}} line
-> across their tactical lineup.
+> sealed against water and dust, drop-tested for transport, made in the US.
+> {{reference_customer}} runs our {{case_line}} line across their tactical lineup.
 >
 > Companies at {{company_name}}'s stage usually lose money one of two ways: warranty claims
 > from damaged units in transit, or slower sales cycles because buyers don't trust a soft

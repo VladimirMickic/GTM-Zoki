@@ -34,6 +34,7 @@ from gtm.draft import (
     build_redraft_prompt,
     check_pain_grounding,
     check_reference_customer,
+    check_spec_jargon,
     check_tier_distinctness,
     qa_check,
 )
@@ -452,6 +453,7 @@ def cmd_draft(run: str, drafts_json: str) -> None:
                         check_reference_customer(p, draft, others)
                         or check_tier_distinctness(p, tier, draft)
                         or check_pain_grounding(p, draft)
+                        or check_spec_jargon(draft)
                         or qa_check(p, draft, costlog=costlog)
                     )
                     draft.qa_flag = flag or "passed"
@@ -505,6 +507,7 @@ def cmd_redraft(run: str, drafts_json: str) -> None:
                         check_reference_customer(p, draft, others)
                         or check_tier_distinctness(p, tier, draft)
                         or check_pain_grounding(p, draft)
+                        or check_spec_jargon(draft)
                         or qa_check(p, draft, costlog=costlog)
                     )
                     draft.qa_flag = flag or "passed"

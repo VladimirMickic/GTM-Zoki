@@ -7,6 +7,7 @@ from gtm.draft import (
     build_redraft_prompt,
     check_pain_grounding,
     check_reference_customer,
+    check_spec_jargon,
     check_tier_distinctness,
     has_pain_source,
     is_thin_signal,
@@ -849,3 +850,76 @@ def test_draft_prompt_keeps_the_trigger_opener_when_a_fresh_signal_exists():
     assert "{{trigger_event}}" in draft_section
     assert "congrats" in draft_section.lower()
     assert "no fresh, dated trigger" not in prompt.lower()
+
+
+# --- spec-code jargon (2026-07-29 user decision: no IP67/MIL-STD in an email) -------------
+
+def test_check_spec_jargon_flags_the_codes_in_a_body():
+    # us-drone-19 shipped this exact value line in 8 of 10 bodies.
+    draft = _tiered(
+        "field kit for {{airframe_name}}",
+        "{{first_name}},\n\nWe build foam-fit cases sized to one airframe, IP67 / "
+        "MIL-STD-810H, made in the US.\n\n{{sender_name}}",
+    )
+    flag = check_spec_jargon(draft)
+    assert "IP67" in flag and "MIL-STD-810H" in flag
+    assert "sealed against water and dust" in flag  # tells the redraft what to write instead
+
+
+def test_check_spec_jargon_catches_the_codes_in_a_subject_line_and_the_alt_versions():
+    assert "IP67" in check_spec_jargon(DraftSet(initial_subject="IP67 cases for {{airframe_name}}"))
+    assert "MIL-SPEC" in check_spec_jargon(
+        DraftSet(initial_subject="a", initial_subject_alt="MIL-SPEC transport for you")
+    )
+    assert "MIL-STD-810H" in check_spec_jargon(
+        DraftSet(initial_subject="a", initial_body_alt="rated MIL-STD-810H, US-made")
+    )
+
+
+def test_check_spec_jargon_variants_and_spacing():
+    for text in ("IP 67", "ip68", "IP-65", "mil-std 810", "MIL STD", "Mil-Spec"):
+        assert check_spec_jargon(DraftSet(initial_body=f"we build to {text} for you")), text
+
+
+def test_check_spec_jargon_passes_the_plain_language_replacement():
+    draft = _tiered(
+        "field kit for {{airframe_name}}",
+        "{{first_name}},\n\nWe build foam-fit cases sized to one airframe — sealed against "
+        "water and dust, drop- and vibration-tested for transport, made in the US.\n\n"
+        "{{sender_name}}",
+    )
+    assert check_spec_jargon(draft) == ""
+
+
+def test_check_spec_jargon_does_not_fire_on_ordinary_copy_that_merely_contains_ip_or_mil():
+    # Substring matching here would flag routine words: "equipment"/"shipping" hold "ip",
+    # and a "mil" prefix shows up in "military" and "milled".
+    draft = _tiered(
+        "shipping {{airframe_name}}",
+        "{{first_name}},\n\nMilitary buyers hold you to a standard, and your equipment "
+        "ships a lot. Our foam is milled per airframe.\n\n{{sender_name}}",
+    )
+    assert check_spec_jargon(draft) == ""
+
+
+def test_check_spec_jargon_ignores_talking_points_which_keep_the_exact_codes():
+    # The specs are true and a rep needs them on the call — the ban is body/subject only.
+    draft = DraftSet(
+        initial_subject="field kit for {{airframe_name}}",
+        initial_body="{{first_name}},\n\nSealed against water and dust.\n\n{{sender_name}}",
+        talking_points="US-made, IP67 / MIL-STD-810H, foam-fit to the airframe",
+    )
+    assert check_spec_jargon(draft) == ""
+
+
+def test_draft_prompt_bans_the_codes_and_supplies_the_plain_language_substitute():
+    p = Prospect(
+        company="Cleo Robotics", website="https://cleorobotics.com", status="keep",
+        case_evidence="ships in a case built by the manufacturer itself",
+        buying_signals=["$2.5M US Army RCCTO prototype contract (dronelife, 2026-06-01)"],
+    )
+    prompt = build_draft_prompt(VOICE_GUIDE_SAMPLE, p, "c-suite")
+    assert "BANNED in the subject" in prompt
+    assert "sealed against water and dust" in prompt
+    # The banned-skeleton example must not itself model the banned code.
+    assert "We build MIL-STD cases sized to it" not in prompt
