@@ -44,17 +44,35 @@ def _domain(url: str) -> str:
     return urlparse(url).netloc.removeprefix("www.")
 
 
+# Words that say "drone company" rather than *which* drone company. Matched alone they
+# hand any industry domain to any maker: "US Drone Makers" claimed dronelife.us off the
+# bare token "drone". Only barred as standalone candidates — joined forms ("tealdrones")
+# stay, because those are distinctive.
+GENERIC_NAME_TOKENS = {
+    "aerial", "aeronautics", "aerospace", "aviation", "company", "corp", "corporation",
+    "defense", "drone", "drones", "group", "holdings", "inc", "industries", "international",
+    "llc", "ltd", "maker", "makers", "robotics", "solutions", "systems", "tech",
+    "technologies", "technology", "uas", "uav", "unmanned",
+}
+
+
 def _name_matches_domain(company: str, domain: str) -> bool:
     """True if the company's name plausibly owns the domain (guards against
     articles/listicles ABOUT a maker passing with the publisher's URL)."""
     tokens = re.findall(r"[a-z0-9]+", company.lower())
     if not tokens:
         return False
-    candidates = {t for t in tokens if len(t) >= 4}
+    candidates = {t for t in tokens if len(t) >= 4 and t not in GENERIC_NAME_TOKENS}
     candidates.update(a + b for a, b in zip(tokens, tokens[1:]))  # "red cat" → "redcat"
     candidates.add("".join(tokens))
     domain_flat = re.sub(r"[^a-z0-9]", "", domain.lower())
-    return any(c in domain_flat for c in candidates)
+    if any(c in domain_flat for c in candidates):
+        return True
+    # A short distinctive token ("AAI Corporation" at aai.com) can't be substring-matched
+    # — 3 letters hit half the web — so it has to BE the domain's own label. Checking only
+    # the first label keeps a country-code TLD from lending "us"/"co" to a listicle.
+    label = domain.lower().split(".")[0]
+    return any(2 <= len(t) <= 3 and t == label for t in tokens)
 
 
 def load_denylist(path: str | Path = DENYLIST_FILE) -> set[str]:

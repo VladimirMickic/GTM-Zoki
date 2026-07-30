@@ -160,7 +160,14 @@ def pick_product_links(
             shallow.append(h)
     if keyword_only:
         return keyword[:limit]
-    return (keyword or sorted(shallow, key=_model_likeness))[:limit]
+    # Keyword hits rank first but no longer veto the shallow tier: the live hyl.io run
+    # had exactly one keyword path (/hardware) and left the second crawl slot unused
+    # while /pegasus and /ares sat in the shallow tier, so extraction saw no model
+    # names at all. Within each tier the aircraft-named path wins (/products/black-widow
+    # over the /products index).
+    ranked = sorted(keyword, key=_model_likeness)
+    ranked += [h for h in sorted(shallow, key=_model_likeness) if h not in ranked]
+    return ranked[:limit]
 
 
 def scrape_deep(

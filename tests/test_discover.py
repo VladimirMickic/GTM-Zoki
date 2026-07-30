@@ -147,6 +147,39 @@ def test_discover_drops_candidates_whose_name_is_absent_from_domain():
     assert [c.company for c in got] == ["BRINC", "Teal Drones", "Red Cat Holdings"]
 
 
+def test_name_matches_domain_accepts_a_short_name_that_is_the_domain_label():
+    """The >=4-char rule silently dropped every maker whose distinctive token is short:
+    "AAI Corporation" at aai.com produced candidates {corporation, aaicorporation} and
+    matched nothing. Substring-matching a 3-char token against the whole domain would
+    fire on anything, so a short token has to BE the domain's own label."""
+    from gtm.discover import _name_matches_domain
+
+    assert _name_matches_domain("AAI Corporation", "aai.com")
+    assert _name_matches_domain("SES Drones", "ses.com")
+    assert _name_matches_domain("XAG", "xag.com")  # already worked, via the joined form
+
+
+def test_name_matches_domain_short_token_must_be_the_label_not_a_substring():
+    from gtm.discover import _name_matches_domain
+
+    # a listicle's "US" must not claim a .us domain, nor "ses" claim sesame.com
+    assert not _name_matches_domain("US Drone Makers", "dronelife.us")
+    assert not _name_matches_domain("SES Drones", "sesame.com")
+    assert not _name_matches_domain("Skydio", "abjacademy.global")
+
+
+def test_discover_keeps_a_short_named_maker():
+    marked = CandidateList(
+        candidates=[
+            {"company": "AAI Corporation", "website": "https://aai.com/", "is_manufacturer": True},
+            {"company": "Top US Drones", "website": "https://dronelife.us/list", "is_manufacturer": True},
+        ]
+    )
+    serp = [{"title": "t", "link": "https://x.com", "snippet": "s"}]
+    got = discover("q", search=lambda q, num=10: serp, client=FakeClient(marked), denylist=set())
+    assert [c.company for c in got] == ["AAI Corporation"]
+
+
 def test_discover_does_not_narrow_to_us_by_default():
     seen = []
 

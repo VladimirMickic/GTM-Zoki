@@ -146,12 +146,66 @@ def test_pick_product_links_ranking_is_stable_within_a_tier():
 
 
 def test_pick_product_links_ranking_never_outranks_a_keyword_path():
-    """An explicit /products/ or /drones/ path beats a model-like guess every time."""
+    """An explicit /products/ or /drones/ path beats a model-like guess every time.
+
+    It out*ranks* it — it no longer excludes it (see the top-up test below).
+    """
     from gtm.scrape import pick_product_links
 
     hrefs = ["https://t.com/perimeter-8", "https://t.com/products/hawk"]
     picked = pick_product_links(hrefs, "https://t.com/")
-    assert picked == ["https://t.com/products/hawk"]
+    assert picked[0] == "https://t.com/products/hawk"
+
+
+def test_pick_product_links_tops_up_spare_slots_with_shallow_candidates():
+    """Live hyl.io run (2026-07-29) burned only 1 of 2 crawl slots: the single keyword
+    path /hardware suppressed the shallow tier entirely, so the named model pages
+    (/pegasus, /ares) were never fetched and extraction found no airframe names, which
+    blocked {{airframe_name}} at the ship gate. A keyword hit should rank first, not
+    veto the leftover slot.
+    """
+    from gtm.scrape import pick_product_links
+
+    hrefs = [
+        "https://hyl.io/hardware",
+        "https://hyl.io/about",
+        "https://hyl.io/pegasus",
+        "https://hyl.io/ares",
+    ]
+    picked = pick_product_links(hrefs, "https://hyl.io/")
+    assert picked == ["https://hyl.io/hardware", "https://hyl.io/pegasus"]
+
+
+def test_pick_product_links_keyword_tier_promotes_the_model_page_over_the_index():
+    """/products is the catalog landing page, /products/black-widow has the specs. Both
+    are keyword hits; the one named after an aircraft is worth more."""
+    from gtm.scrape import pick_product_links
+
+    hrefs = [
+        "https://t.com/products",
+        "https://t.com/products/black-widow",
+    ]
+    picked = pick_product_links(hrefs, "https://t.com/")
+    assert picked[0] == "https://t.com/products/black-widow"
+
+
+def test_pick_product_links_top_up_never_duplicates_or_exceeds_the_cap():
+    from gtm.scrape import pick_product_links
+
+    hrefs = ["https://t.com/products/hawk", "https://t.com/drones/owl", "https://t.com/pegasus"]
+    picked = pick_product_links(hrefs, "https://t.com/")
+    assert picked == ["https://t.com/products/hawk", "https://t.com/drones/owl"]
+    assert len(picked) == len(set(picked))
+
+
+def test_pick_product_links_keyword_only_still_excludes_the_shallow_tier():
+    """scrape_deep's sitemap pass is keyword_only — a sitemap has no nav order, so a
+    shallow guess from it ranks nothing and must not be topped up."""
+    from gtm.scrape import pick_product_links
+
+    hrefs = ["https://hyl.io/hardware", "https://hyl.io/pegasus"]
+    picked = pick_product_links(hrefs, "https://hyl.io/", keyword_only=True)
+    assert picked == ["https://hyl.io/hardware"]
 
 
 def test_scrape_deep_skips_subpage_crawls_when_nothing_worth_fetching():

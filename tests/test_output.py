@@ -7,6 +7,7 @@ from gtm.output import (
     build_contact_rows,
     push_contacts_to_sheet,
     push_to_sheet,
+    unrendered_summary,
     write_contacts_csv,
     write_csv,
 )
@@ -307,6 +308,58 @@ def test_email_status_not_run_when_emails_stage_never_ran():
     rows = build_contact_rows(p)
     assert [r["email_status"] for r in rows] == ["not_run"] * 3
     assert all(r["contact_email"] == "" for r in rows)
+
+
+def test_role_address_is_flagged_so_a_first_name_draft_is_not_sent_to_a_shared_inbox():
+    """data/feedback.jsonl 2026-07-19 (Paladin): tier-3 AI hunt returned
+    team@paladindrones.io for Maxwell Wang. Deliverable, verified — and the row still
+    shipped a "Hi Maxwell" draft to a shared inbox with nothing on the sheet saying so.
+    """
+    p = MULTI.model_copy(
+        update={"contact_emails": "team@tealdrones.com (verified); manoj@tealdrones.com (valid); -"}
+    )
+    rows = build_contact_rows(p)
+    assert "role-address" in rows[0]["qa_flag"]
+    assert "team@" in rows[0]["qa_flag"]
+    assert "role-address" not in rows[1]["qa_flag"]  # a personal mailbox is not flagged
+    assert "role-address" not in rows[2]["qa_flag"]  # nor is a miss
+
+
+def test_role_address_flag_does_not_blank_the_draft():
+    """A shared inbox is still deliverable and sometimes the only route in — this is a
+    human review call, not a broken render, so the copy stays and the flag explains."""
+    p = MULTI.model_copy(update={"contact_emails": "info@tealdrones.com (verified); -; -"})
+    row = build_contact_rows(p)[0]
+    assert row["draft_initial_body"]
+    assert row["contact_email"] == "info@tealdrones.com"
+
+
+def test_role_address_flag_composes_behind_the_unrendered_gate():
+    """unrendered_summary() keys off the "unrendered:" prefix, so the ship-gate flag has
+    to stay first when a row trips both."""
+    p = MULTI.model_copy(
+        update={
+            "contact_emails": "sales@tealdrones.com (verified); -; -",
+            "drafts_by_tier": {
+                "c-suite": DraftSet(
+                    initial_subject="s", initial_body="Hi {{nickname}}",
+                    initial_subject_alt="s2", initial_body_alt="b2",
+                )
+            },
+        }
+    )
+    row = build_contact_rows(p)[0]
+    assert row["qa_flag"].startswith("unrendered:")
+    assert "role-address" in row["qa_flag"]
+    # both c-suite contacts share that draft, so both rows are gated — the point is
+    # that the role-address flag didn't hide either of them from the count
+    assert unrendered_summary([p]) == 2
+
+
+def test_role_address_check_only_looks_at_the_local_part():
+    # a personal mailbox on a domain that merely contains a role word is not a role box
+    p = MULTI.model_copy(update={"contact_emails": "blake@teamdrones.com (verified); -; -"})
+    assert "role-address" not in build_contact_rows(p)[0]["qa_flag"]
 
 
 def test_email_status_miss_survives_when_waterfall_ran_and_found_nothing():

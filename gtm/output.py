@@ -103,6 +103,25 @@ def _parse_email_entry(entry: str) -> tuple[str, str]:
     return "", "miss"
 
 
+# Shared inboxes. The email waterfall's tier-3 AI hunt surfaces these when a personal
+# mailbox can't be found (data/feedback.jsonl 2026-07-19: team@paladindrones.io returned
+# for Maxwell Wang), and they verify clean, so nothing downstream noticed that a
+# "Hi Maxwell" draft was addressed to whoever staffs the inbox.
+ROLE_LOCAL_PARTS = frozenset(
+    {
+        "admin", "careers", "contact", "enquiries", "general", "hello", "help", "info",
+        "inquiries", "jobs", "mail", "marketing", "office", "press", "sales", "service",
+        "support", "team",
+    }
+)
+
+
+def _role_local_part(email: str) -> str:
+    """The shared-inbox local part of `email`, or "" if it looks personal."""
+    local = email.split("@", 1)[0].strip().lower()
+    return local if local in ROLE_LOCAL_PARTS else ""
+
+
 _DRAFT_ROW_FIELDS = (
     "draft_initial_subject",
     "draft_initial_body",
@@ -177,11 +196,20 @@ def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list
         survivors = []
         for field in _DRAFT_ROW_FIELDS:
             survivors.extend(t for t in unrendered_tokens(row[field]) if t not in survivors)
+        flags = []
         if survivors:
             for field in _DRAFT_ROW_FIELDS:
                 row[field] = ""
-            flag = f"unrendered: {', '.join(survivors)}"
-            row["qa_flag"] = f"{flag} | {draft.qa_flag}" if draft.qa_flag else flag
+            # Stays first: unrendered_summary() and cmd_output key off this prefix.
+            flags.append(f"unrendered: {', '.join(survivors)}")
+        # A shared inbox is deliverable and sometimes the only way in, so this warns
+        # rather than blanking the copy — whether to send a first-name email to a
+        # staffed inbox is a human call, and the flag is how they get to make it.
+        role = _role_local_part(email) if email else ""
+        if role:
+            flags.append(f"role-address: {role}@ is a shared inbox, not {first or name}")
+        if flags:
+            row["qa_flag"] = " | ".join(flags + ([draft.qa_flag] if draft.qa_flag else []))
 
         rows.append(row)
     return rows
