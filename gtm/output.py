@@ -78,16 +78,28 @@ def write_csv(prospects: list[Prospect], path: str | Path, include_drops: bool =
     return len(keep)
 
 
+# No email cell for a contact at all — the emails stage never processed them.
+# Distinct from "miss" on purpose: run us-drone-11 pushed every contact as "miss"
+# with `python -m gtm.run emails` never invoked, so the sheet said "searched, found
+# nothing" about a search that never happened.
+NOT_RUN = "not_run"
+
+
 def _parse_email_entry(entry: str) -> tuple[str, str]:
     """Splits one "email (status)" entry from Prospect.contact_emails into
     (email, status). Anything that isn't a well-formed "email (status)" entry —
     "-", blank, or malformed — is a miss: returns ("", "miss"), never dropped
     (unlike gtm/hubspot.py::_parse_email, which drops misses for its own
-    CRM-push purposes; the Contacts tab must show every tracked person)."""
+    CRM-push purposes; the Contacts tab must show every tracked person).
+
+    "-" is the miss placeholder, never an address: "- (no-finder-key)" keeps its
+    status but yields no email (a literal "-" in contact_email would also collide
+    in _contact_dedupe_key, merging two emailless contacts into one row)."""
     entry = entry.strip()
     if entry.endswith(")") and " (" in entry:
         email, _, status = entry[:-1].partition(" (")
-        return email.strip(), status.strip()
+        email = email.strip()
+        return ("" if email == "-" else email), status.strip()
     return "", "miss"
 
 
@@ -122,7 +134,7 @@ def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list
 
     rows = []
     for i, name in enumerate(names):
-        email, status = _parse_email_entry(emails[i]) if i < len(emails) else ("", "miss")
+        email, status = _parse_email_entry(emails[i]) if i < len(emails) else ("", NOT_RUN)
         name = name.strip()
         first = name.split()[0] if name else ""
         title = titles[i].strip() if i < len(titles) else ""
@@ -188,6 +200,31 @@ def unrendered_summary(prospects: list[Prospect], *, config=None) -> int:
     )
 
 
+OUTREACH_TOKENS = ("{{sender_name}}", "{{reference_customer}}")
+
+
+def blocked_row_tokens(prospects: list[Prospect], *, config=None) -> list[str]:
+    """Which tokens actually blocked this run's rows, in order of first appearance.
+
+    cmd_output used to blame company/outreach.md for every block. Run us-drone-13's
+    only block was {{airframe_name}} — a missing drone model, nothing outreach.md can
+    fix — so the message sent the reader to the wrong file."""
+    run_mates = [p.company for p in prospects]
+    tokens: list[str] = []
+    for p in prospects:
+        if p.status == "drop":
+            continue
+        for row in build_contact_rows(p, config=config, run_mates=run_mates):
+            flag = row["qa_flag"]
+            if not flag.startswith("unrendered:"):
+                continue
+            for token in flag.split("|")[0].removeprefix("unrendered:").split(","):
+                token = token.strip()
+                if token and token not in tokens:
+                    tokens.append(token)
+    return tokens
+
+
 def write_contacts_csv(prospects: list[Prospect], path: str | Path) -> int:
     from gtm.render import load_outreach_config
 
@@ -217,14 +254,28 @@ def _normalize_domain(website: str) -> str:
     return d.rstrip("/")
 
 
-def _contact_dedupe_key(row: dict) -> str:
-    """Email is the most reliable identity; LinkedIn next; name+company last
-    resort when a contact has neither (still better than always appending)."""
+def _contact_identity_keys(row: dict) -> list[str]:
+    """Every identity this row can be recognized by, strongest first.
+
+    A contact's strongest identity changes over time: rows pushed before the emails
+    stage ran carry only a LinkedIn, and gain an email on the next push. Matching on
+    the primary key alone made that same person append as a second row (runs
+    us-drone-11/13, 2026-07-29), so both sides of the lookup use the full set."""
+    keys = []
     if row["contact_email"]:
-        return f"email:{row['contact_email'].lower()}"
+        keys.append(f"email:{row['contact_email'].lower()}")
     if row["contact_linkedin"]:
-        return f"li:{row['contact_linkedin'].lower()}"
-    return f"name:{row['company'].lower()}|{row['contact_name'].lower()}"
+        keys.append(f"li:{row['contact_linkedin'].lower()}")
+    if row["contact_name"]:
+        keys.append(f"name:{row['company'].lower()}|{row['contact_name'].lower()}")
+    return keys
+
+
+def _contact_dedupe_key(row: dict) -> str:
+    """The row's primary identity — email, else LinkedIn, else name+company (still
+    better than always appending). Used to dedupe within one run."""
+    keys = _contact_identity_keys(row)
+    return keys[0] if keys else f"name:{row['company'].lower()}|"
 
 
 def _open_worksheet(name: str = "Companies"):
@@ -317,13 +368,13 @@ def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> Shee
     for i, row in enumerate(data_rows):
         if len(row) <= max(email_idx, linkedin_idx, company_idx, name_idx):
             continue
-        key = _contact_dedupe_key({
+        for key in _contact_identity_keys({
             "contact_email": row[email_idx],
             "contact_linkedin": row[linkedin_idx],
             "company": row[company_idx],
             "contact_name": row[name_idx],
-        })
-        row_by_key.setdefault(key, i + 2)
+        }):
+            row_by_key.setdefault(key, i + 2)
 
     updates: list[tuple[int, list]] = []
     appends: list[list] = []
@@ -334,7 +385,9 @@ def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> Shee
             continue
         seen.add(key)
         values = [row[col] for col in CONTACT_COLUMNS]
-        row_no = row_by_key.get(key)
+        row_no = next(
+            (row_by_key[k] for k in _contact_identity_keys(row) if k in row_by_key), None
+        )
         if row_no is None:
             appends.append(values)
         else:

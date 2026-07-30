@@ -1302,7 +1302,10 @@ def test_cmd_output_reports_rows_blocked_by_the_render_gate(monkeypatch, tmp_pat
     prospects = [Prospect(
         company="Red Cat", website="https://redcatholdings.com", fit_score=87, status="priority",
         contact_name="Jeff Thompson", contact_title="CEO",
-        drafts_by_tier={"c-suite": DraftSet(initial_body="Hi {{first_name}} — {{sender_name}}")},
+        # {{trigger_event}}, not {{sender_name}}: this prospect has no fresh signal,
+        # so the token is unfillable from the prospect's own data — the assertion no
+        # longer depends on whether the live company/outreach.md happens to be filled.
+        drafts_by_tier={"c-suite": DraftSet(initial_body="Hi {{first_name}} — {{trigger_event}}")},
     )]
     save_state(prospects, tmp_path)
 
@@ -1310,7 +1313,10 @@ def test_cmd_output_reports_rows_blocked_by_the_render_gate(monkeypatch, tmp_pat
 
     out = capsys.readouterr().out
     assert "1 contact row blocked" in out
-    assert "company/outreach.md" in out
+    assert "{{trigger_event}}" in out
+    # Only outreach.md's own tokens send the reader to outreach.md (see
+    # gtm/output.py::blocked_row_tokens) — a stale signal is not fixable there.
+    assert "company/outreach.md" not in out
 
 
 def test_cmd_output_says_nothing_about_the_gate_when_every_row_renders(monkeypatch, tmp_path, capsys):

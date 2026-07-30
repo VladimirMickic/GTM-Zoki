@@ -211,6 +211,37 @@ def test_push_contacts_to_sheet_matches_on_linkedin_when_email_is_a_miss():
     assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Steven Butler"
 
 
+def test_push_contacts_to_sheet_matches_a_row_that_gained_an_email_later():
+    # 2026-07-29: runs us-drone-11/13 were pushed BEFORE the emails stage ran, so
+    # their sheet rows carry a LinkedIn and no email. Re-pushing after the waterfall
+    # changes the contact's primary identity from LinkedIn to email — if the lookup
+    # only tries the primary key, the same person appends as a second row.
+    ws = FakeWorksheet()
+    existing_row = [""] * len(CONTACT_COLUMNS)
+    existing_row[CONTACT_COLUMNS.index("company")] = "Teal Drones"
+    existing_row[CONTACT_COLUMNS.index("contact_name")] = "Blake Resnick"
+    existing_row[CONTACT_COLUMNS.index("contact_linkedin")] = "https://linkedin.com/in/blake"
+    ws.values = [CONTACT_COLUMNS, existing_row]
+    res = push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert (res.added, res.updated) == (2, 1)
+    updated = ws.batched[0]["values"][0]
+    assert updated[CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
+    assert updated[CONTACT_COLUMNS.index("contact_email")] == "blake@tealdrones.com"
+
+
+def test_push_contacts_to_sheet_matches_on_name_when_a_row_has_neither_id():
+    # Rows pushed with no email and no LinkedIn (both scraped blank) still have a
+    # name+company identity — the third key in _contact_dedupe_key.
+    ws = FakeWorksheet()
+    existing_row = [""] * len(CONTACT_COLUMNS)
+    existing_row[CONTACT_COLUMNS.index("company")] = "Teal Drones"
+    existing_row[CONTACT_COLUMNS.index("contact_name")] = "Manoj Mohan"
+    ws.values = [CONTACT_COLUMNS, existing_row]
+    res = push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert (res.added, res.updated) == (2, 1)
+    assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Manoj Mohan"
+
+
 def test_contact_columns_locked_order():
     # 2026-07-21 (user layout): drafts live on the Contacts tab again; source/status
     # dropped. One row per contact; company-level cells (outreach_angle, drafts,
@@ -266,6 +297,43 @@ def test_build_contact_rows_keeps_all_contacts_including_email_miss():
     assert rows[1]["email_status"] == "risky"
     assert rows[2]["contact_email"] == ""
     assert rows[2]["email_status"] == "miss"
+
+
+def test_email_status_not_run_when_emails_stage_never_ran():
+    # 2026-07-29: runs us-drone-11/13 shipped every contact as "miss" without the
+    # emails stage ever being invoked — "we looked and found nothing" and "we never
+    # looked" read identically on the sheet. They are different facts.
+    p = MULTI.model_copy(update={"contact_emails": ""})
+    rows = build_contact_rows(p)
+    assert [r["email_status"] for r in rows] == ["not_run"] * 3
+    assert all(r["contact_email"] == "" for r in rows)
+
+
+def test_email_status_miss_survives_when_waterfall_ran_and_found_nothing():
+    p = MULTI.model_copy(update={"contact_emails": "-; -; -"})
+    assert [r["email_status"] for r in build_contact_rows(p)] == ["miss"] * 3
+
+
+def test_email_status_not_run_for_contacts_added_after_the_waterfall():
+    # A contact with no parallel email cell at all was never searched, even when
+    # earlier indexes were.
+    p = MULTI.model_copy(update={"contact_emails": "blake@tealdrones.com (verified)"})
+    assert [r["email_status"] for r in build_contact_rows(p)] == [
+        "verified", "not_run", "not_run",
+    ]
+
+
+def test_no_finder_key_placeholder_is_not_treated_as_an_email():
+    # emails_for_prospect writes "- (no-finder-key)" (gtm/run.py). The "-" is a
+    # placeholder, not an address: it must not land in contact_email, and two such
+    # contacts must not collapse into one row via the email dedupe key.
+    from gtm.output import _contact_dedupe_key
+
+    p = MULTI.model_copy(update={"contact_emails": "- (no-finder-key); - (no-finder-key); -"})
+    rows = build_contact_rows(p)
+    assert [r["contact_email"] for r in rows] == ["", "", ""]
+    assert [r["email_status"] for r in rows] == ["no-finder-key", "no-finder-key", "miss"]
+    assert _contact_dedupe_key(rows[0]) != _contact_dedupe_key(rows[1])
 
 
 def test_build_contact_rows_company_level_fields_repeat_on_every_row():
@@ -529,3 +597,24 @@ def test_unrendered_summary_counts_blocked_rows():
                      contact_name="Adam Bry", contact_title="CEO",
                      drafts_by_tier={"c-suite": DraftSet(initial_body="hi there")})
     assert unrendered_summary([blocked, clean], config=OutreachConfig()) == 1
+
+
+def test_blocked_row_tokens_names_the_tokens_that_actually_blocked():
+    # 2026-07-29: us-drone-13's only block was {{airframe_name}} (no drone model on
+    # the prospect) but cmd_output told the reader to fill company/outreach.md.
+    from gtm.output import OUTREACH_TOKENS, blocked_row_tokens
+    from gtm.render import OutreachConfig
+
+    airframe = Prospect(company="Hylio", website="https://hyl.io", status="priority",
+                        contact_name="Joseph Kana", contact_title="CEO",
+                        drafts_by_tier={"c-suite": DraftSet(
+                            initial_body="hi — the {{airframe_name}}", qa_flag="passed")})
+    sender = Prospect(company="Red Cat", website="https://redcatholdings.com", status="priority",
+                      contact_name="Jeff Thompson", contact_title="CEO",
+                      drafts_by_tier={"c-suite": DraftSet(initial_body="hi {{sender_name}}")})
+    filled = OutreachConfig(sender_name="Vladimir Mickic", fallback_reference="defense sUAS makers")
+
+    assert blocked_row_tokens([airframe], config=filled) == ["{{airframe_name}}"]
+    assert not any(t in OUTREACH_TOKENS for t in blocked_row_tokens([airframe], config=filled))
+    assert blocked_row_tokens([sender], config=OutreachConfig()) == ["{{sender_name}}"]
+    assert blocked_row_tokens([], config=filled) == []

@@ -522,7 +522,9 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
 
     from gtm.hubspot import push_to_hubspot
     from gtm.output import (
+        OUTREACH_TOKENS,
         SERVICE_ACCOUNT_FILE,
+        blocked_row_tokens,
         push_contacts_to_sheet,
         push_to_sheet,
         unrendered_summary,
@@ -544,10 +546,15 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         print(f"wrote {nc} contacts → {contacts_csv_path}")
         blocked = unrendered_summary(prospects)
         if blocked:
+            tokens = blocked_row_tokens(prospects)
+            fix = (
+                " — fill company/outreach.md"
+                if any(t in OUTREACH_TOKENS for t in tokens)
+                else ""
+            )
             print(
-                f"{blocked} contact row{'s' if blocked > 1 else ''} blocked from send — a "
-                f"draft token had no value behind it (see each row's qa_flag; fill "
-                f"company/outreach.md for sender/reference tokens)"
+                f"{blocked} contact row{'s' if blocked > 1 else ''} blocked from send — no "
+                f"value behind {', '.join(tokens)} (see each row's qa_flag){fix}"
             )
         if Path(SERVICE_ACCOUNT_FILE).exists() and writes_enabled(not dry_run):
             pushed = push_to_sheet(prospects)

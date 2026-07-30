@@ -10,9 +10,10 @@ any draft still needing it is blocked from the sheet with a `qa_flag`, never shi
 the raw token showing (which is exactly what run `test-batch-1` pushed).
 
 ## Sender
-- name: TODO — the human name that signs every email (e.g. "Vladimir Mickic")
-- title: TODO — optional, e.g. "Founder, AeroVault Cases"
-- email: TODO — optional, the reply-to address
+- name: Vladimir Mickic
+- title: Founder, AeroVault Cases
+- email: TODO — optional, the reply-to address (nothing reads it yet; only `name`
+  fills a draft token)
 
 ## Approved reference customers
 Real AeroVault references only, and only ones cleared to be named in writing. Never a

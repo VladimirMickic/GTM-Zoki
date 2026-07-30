@@ -45,9 +45,13 @@ def test_unrendered_tokens_lists_survivors():
 
 
 def test_load_outreach_config_reads_the_repo_file():
+    # 2026-07-29: the sender was filled in so the pushed rows could ship, so this no
+    # longer asserts emptiness — it asserts the live file still parses into a usable
+    # config. A sender that silently stops parsing blocks every row in every run.
     cfg = load_outreach_config()
-    # Seeded with TODOs on purpose: an unfilled sender must block a send, loudly.
-    assert cfg.sender_name == ""
+    assert cfg.sender_name and "todo" not in cfg.sender_name.lower()
+    # No named reference is approved yet (naming an unapproved customer is worse than
+    # naming none), so the category-level fallback is what fills the token.
     assert cfg.reference_customers == []
     assert cfg.fallback_reference == "defense sUAS makers we work with"
 
