@@ -33,12 +33,15 @@ First prospect: **Teal Drones** (tealdrones.com).
 
 ## Pipeline (demo = stages 1–6 → Sheet; see docs/PLAN.md)
 1. **Input** — URLs, or Serper NL search → auto-filter to real makers (no approval step).
-2. **Scrape** — crawl4ai → markdown; named in prompt; auto-fallback (Firecrawl→Scrapling→Apify→ScrapeGraphAI).
+2. **Scrape** — crawl4ai → markdown; named in prompt; auto-fallback (Firecrawl→ScrapeGraphAI→Apify;
+   social hosts go straight to Apify). Scrapling dropped — see `docs/tools/scrapers.md`.
 3. **Extract** — `gpt-4o-mini`: markdown → structured drone fields (one place, scraper-agnostic).
 4. **Fit** — Claude scores 0–100 vs `company/ICP.md`; hard disqualifiers.
 5. **Contacts + Enrich** (passers only) — Serper `site:linkedin.com/in` + team scrape (names/titles/LinkedIn, no email yet); `company-research` find-profiles + find-news; Serper LinkedIn/Reddit.
 6. **Output** — CSV → Google Sheet (service account).
-- **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits each run.
+- **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
+  entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
+  session/smoke-test notes are context, never grounds for an edit on their own.
 
 ## Decisions locked
 - Demo, Python, Claude orchestrates. Model routing: gpt-4o-mini = extraction, Claude = judgment.

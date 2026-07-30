@@ -99,6 +99,23 @@ def _trim_keep_source(s: str, n: int) -> str:
     return s + source + marker
 
 
+class Feedback(BaseModel):
+    """One data/feedback.jsonl entry — the Learn stage's only input (CLAUDE.md).
+
+    `origin` distinguishes feedback a user actually gave from Claude's own
+    session/smoke-test write-ups: only "user" entries may drive a proposed
+    company/ICP.md or company/denylist.md edit (see gtm/learn.py). The default,
+    "session", covers every entry recorded before this field existed — checked
+    2026-07-30: all 20 were live-smoke/dev-log notes, none a user's own words —
+    and any future note Claude writes about its own run rather than repeating
+    something the user said."""
+    date: str
+    run: str
+    company: str
+    feedback: str
+    origin: str = "session"
+
+
 class DraftSet(BaseModel):
     """One tier's outreach package: pain_points/talking_points (always
     produced — the primary, position-specific deliverable) plus a single

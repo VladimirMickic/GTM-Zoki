@@ -54,18 +54,32 @@ FEEDBACK = DATA / "feedback.jsonl"
 
 
 def run_costlog(run: str) -> CostLog:
-    """Per-run cost file so `cost of each run` is separable (openai $ + serper
-    credits). Also arms serper credit logging: every serper_search call routes
-    through gtm.contacts and records 1 credit into this file (ambient hook)."""
+    """Per-run cost file so `cost of each run` is separable. Also arms the two
+    ambient credit hooks: every serper_search (gtm.contacts) and every email
+    finder/verifier call (gtm.email_providers) records its own credit into this
+    file without being handed a costlog."""
     import gtm.contacts as contacts
+    import gtm.email_providers as email_providers
 
     costlog = CostLog(run_dir(run) / "costs.jsonl")
     contacts.set_active_costlog(costlog)
+    email_providers.set_active_costlog(costlog)
     return costlog
 
 
 def _print_cost_summary(run: str) -> None:
-    print(f"\ncost this run — {CostLog(run_dir(run) / 'costs.jsonl').summary_line()}")
+    """The four spend units of a run, in one line: openai dollars, serper credits,
+    email-vendor credits, Claude judgment tokens. Claude's share is charged here
+    rather than at a call site — it is spent OUTSIDE this process, between stage
+    commands, and only Claude Code's transcript records it (gtm/claudeusage.py)."""
+    from gtm.claudeusage import record_delta
+
+    costlog = CostLog(run_dir(run) / "costs.jsonl")
+    try:
+        record_delta(costlog, run_dir(run) / "claude_tokens.json")
+    except OSError as e:  # transcript unreadable — never fail a stage over accounting
+        _log_error(ERROR_LOG, "-", "claude token accounting", e)
+    print(f"\ncost this run — {costlog.summary_line()}")
 ICP = Path("company/ICP.md")
 VOICE_GUIDE = Path("company/voice-guide.md")
 
@@ -357,6 +371,10 @@ def cmd_fit(run: str, fit_json: str) -> None:
         save_state(prospects, run_dir(run))
         for p in prospects:
             print(f"[{p.status}] {p.company} score={p.fit_score}")
+        # Spends no API credit itself, but the Claude scoring it applies is the
+        # single most expensive judgment in the pipeline — CLAUDE.md wants every
+        # stage's reply to close with the run total, so it has to print one.
+        _print_cost_summary(run)
 
 
 def cmd_enrich(run: str) -> None:
@@ -414,11 +432,20 @@ def cmd_enrich(run: str) -> None:
 
 
 def cmd_signals(run: str, signals_json: str) -> None:
+    from gtm.enrich import redate_undated_signals
+
     with _track_stage(run, "signals"):
+        costlog = run_costlog(run)  # arms serper+openai accounting for the dating pass below
         prospects = load_state(run_dir(run))
         merge_signals(prospects, json.loads(Path(signals_json).read_text()))
+        dated_total = 0
+        for p in prospects:
+            if p.status in ("priority", "keep") and p.buying_signals:
+                dated_total += redate_undated_signals(p, costlog=costlog)
         save_state(prospects, run_dir(run))
         print("signals merged for", sum(1 for p in prospects if p.outreach_angle), "prospects")
+        if dated_total:
+            print(f"dated {dated_total} previously-[undated] signal(s) via follow-up search")
         blank = missing_trigger_phrase(prospects)
         if blank:
             print(
@@ -427,6 +454,7 @@ def cmd_signals(run: str, signals_json: str) -> None:
                 "blanked at output. Add a short noun phrase per company to the signals "
                 "JSON and re-run this stage."
             )
+        _print_cost_summary(run)
 
 
 def cmd_segment(run: str) -> None:
@@ -450,6 +478,7 @@ def cmd_segment(run: str) -> None:
                     print(f"\n----- {p.company} [{tier}] -----")
                     print(build_draft_prompt(voice_guide, p, tier, sibling_tiers=tiers))
 
+        _print_cost_summary(run)  # before the checkpoint raise, or it never prints
         if needs_draft:
             raise CheckpointPending(
                 file="drafts.json",
@@ -562,6 +591,7 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         OUTREACH_TOKENS,
         SERVICE_ACCOUNT_FILE,
         blocked_row_tokens,
+        no_draft_summary,
         push_contacts_to_sheet,
         push_to_sheet,
         unrendered_summary,
@@ -588,6 +618,13 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
                 f"{unverified} contact row{'s' if unverified > 1 else ''} blocked from send — "
                 "nothing in the SERP ties that person to that company (see each row's "
                 "qa_flag); confirm on LinkedIn before sending"
+            )
+        undrafted = no_draft_summary(prospects)
+        if undrafted:
+            print(
+                f"{undrafted} contact row{'s have' if undrafted > 1 else ' has'} no email copy — "
+                "their persona tier was added after the draft stage ran; re-run "
+                f"`python -m gtm.run segment {run}` and redraft to cover them"
             )
         blocked = unrendered_summary(prospects)
         if blocked:
@@ -664,13 +701,27 @@ def cmd_emails(run: str) -> None:
 
 
 def cmd_learn() -> None:
-    if not FEEDBACK.exists():
+    from gtm.learn import eligible_for_proposal, load_feedback
+
+    entries = load_feedback(FEEDBACK, limit=50)  # bounded read (credit rule)
+    if not entries:
         print("no feedback yet (data/feedback.jsonl)")
         return
-    lines = FEEDBACK.read_text().splitlines()[-50:]  # bounded read (credit rule)
-    print(f"=== last {len(lines)} feedback entries — Claude: propose ICP/denylist edits ===")
-    for line in lines:
-        print(line)
+
+    user_entries = eligible_for_proposal(entries)
+    session_entries = [e for e in entries if e.origin != "user"]
+
+    print(f"=== last {len(entries)} feedback entries ===")
+    if user_entries:
+        print(f"\n--- {len(user_entries)} from the user — Claude: propose ICP/denylist edits from these only ---")
+        for e in user_entries:
+            print(e.model_dump_json())
+    else:
+        print("\n--- none of these are user-sourced — no ICP/denylist edit should be proposed this run ---")
+    if session_entries:
+        print(f"\n--- {len(session_entries)} session/smoke-test notes — context only, not actionable ---")
+        for e in session_entries:
+            print(e.model_dump_json())
 
 
 def main() -> None:
