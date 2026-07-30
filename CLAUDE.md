@@ -38,7 +38,8 @@ First prospect: **Teal Drones** (tealdrones.com).
 3. **Extract** — `gpt-4o-mini`: markdown → structured drone fields (one place, scraper-agnostic).
 4. **Fit** — Claude scores 0–100 vs `company/ICP.md`; hard disqualifiers.
 5. **Contacts + Enrich** (passers only) — Serper `site:linkedin.com/in` + team scrape (names/titles/LinkedIn, no email yet); `company-research` find-profiles + find-news; Serper LinkedIn/Reddit.
-6. **Output** — CSV → Google Sheet (service account).
+6. **Output** — CSV → Google Sheet (service account) + HubSpot (company/contact upsert,
+   `gtm/hubspot.py`, gated on `HUBSPOT_SERVICE_KEY`).
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.
@@ -47,7 +48,9 @@ First prospect: **Teal Drones** (tealdrones.com).
 - Demo, Python, Claude orchestrates. Model routing: gpt-4o-mini = extraction, Claude = judgment.
 - Scrapers return markdown only; Claude/gpt extracts once. Ignore Spider API.
 - Enrichment = `company-research` + Serper (no Apollo/paid). Contacts = names/titles/LinkedIn only.
-- Sink = Google Sheets via **service account**. HubSpot + email-finder (non-Apollo) + copy = later.
+- Sink = Google Sheets via **service account** + HubSpot (`gtm/hubspot.py`, live). Email-finder
+  (non-Apollo, `gtm/emails.py`/`gtm/email_providers.py`) and drafting (`gtm/draft.py`) are also
+  live now — none of these three are "later" anymore.
 - Self-improve = feedback file (user feedback for now) + auto-proposed ICP/denylist updates.
 - Tests = recorded fixtures + 1 live smoke per slice. Adopt: per-run brief + cost/token log.
 - Secret-scan hook: never expose an API key.
@@ -85,7 +88,8 @@ Format the closing line exactly as: `Cost — openai:$0.0412 · serper:15 credit
   Fallback-scraper keys optional/later.
 
 ## Skills (local)
-company-research (enrichment) · prospect-research · reddit-find · cold-email (later) ·
+company-research (enrichment) · prospect-research · reddit-find · cold-email (manual one-off
+draft; pipeline drafts automatically via `gtm/draft.py`) ·
 agent-browser (browser fallback) · youtube-transcript · driven-pipeline (run the
 full pipeline end-to-end with only 2 human checkpoints).
 
