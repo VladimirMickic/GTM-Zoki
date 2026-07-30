@@ -4,6 +4,19 @@ Free-tier **demo** of a LeadGrow-style GTM orchestrator, built in Codex (replace
 Goal: find drone manufacturers → check if their drones fit our cases → enrich → find the
 right contact → push top prospects to a Google Sheet. Full plan: `docs/PLAN.md`.
 
+## Assume, state, proceed — don't interrogate
+2026-07-30, user: "I do not want to answer that many questions". A missing detail takes the
+default and gets stated in one line, not asked. **region** falls back to `Brief.region`
+(default `us`); **segment** defaults to mixed. Only two questions are worth stopping for,
+because a wrong guess costs more than a rerun: **company count** when unspecified, and
+**final approval before any Sheet/HubSpot push**.
+
+## Shell rules (these cause most permission prompts, not the pipeline)
+Never prefix `cd "/Users/hugorabbit/GTM Helper" &&` — the shell already starts there, and the
+prefix alone fired four "compound command contains cd with write/redirection" prompts in one
+session. No heredocs, no process substitution; write a script file and run it. Temp output
+goes to the session scratchpad, not `/tmp`. Prefer file-read tools over `cat`/`grep` shells.
+
 ## How we build
 - **Vertical slices**: one stage fully built + tested before the next. Never build-all-then-test.
 - **Credit-efficient**: CLI-first; `gpt-4o-mini` for bulk extraction, Codex for judgment;

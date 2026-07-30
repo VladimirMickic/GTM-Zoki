@@ -1,5 +1,5 @@
 """S7a — discover: NL query → Serper → gpt-4o-mini filter → real manufacturers only."""
-from gtm.discover import CandidateList, discover
+from gtm.discover import CandidateList, discover, region_query
 
 SERP = [
     {"title": "Teal Drones — Military sUAS", "link": "https://tealdrones.com/", "snippet": "US maker of tactical drones"},
@@ -212,3 +212,40 @@ def test_require_us_does_not_double_up_an_already_ndaa_query():
 
     discover("NDAA drone makers", 5, search=fake_search, denylist=set(), require_us=True)
     assert seen == ["NDAA drone makers"]
+
+
+# 2026-07-30: a missing region used to stop the run and cost a user question. It now
+# falls back to Brief.region (default "us") and only shapes the query — same credit.
+
+
+def test_region_query_appends_the_spelled_out_region():
+    assert region_query("drone manufacturer", "us") == "drone manufacturer United States"
+    assert region_query("drone manufacturer", "uk") == "drone manufacturer United Kingdom"
+
+
+def test_region_query_passes_an_unknown_region_through_verbatim():
+    assert region_query("drone maker", "Nordics") == "drone maker Nordics"
+
+
+def test_region_query_is_a_no_op_when_the_query_already_says_it():
+    assert region_query("United States drone maker", "us") == "United States drone maker"
+
+
+def test_region_query_skips_us_when_require_us_already_narrowed_the_search():
+    """Stacking the NDAA clause and 'United States' over-constrains the SERP."""
+    assert region_query("drone maker", "us", require_us=True) == "drone maker"
+
+
+def test_region_query_is_a_no_op_for_a_worldwide_run():
+    assert region_query("drone maker", "") == "drone maker"
+
+
+def test_discover_searches_the_region_scoped_query():
+    seen = {}
+
+    def search(query, num=10):
+        seen["q"] = query
+        return []
+
+    discover("drone manufacturer", 3, search=search, region="uk", denylist=set())
+    assert seen["q"] == "drone manufacturer United Kingdom"

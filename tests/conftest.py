@@ -28,3 +28,11 @@ def _isolate_error_log(tmp_path, monkeypatch):
         monkeypatch.setattr(mod, "ERROR_LOG", log)
     for fn, param in _DEFAULT_ERROR_LOG_FNS:
         monkeypatch.setitem(fn.__kwdefaults__, param, log)
+
+
+@pytest.fixture(autouse=True)
+def _no_real_dns(monkeypatch):
+    """process_company's DNS preflight would otherwise resolve example.com & co. for
+    real, making a fixture suite depend on the network. Tests that mean to exercise
+    the preflight pass their own `resolves_fn`/`lookup`."""
+    monkeypatch.setitem(run_mod.process_company.__kwdefaults__, "resolves_fn", lambda url: True)

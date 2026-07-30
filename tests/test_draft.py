@@ -3,6 +3,7 @@ import pytest
 from gtm.draft import (
     QAError,
     QAResult,
+    bad_markers,
     build_draft_prompt,
     build_redraft_prompt,
     check_batch_repetition,
@@ -11,6 +12,7 @@ from gtm.draft import (
     check_reference_customer,
     check_spec_jargon,
     check_tier_distinctness,
+    fresh_signals,
     has_pain_source,
     is_thin_signal,
     qa_check,
@@ -1072,3 +1074,29 @@ def test_check_body_length_checks_both_versions():
     p = Prospect(company="A Corp", website="https://a.com", status="keep")
     draft = DraftSet(initial_subject="s", initial_body=_body_of(300), initial_body_alt=_body_of(800))
     assert "v2" in check_body_length(p, draft)
+
+
+# 2026-07-30, run us-drone-20: a signal was written "[undated, year not confirmed in
+# source]". fresh_signals matches the marker as a literal substring, so the extra text
+# made the marker invisible and promoted a stale signal to a usable email opener. It
+# was caught by eye one step before drafting; it is now a hard error.
+
+
+def test_bad_markers_flags_text_inside_the_brackets():
+    bad = bad_markers(["Award (src) [undated, year not confirmed in source]"])
+    assert len(bad) == 1
+
+
+def test_bad_markers_accepts_the_exact_markers():
+    assert bad_markers(["A (src) [undated]", "B (src) [stale]", "C (src, 2026-03)"]) == []
+
+
+def test_bad_markers_ignores_unrelated_brackets():
+    assert bad_markers(["Award of $87M [sic] (src, 2026-03)"]) == []
+
+
+def test_a_near_miss_marker_still_reads_as_fresh_to_fresh_signals():
+    """The reason bad_markers has to exist: the near-miss is invisible downstream."""
+    p = Prospect(company="X", website="https://x.com", buying_signals=["Award (src) [undated, not confirmed]"])
+    assert fresh_signals(p) == p.buying_signals  # silently "fresh" — the bug
+    assert bad_markers(p.buying_signals)         # ...which this now blocks

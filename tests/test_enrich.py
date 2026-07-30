@@ -945,3 +945,68 @@ def test_redate_undated_signals_ignores_a_date_the_model_cannot_parse():
     )
     assert dated == 0
     assert p.buying_signals == ["Vague claim (source) [undated]"]
+
+
+# 2026-07-30 (user, reading run us-drone-20's Anduril news): "this doesn't give any
+# useful info". The truncation they saw was Google's own "..." inside the snippet, not
+# ours — but the audit found two real defects behind the complaint: 5 news slots held
+# only 2 distinct events (the CCA contract appeared 3x, one of them a YouTube clip),
+# and a signal was written "[undated]" from a source whose own text said "April 2024".
+
+
+def test_find_news_drops_video_and_social_hosts():
+    results = [
+        {"title": "Anduril Secures Landmark Air Force Drone Contract", "link": "https://www.youtube.com/watch?v=OyG11iKEoJ8", "snippet": "video"},
+        {"title": "Army awards Anduril counter-drone task order", "link": "https://breakingdefense.com/x", "snippet": "$87 million"},
+    ]
+    news = find_news("Anduril", search=lambda q, num=10: results)
+    assert len(news) == 1
+    assert "breakingdefense.com" in news[0]
+
+
+def test_find_news_dedupes_the_same_event_across_outlets():
+    results = [
+        {"title": "Air Force Selects General Atomics and Anduril for CCA production", "link": "https://airandspaceforces.com/a", "snippet": "one"},
+        {"title": "Air Force selects Anduril and General Atomics for CCA production", "link": "https://jpost.com/b", "snippet": "same story, other outlet"},
+        {"title": "Army awards Anduril $87M counter-drone task order", "link": "https://breakingdefense.com/c", "snippet": "different event"},
+    ]
+    news = find_news("Anduril", search=lambda q, num=10: results)
+    assert len(news) == 2
+    assert "airandspaceforces.com" in news[0] and "breakingdefense.com" in news[1]
+
+
+def test_find_news_backfills_the_freed_slots_with_distinct_events():
+    """Dropping dupes must not shrink the list below MAX_NEWS when the SERP still has
+    distinct stories further down — same Serper credit, more actual evidence."""
+    dupes = [{"title": "Anduril wins CCA production contract", "link": f"https://outlet{i}.com/x", "snippet": "s"} for i in range(4)]
+    distinct = [
+        {"title": "Anduril opens Ohio manufacturing plant", "link": "https://trade1.com/a", "snippet": "s"},
+        {"title": "Lattice software picked as counter-drone backbone", "link": "https://trade2.com/b", "snippet": "s"},
+        {"title": "Ghost X airframe cleared for Blue UAS", "link": "https://trade3.com/c", "snippet": "s"},
+        {"title": "Series G funding round closes", "link": "https://trade4.com/d", "snippet": "s"},
+        {"title": "Navy tests Dive-LD underwater vehicle", "link": "https://trade5.com/e", "snippet": "s"},
+    ]
+    news = find_news("Anduril", search=lambda q, num=10: dupes + distinct)
+    assert len(news) == 5  # 1 of the 4 dupes + 4 distinct, not 1 + nothing
+
+
+def test_news_line_stamps_the_date_from_the_url_path():
+    results = [{"title": "Army awards Anduril task order", "link": "https://breakingdefense.com/2026/03/army-awards-anduril/", "snippet": "$87 million"}]
+    assert find_news("Anduril", search=lambda q, num=10: results)[0].endswith("[date: 2026-03]")
+
+
+def test_news_line_stamps_the_date_from_prose_when_the_url_has_none():
+    results = [{"title": "Air Force Selects Anduril for CCA", "link": "https://airandspaceforces.com/cca-contracts/", "snippet": "In April 2024, the Air Force awarded contracts"}]
+    assert find_news("Anduril", search=lambda q, num=10: results)[0].endswith("[date: 2024-04]")
+
+
+def test_news_line_has_no_stamp_when_nothing_dates_the_result():
+    results = [{"title": "Anduril profile", "link": "https://trade.com/anduril", "snippet": "no date anywhere"}]
+    assert "[date:" not in find_news("Anduril", search=lambda q, num=10: results)[0]
+
+
+def test_signal_prompt_forbids_undated_on_a_dated_news_line():
+    p = Prospect(company="Anduril", website="https://anduril.com", key_news=["X (url) [date: 2026-03]"])
+    prompt = build_signal_prompt(p)
+    assert "[date: YYYY-MM]" in prompt
+    assert "EXACTLY" in prompt

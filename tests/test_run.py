@@ -24,6 +24,7 @@ from gtm.run import (
     merge_fit,
     merge_signals,
     process_company,
+    resolves,
     run_dir,
     save_state,
 )
@@ -1412,3 +1413,48 @@ def test_cmd_learn_says_no_edit_should_be_proposed_when_nothing_is_user_sourced(
 
     cmd_learn()
     assert "no ICP/denylist edit should be proposed" in capsys.readouterr().out
+
+
+# 2026-07-30: run us-drone-20 spent a scrape each on pdw.aero and firestormlabs.io.
+# Neither domain exists — both were guessed from a company name. DNS is free.
+
+
+def test_resolves_is_false_for_a_dead_domain():
+    def lookup(host):
+        raise OSError("nodename nor servname provided")
+    assert resolves("https://pdw.aero/", lookup=lookup) is False
+
+
+def test_resolves_is_true_when_dns_answers():
+    assert resolves("https://pdw.ai/", lookup=lambda host: "1.2.3.4") is True
+
+
+def test_resolves_is_false_without_a_host():
+    assert resolves("not-a-url", lookup=lambda host: "1.2.3.4") is False
+
+
+def test_process_company_skips_the_scrape_when_the_domain_is_dead():
+    calls = []
+    p = Prospect(company="Performance Drone Works", website="https://pdw.aero/", source="brief")
+    process_company(
+        p,
+        scrape_fn=lambda u: calls.append(u) or "md",
+        extract_fn=lambda md, costlog=None: (_ for _ in ()).throw(AssertionError("must not extract")),
+        resolves_fn=lambda url: False,
+    )
+    assert p.status == "error"
+    assert calls == []  # no scrape spent
+
+
+def test_merge_signals_rejects_a_near_miss_recency_marker():
+    prospects = [Prospect(company="American Robotics", website="https://x.com", status="keep")]
+    signals = {"American Robotics": {"buying_signals": ["Blue UAS listing (src) [undated, year not confirmed in source]"]}}
+    with pytest.raises(ValueError, match="exactly"):
+        merge_signals(prospects, signals)
+    assert prospects[0].buying_signals == []  # aborted before any state was written
+
+
+def test_merge_signals_accepts_the_exact_marker():
+    prospects = [Prospect(company="American Robotics", website="https://x.com", status="keep")]
+    merge_signals(prospects, {"American Robotics": {"buying_signals": ["Blue UAS listing (src) [undated]"]}})
+    assert prospects[0].buying_signals == ["Blue UAS listing (src) [undated]"]
