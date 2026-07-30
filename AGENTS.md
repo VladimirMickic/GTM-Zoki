@@ -39,12 +39,22 @@ First prospect: **Teal Drones** (tealdrones.com).
    `gtm/contacts.py` (`site:linkedin.com/in` + team scrape → names/titles/LinkedIn, ranked,
    employment-verified, no email yet), `gtm/enrich.py` (company LinkedIn, community signals,
    headcount, news). The `company-research` skill is a standalone research tool, NOT called
-   by this stage — don't assume the pipeline runs it.
+   by this stage — don't assume the pipeline runs it. News is deduped by event and video
+   hosts are dropped, and a datable result is stamped `[date: YYYY-MM]` from its URL/prose —
+   so a dated source can't be written up `[undated]`. The recency marker must be EXACTLY
+   `[stale]`/`[undated]`; `gtm.run signals` rejects the file otherwise
+   (`gtm/draft.py::bad_markers`). Dead/guessed domains are dropped by a free DNS preflight
+   before any scrape is spent (`gtm/run.py::resolves`).
 6. **Output** — CSV → Google Sheet (service account) + HubSpot (company/contact upsert,
    `gtm/hubspot.py`, gated on `HUBSPOT_SERVICE_KEY`).
 - **Learn** — read `data/feedback.jsonl` → Codex proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Codex's own
   session/smoke-test notes are context, never grounds for an edit on their own.
+- **Postmortem** — `gtm/postmortem.py` mines a finished run's own slice of `data/errors.log`
+  (via that run's `costs.jsonl` time window) and records one `Feedback(origin="run")` entry
+  per distinct failure stage — zero LLM cost, never edits code or ICP.md. `gtm.run learn`
+  folds `origin in ("user","run")` entries into a capped `data/lessons.md` (≤20 lines),
+  printed by `gtm.run start`.
 
 ## Decisions locked
 - Demo, Python, Codex orchestrates. Model routing: gpt-4o-mini = extraction, Codex = judgment.
@@ -71,7 +81,8 @@ python -m gtm.run enrich <run>                     # passers: contacts + enrichm
 python -m gtm.run signals <run> <signals.json>     # apply Codex's buying_signals/outreach_angle
 python -m gtm.run emails <run>                     # email waterfall (pattern → provider chain → AI hunt)
 python -m gtm.run output <run>                     # CSV (+ Sheet push if credentials present)
-python -m gtm.run learn                            # show feedback for ICP/denylist proposals
+python -m gtm.run learn                            # show feedback for ICP/denylist proposals + regenerate data/lessons.md
+python -m gtm.run postmortem <run>                 # mine this run's errors.log window → feedback(origin="run")
 ```
 Failures are logged to `data/errors.log` and that company is skipped (`status="error"`) — never
 the whole run. Example brief: `data/runs/teal-demo/brief.md`.

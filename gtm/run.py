@@ -9,6 +9,7 @@
   python -m gtm.run redraft <run> <drafts.json>      # apply fixed drafts for QA-flagged prospects → recheck (final)
   python -m gtm.run output <run>                     # CSV (+ Sheet push if creds present)
   python -m gtm.run learn                            # show feedback for ICP/denylist proposals
+  python -m gtm.run postmortem <run>                 # mine this run's errors.log window → feedback(origin="run")
   python -m gtm.run smoke <url> [--live]             # one company, end-to-end; --live also pushes to Sheet
 
 State = data/runs/<run>/prospects.json. Failures are logged to data/errors.log and the
@@ -355,6 +356,10 @@ def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
 # ---------------------------------------------------------------- CLI stages
 
 def cmd_start(brief_path: str) -> None:
+    from gtm.learn import LESSONS_FILE
+
+    if LESSONS_FILE.exists():
+        print(LESSONS_FILE.read_text())  # bounded to _LESSONS_MAX_LINES by write_lessons, no cost
     brief = load_brief(brief_path)
     freeze_brief(brief, run_dir(brief.run))
     # `run` (brief.run) only becomes known above, mid-body — the tracking
@@ -746,7 +751,7 @@ def cmd_emails(run: str) -> None:
 
 
 def cmd_learn() -> None:
-    from gtm.learn import eligible_for_proposal, load_feedback
+    from gtm.learn import LESSONS_FILE, eligible_for_proposal, load_feedback, write_lessons
 
     entries = load_feedback(FEEDBACK, limit=50)  # bounded read (credit rule)
     if not entries:
@@ -767,6 +772,20 @@ def cmd_learn() -> None:
         print(f"\n--- {len(session_entries)} session/smoke-test notes — context only, not actionable ---")
         for e in session_entries:
             print(e.model_dump_json())
+
+    path = write_lessons(entries, LESSONS_FILE)
+    print(f"\nwrote {path} ({sum(1 for _ in path.read_text().splitlines())} lines)")
+
+
+def cmd_postmortem(run: str) -> None:
+    from gtm.postmortem import run_postmortem
+
+    n = run_postmortem(run)
+    if n == 0:
+        print(f"postmortem {run}: nothing new (clean run, or already postmortemed)")
+    else:
+        print(f"postmortem {run}: recorded {n} failure-pattern entr{'y' if n == 1 else 'ies'} to {FEEDBACK}")
+        print("run `python -m gtm.run learn` to fold these into data/lessons.md")
 
 
 def main() -> None:
@@ -798,6 +817,8 @@ def main() -> None:
                 cmd_output(run, dry_run=True)
             case ["learn"]:
                 cmd_learn()
+            case ["postmortem", run]:
+                cmd_postmortem(run)
             case ["smoke", url]:
                 from gtm.smoke import run_smoke
 

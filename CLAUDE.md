@@ -70,6 +70,13 @@ First prospect: **Teal Drones** (tealdrones.com).
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.
+- **Postmortem** — `gtm/postmortem.py` mines a finished run's own slice of `data/errors.log`
+  (recovered via that run's `costs.jsonl` time window — errors.log has no run field of its
+  own) and records one `Feedback(origin="run")` entry per distinct failure stage. Pure log
+  parsing, zero LLM cost, never edits code or ICP.md. `gtm.run learn` folds `origin in
+  ("user","run")` entries into a capped `data/lessons.md` (≤20 lines), which `gtm.run start`
+  prints. This is deliberately narrow — a printed reminder, not a second memory system, and
+  it never proposes an ICP/denylist edit on its own (only `origin="user"` still does that).
 
 ## Decisions locked
 - Demo, Python, Claude orchestrates. Model routing: gpt-4o-mini = extraction, Claude = judgment.
@@ -96,7 +103,8 @@ python -m gtm.run enrich <run>                     # passers: contacts + enrichm
 python -m gtm.run signals <run> <signals.json>     # apply Claude's buying_signals/outreach_angle
 python -m gtm.run emails <run>                     # email waterfall (pattern → provider chain → AI hunt)
 python -m gtm.run output <run>                     # CSV (+ Sheet push if credentials present)
-python -m gtm.run learn                            # show feedback for ICP/denylist proposals
+python -m gtm.run learn                            # show feedback for ICP/denylist proposals + regenerate data/lessons.md
+python -m gtm.run postmortem <run>                 # mine this run's errors.log window → feedback(origin="run")
 ```
 Failures are logged to `data/errors.log` and that company is skipped (`status="error"`) — never
 the whole run. Example brief: `data/runs/teal-demo/brief.md`.
