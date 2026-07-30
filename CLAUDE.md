@@ -51,7 +51,8 @@ First prospect: **Teal Drones** (tealdrones.com).
 ## Decisions locked
 - Demo, Python, Claude orchestrates. Model routing: gpt-4o-mini = extraction, Claude = judgment.
 - Scrapers return markdown only; Claude/gpt extracts once. Ignore Spider API.
-- Enrichment = `company-research` + Serper (no Apollo/paid). Contacts = names/titles/LinkedIn only.
+- Enrichment = `gtm/enrich.py` + Serper (no Apollo/paid; `company-research` skill is a separate,
+  standalone tool, not part of this stage). Contacts = names/titles/LinkedIn only.
 - Sink = Google Sheets via **service account** + HubSpot (`gtm/hubspot.py`, live). Email-finder
   (non-Apollo, `gtm/emails.py`/`gtm/email_providers.py`) and drafting (`gtm/draft.py`) are also
   live now — none of these three are "later" anymore.
