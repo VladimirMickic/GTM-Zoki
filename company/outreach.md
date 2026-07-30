@@ -27,4 +27,9 @@ drops any name matching the recipient or a run-mate before picking one.
 Used when no approved name survives the filter. Category-level only, never a logo — this
 is the voice guide's documented fallback ("Social proof — `{{reference_customer}}` only").
 
-- fallback: defense sUAS makers we work with
+**Must read as a SINGULAR noun phrase.** Drafts are written around this token holding one
+company name ("{{reference_customer}} runs our AV-Ops line"), so a plural fills it into
+broken English. The old plural value shipped "defense sUAS makers we work with orders their
+AV-Micro builds from us this way" to the live sheet in run us-drone-19 (2026-07-29).
+
+- fallback: a defense sUAS maker we work with

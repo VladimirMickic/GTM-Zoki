@@ -483,6 +483,13 @@ def build_signal_prompt(p: Prospect, *, today: date | None = None) -> str:
   · a directory, database or profile page (Crunchbase, ZoomInfo, a listing site) — a record
     that they exist is not an event;
   · anything sourced from {p.company}'s own site or press page describing what they sell.
+- trigger_phrase: the freshest FRESH signal (never a [stale] or [undated] one) reduced to a
+  short NOUN PHRASE, 6 words or fewer, that reads correctly after a possessive — the draft
+  uses it as "Saw {p.company}'s <trigger_phrase> — congrats." So: "Air Force Phase Three
+  award", "$1.8M CBP contract", "Blue UAS certification". NOT a clause ("Awarded an Air
+  Force contract to test..."), NOT the company's own name, NOT a passive participle
+  ("Knighthawk 2 launched"). Return "" when no fresh signal exists or none reduces to a
+  clean phrase — "" correctly blocks the row rather than shipping broken English.
 - outreach_angle: 2-3 sentences: (1) the strongest ICP outreach angle for this prospect,
   (2) why it's the strongest fit for THIS prospect specifically, (3) which piece of
   evidence (news / community signal / fit reason) backs it. Still a single string, no
@@ -503,4 +510,4 @@ linkedin: {p.linkedin}
 description: {p.description}
 
 Reply with ONLY this JSON (no prose):
-{{"buying_signals": ["..."], "outreach_angle": "...", "community_signals": ["..."]}}"""
+{{"buying_signals": ["..."], "trigger_phrase": "...", "outreach_angle": "...", "community_signals": ["..."]}}"""

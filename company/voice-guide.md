@@ -100,8 +100,14 @@ company. A draft must never contain a hardcoded company name other than
 `{{company_name}}` — naming another prospect from the same run as a customer is the failure
 mode this token exists to prevent (`gtm/draft.py::check_reference_customer` enforces it).
 
-Where no reference fits, fall back to category-level only — *"defense sUAS makers we work
+Where no reference fits, fall back to category-level only — *"a defense sUAS maker we work
 with"* — never a named client or logo written out literally.
+
+**Write the sentence so it reads correctly with a singular noun phrase in the slot**, because
+that fallback is what fills it until a real reference is approved in `company/outreach.md`.
+"{{reference_customer}} runs our {{case_line}} line" works either way; "{{reference_customer}}
+**are** customers" does not. `gtm/render.py` capitalizes the fill when it lands at a sentence
+start, so the lowercase fallback is safe mid-paragraph.
 
 The token is filled at output time from `company/outreach.md`
 (`gtm/render.py::pick_reference_customer`), which drops the recipient and every run-mate

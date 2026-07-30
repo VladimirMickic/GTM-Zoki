@@ -246,6 +246,7 @@ def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
         if s:
             p.buying_signals = s.get("buying_signals", [])
             p.outreach_angle = s.get("outreach_angle", "")
+            p.trigger_phrase = s.get("trigger_phrase", p.trigger_phrase)
             # Default to the prospect's existing value, not []: cmd_enrich prints the
             # signal prompt and the displacement prompt as two separate blocks for the
             # same company, so an entry that only answers the signal prompt omits this

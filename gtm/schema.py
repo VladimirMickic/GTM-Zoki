@@ -121,6 +121,15 @@ class Prospect(BaseModel):
     linkedin: str = ""
     headcount: str = ""  # employee-count band (e.g. "51-200"); "" when unknown — never a guessed number
     community_signals: list[str] = []
+    # 2026-07-29: the noun phrase that fills {{trigger_event}} in an opener ("Air Force
+    # Phase Three award"). Separate from buying_signals because those are verb-led clauses
+    # with a source and a "why it matters" half — dropping one into the possessive slot
+    # "Saw {{company_name}}'s ..." is what pushed "Saw Asylon's Awarded an Air Force Phase
+    # Three contract to test DroneDog and ground robots networked into a single inspection
+    # system" into the live sheet. Written by the signals stage (judgment), never derived
+    # by truncating a signal (heuristics mangled half the stored corpus). "" = no usable
+    # trigger, which leaves the token standing and blocks the row.
+    trigger_phrase: str = ""
     outreach_angle: str = ""
     # stage "enrich" (displacement sub-step, gtm/displace.py) — state-only, feeds
     # draft's value-prop ammo; "" / [] when no named competitor was detected.

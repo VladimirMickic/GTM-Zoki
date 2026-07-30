@@ -485,7 +485,8 @@ def test_build_contact_rows_merges_company_variable():
 def test_build_contact_rows_blank_name_falls_back_to_there():
     p = MULTI.model_copy(update={"contact_name": "; Manoj Mohan; Steven Butler"})
     rows = build_contact_rows(p)
-    assert rows[0]["draft_initial_body"] == "there — saw Teal's SRR win."
+    # Capitalized: the fill lands at the start of the body (render_tokens, 2026-07-29).
+    assert rows[0]["draft_initial_body"] == "There — saw Teal's SRR win."
 
 
 def test_build_contact_rows_trims_long_outreach_angle():
@@ -613,7 +614,7 @@ def test_build_contact_rows_never_names_a_run_mate_as_the_reference():
     from gtm.render import OutreachConfig
 
     cfg = OutreachConfig(sender_name="V M", reference_customers=["Easy Aerial"],
-                         fallback_reference="defense sUAS makers we work with")
+                         fallback_reference="a defense sUAS maker we work with")
     p = Prospect(
         company="Red Cat", website="https://redcatholdings.com", status="priority",
         contact_name="Jeff Thompson", contact_title="CEO",
@@ -621,7 +622,8 @@ def test_build_contact_rows_never_names_a_run_mate_as_the_reference():
     )
     row = build_contact_rows(p, config=cfg, run_mates=["Easy Aerial", "Red Cat"])[0]
     assert "Easy Aerial" not in row["draft_initial_body"]
-    assert "defense sUAS makers we work with" in row["draft_initial_body"]
+    # Sentence-initial, so the lowercase fallback is capitalized on the way in.
+    assert row["draft_initial_body"].startswith("A defense sUAS maker we work with likes it.")
 
 
 def test_write_contacts_csv_gates_every_run_mate_together(tmp_path):

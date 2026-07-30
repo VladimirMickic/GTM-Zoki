@@ -94,9 +94,22 @@ def load_outreach_config(path: str | Path = OUTREACH_FILE) -> OutreachConfig:
 def render_tokens(text: str, ctx: dict) -> str:
     """Substitute {{token}} from ctx. A token that is unknown or maps to an empty
     value is left in place on purpose: the caller's ship gate needs to see it.
-    Silent blanking is how an email goes out signed by nobody."""
+    Silent blanking is how an email goes out signed by nobody.
+
+    A fill landing at a sentence start is capitalized. Drafts are written around
+    {{reference_customer}} holding a company name, which is already capitalized — the
+    category fallback ("a defense sUAS maker we work with") is not, and run us-drone-19
+    rendered "US-made. a defense sUAS maker we work with orders..." into the live sheet
+    (2026-07-29)."""
     def sub(m: re.Match) -> str:
-        return str(ctx.get(m.group(1).lower()) or m.group(0))
+        value = ctx.get(m.group(1).lower())
+        if not value:
+            return m.group(0)
+        value = str(value)
+        before = text[: m.start()].rstrip()
+        if not before or before[-1] in ".?!":
+            value = value[0].upper() + value[1:]
+        return value
 
     return _TOKEN.sub(sub, text or "")
 
@@ -121,16 +134,25 @@ def pick_reference_customer(prospect: Prospect, config: OutreachConfig, run_mate
 
 
 def _trigger_event(prospect: Prospect) -> str:
-    """The freshest signal that may open an email, reduced to the event itself.
+    """The noun phrase that fills {{trigger_event}} — Prospect.trigger_phrase, written by
+    the signals stage, or "" when there is none.
 
-    Signal lines read "<what happened> — <why it matters> (<source>, <date>)"; only
-    the first half belongs in a sentence. [stale]/[undated] signals are excluded by
-    fresh_signals — an old event greeted as news is what run test-batch-1 sent."""
-    fresh = fresh_signals(prospect)
-    if not fresh:
+    Deliberately does NOT derive one from buying_signals. Those are verb-led clauses
+    carrying a source and a "why it matters" half ("Awarded an Air Force Phase Three
+    contract to test DroneDog and ground robots networked into a single inspection
+    system"), and the token slots into a possessive: "Saw {{company_name}}'s ... —
+    congrats." Run us-drone-19 pushed that whole clause into the live sheet (2026-07-29).
+    A heuristic normalizer was tried and rejected the same day — measured against every
+    stored run it mangled roughly half the corpus ("Saw X's n Air Force Phase Three
+    contract", "Saw X's Country of origin", "Saw X's Red Cat Secures $1 Million Contract").
+    Reducing a clause to a phrase is judgment, so the signals stage does it; "" here leaves
+    the token standing and the ship gate blocks the row, which beats broken English.
+    """
+    if not prospect.trigger_phrase.strip():
         return ""
-    event = fresh[0].split("—")[0].strip()
-    return re.sub(r"\s*\([^)]*\)\s*$", "", event).strip()
+    # A trigger only ever opens on something fresh. A phrase left behind after the signal
+    # it came from went [stale] must not still open an email.
+    return prospect.trigger_phrase.strip() if fresh_signals(prospect) else ""
 
 
 def build_render_context(
