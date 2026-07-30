@@ -310,6 +310,44 @@ def test_push_to_hubspot_splits_multiple_contacts_by_index(monkeypatch, tmp_path
     assert {i["from"]["id"] for i in assoc_inputs} == {"contact-1", "contact-2"}
 
 
+def test_push_to_hubspot_stamps_company_name_on_every_contact(monkeypatch, tmp_path):
+    """The contact's own `company` property, not just the association.
+
+    Associating a contact to a company (section 3) sets the *relationship*, but
+    leaves the contact's built-in `company` ("Company Name") property empty — so
+    contact list views and any export keyed off that property showed a blank
+    company for every person we pushed. Both contacts here must carry it.
+    """
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "svc-key")
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append((url, json))
+        if url.endswith("/companies/search"):
+            return FakeResponse(200, {"results": []})
+        if url.endswith("/companies"):
+            return FakeResponse(201, {"id": "company-1"})
+        if url.endswith("/contacts/batch/upsert"):
+            return FakeResponse(200, {"results": [{"id": "c-1"}, {"id": "c-2"}]})
+        if url.endswith("/associations/contact/company/batch/create"):
+            return FakeResponse(201, {})
+        raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(hs.requests, "post", fake_post)
+
+    prospect = _prospect(
+        contact_name="Jane Doe; John Smith",
+        contact_emails="jane@tealdrones.com (verified); john@tealdrones.com (verified)",
+    )
+    hs.push_to_hubspot([prospect], error_log=tmp_path / "errors.log")
+
+    contact_call = next(c for c in calls if c[0].endswith("/contacts/batch/upsert"))
+    inputs = contact_call[1]["inputs"]
+    assert len(inputs) == 2
+    for entry in inputs:
+        assert entry["properties"]["company"] == "Teal Drones"
+
+
 def test_push_to_hubspot_sends_city_country_only_when_present(monkeypatch, tmp_path):
     monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "svc-key")
     calls = []

@@ -79,7 +79,12 @@ def _split_contacts(prospect: Prospect) -> list[dict]:
     """Reconstructs one contact per index from the CONTACT_FIELD_SEP-joined
     parallel strings (contact_name/contact_title/contact_linkedin/contact_emails).
     Skips any index whose email entry is a miss — never push a contact to
-    HubSpot with no real email."""
+    HubSpot with no real email.
+
+    Carries the company name onto every contact: the association call sets the
+    contact-to-company *relationship*, but HubSpot's built-in `company`
+    ("Company Name") contact property is separate and stays blank unless written
+    explicitly, which is why pushed contacts read as company-less in list views."""
     names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
     titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
     linkedins = (
@@ -101,6 +106,7 @@ def _split_contacts(prospect: Prospect) -> list[dict]:
                 "lastname": last,
                 "jobtitle": titles[i].strip() if i < len(titles) else "",
                 "linkedin": linkedins[i].strip() if i < len(linkedins) else "",
+                "company": prospect.company.strip(),
             }
         )
     return contacts
@@ -205,6 +211,7 @@ def _upsert_contacts(
                 "lastname": c["lastname"],
                 "jobtitle": c["jobtitle"],
                 "hs_linkedin_url": c["linkedin"],
+                "company": c["company"],
             },
         }
         for c in contacts

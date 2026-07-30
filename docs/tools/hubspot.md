@@ -143,13 +143,22 @@ Response: same shape family as companies — `id`, `properties`, `createdAt`, `u
 `archived` per contact on success.
 
 Contact properties we map, from `Prospect` (`gtm/schema.py`): `contact_name` → split into
-`firstname`/`lastname`, `contact_title` → `jobtitle`, `contact_linkedin` → `hs_linkedin_url`
+`firstname`/`lastname`, `contact_title` → `jobtitle`, `company` → `company`
+(**required — see below**), `contact_linkedin` → `hs_linkedin_url`
 (HubSpot's default LinkedIn URL property; confirmed to exist as a standard contact property,
 grouped under "Social Media Information" — may not appear in default UI columns but is a
 real, writable API property), `contact_emails` → `email` (note: `Prospect.contact_emails` is
 stored as `"email (status)"`, parallel-list-joined for multiple contacts per company per the
 schema comment — Task 7.1 needs to parse that format into one `email` string per contact
 before building the upsert body).
+
+**Gotcha — the association does NOT fill the contact's `company` property.** Section 3's
+association sets the contact→company *relationship* (and the "Primary company" card in the
+UI), but HubSpot's built-in `company` ("Company Name") contact property is a separate plain
+text field that stays empty unless written explicitly. Contacts pushed without it read as
+company-less in contact list views and in any export keyed off that property. So the contact
+upsert body must carry `"company": "<prospect.company>"` in addition to the association —
+both, not either.
 
 ## 3. Associate a contact with its company
 `POST https://api.hubapi.com/crm/v4/associations/contact/company/batch/create`
