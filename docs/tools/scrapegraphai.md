@@ -9,7 +9,9 @@ fetch this session (flagged below) on 2026-07-19. Read this before writing
 Header `SGAI-APIKEY: $SGAI_API_KEY`. Key format `sgai-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`
 — **unconfirmed, WebSearch snippet only** (the header name/format was not visible on the
 primary `api-reference/introduction` page fetched directly; a search snippet quoting
-ScrapeGraphAI's own curl examples gave `SGAI-APIKEY`). Env var: `SGAI_API_KEY`. Key from the
+ScrapeGraphAI's own curl examples gave `SGAI-APIKEY`). Env var: `SGAI_API_KEY` — but this
+repo's `.env` spells it `SCRAPEGRAPHAI_API_KEY`, so `gtm/scrape.py` reads both (vendor name
+first). Reading only `SGAI_API_KEY` left the configured key unread and this fallback dead. Key from the
 ScrapeGraphAI dashboard (scrapegraphai.com/dashboard).
 
 ## Scrape endpoint (the one call our adapter needs)
@@ -49,6 +51,19 @@ primary ScrapeGraphAI page fetched this session** (the primary `introduction` pa
 disclose credit amounts). Per that same snippet: markdown/html/links/images/summary scrape =
 1 credit each; `extract` (AI) = 5 credits/call; `search` = 2-5 credits/result. Re-verify at
 scrapegraphai.com/pricing before relying on this for budgeting.
+
+## Response shape (confirmed live 2026-07-30)
+`POST /api/scrape` with `formats: [{"type": "markdown"}]` answers:
+```json
+{
+  "id": "01f01dd3-1daa-4360-919f-e5a6632b10a3",
+  "results": {"markdown": {"data": ["# Example Domain\n\n..."]}},
+  "metadata": {"contentType": "text/html"}
+}
+```
+`results.markdown.data` is a **list** of markdown chunks — `gtm/scrape.py` joins them with a
+blank line. Earlier guesses (`result`, `data.markdown`, `content`) all assumed a single string,
+so genuine 200s were being thrown away as "no markdown in response".
 
 ## We do NOT use its AI extraction
 ScrapeGraphAI's `extract` endpoint (`POST /api/extract`, formerly `smartscraper`) does

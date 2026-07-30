@@ -13,7 +13,7 @@ Python does mechanical work; `gpt-4o-mini` does bulk extraction; Claude does jud
 | # | Stage | Engine | Notes |
 |---|---|---|---|
 | 1 | Input / discover | Python + Serper | URLs, or NL search → auto-filter to real makers |
-| 2 | Scrape | crawl4ai (→ markdown) | named in prompt, auto-fallback: Firecrawl→Scrapling→Apify→ScrapeGraphAI |
+| 2 | Scrape | crawl4ai (→ markdown) | named in prompt, auto-fallback: Firecrawl→ScrapeGraphAI→Apify (scrapling dropped) |
 | 3 | Extract | `gpt-4o-mini` | markdown → structured drone fields |
 | 4 | Fit score | Claude | 0–100 vs `company/ICP.md`, hard disqualifiers |
 | 5a | Contacts (passers) | Serper + crawl4ai | names/titles/LinkedIn (no email yet) |

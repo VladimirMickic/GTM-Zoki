@@ -42,20 +42,34 @@ Actor ID (confirmed via primary fetch of its Apify Store page): `apify/website-c
   "startUrls": [{ "url": "https://example.com" }],
   "crawlerType": "adaptive",
   "maxCrawlPages": 1,
+  "maxCrawlDepth": 0,
   "saveMarkdown": true
 }
 ```
-(`maxCrawlPages: 1` — we only want the single page our adapter was asked for, not a full-site
-crawl; `saveMarkdown: true` is required to get a `markdown` field in the output.)
+(`maxCrawlPages: 1` + `maxCrawlDepth: 0` — we only want the single page our adapter was asked
+for, not a full-site crawl on a paid meter; `saveMarkdown: true` is required to get a
+`markdown` field in the output.)
 
 2. Call the actor and get the dataset back in one shot:
 ```bash
-apify call apify/website-content-crawler -i input.json --output-dataset
+apify call apify/website-content-crawler -f input.json --output-dataset --silent
 ```
-`-i, --input=<value>` passes input JSON inline or (per CLI reference) `-f <file>` reads it
-from a file — confirm which flag your installed CLI version expects; `--output-dataset`
-(alias `-o`) "prints out the entire default dataset on successful run of the Actor" (exact
-CLI reference wording, primary fetch).
+**Flag shape confirmed live 2026-07-30 against installed apify-cli 1.7.1** (`apify call --help`
+plus a real run): `-i, --input=<value>` is **inline JSON only** — a file path needs
+`-f, --input-file=<value>`. Passing `-i input.json` makes the CLI try to parse the filename as
+JSON. `--output-dataset` (alias `-o`) "prints out the entire default dataset on successful run
+of the Actor"; `--silent` suppresses the actor's run logs, which otherwise interleave with that
+JSON on stdout and break parsing.
+
+Confirmed dataset shape (one object per crawled page):
+```json
+[{ "url": "...", "crawl": {...}, "metadata": {...}, "text": "...", "markdown": "# ...", "html": null }]
+```
+
+**Timing gotcha:** the CLI blocks on the remote run and can sit far longer than the run itself
+— the 2026-07-30 smoke was a 5.2s actor run ($0.0024) whose `apify call` had still not returned
+after 5 minutes. `gtm/scrape.py` bounds it with `APIFY_TIMEOUT_SECONDS` (default 180) and, on
+timeout, parses whatever dataset JSON was already printed rather than discarding a paid run.
 
 Alternative if you already have a `datasetId` (e.g. from a prior async run) and want the
 dataset separately:

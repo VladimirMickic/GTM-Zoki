@@ -426,9 +426,89 @@ def test_scrape_scrapegraphai_returns_markdown_on_success(monkeypatch):
 
 def test_scrape_scrapegraphai_raises_when_no_api_key(monkeypatch):
     monkeypatch.delenv("SGAI_API_KEY", raising=False)
+    monkeypatch.delenv("SCRAPEGRAPHAI_API_KEY", raising=False)
 
     with pytest.raises(ScrapeError):
         scrape_scrapegraphai("https://tealdrones.com")
+
+
+def test_scrape_scrapegraphai_accepts_the_env_name_this_repo_actually_uses(monkeypatch):
+    """.env spells the key SCRAPEGRAPHAI_API_KEY, the vendor spells it SGAI_API_KEY.
+    Reading only the vendor name left a configured key unread and the fallback dead."""
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.delenv("SGAI_API_KEY", raising=False)
+    monkeypatch.setenv("SCRAPEGRAPHAI_API_KEY", "sgai-dotenv-key")
+
+    markdown = "# Teal Drones\n\n" + "Rugged UAS for defense. " * 20
+    seen = {}
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        seen["key"] = headers["SGAI-APIKEY"]
+        return _FakeResponse({"status": "completed", "result": markdown})
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    assert scrape_scrapegraphai("https://tealdrones.com") == markdown
+    assert seen["key"] == "sgai-dotenv-key"
+
+
+def test_scrape_scrapegraphai_prefers_the_vendor_env_name(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("SGAI_API_KEY", "sgai-vendor-key")
+    monkeypatch.setenv("SCRAPEGRAPHAI_API_KEY", "sgai-dotenv-key")
+
+    markdown = "# Teal Drones\n\n" + "Rugged UAS for defense. " * 20
+    seen = {}
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        seen["key"] = headers["SGAI-APIKEY"]
+        return _FakeResponse({"status": "completed", "result": markdown})
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    scrape_scrapegraphai("https://tealdrones.com")
+    assert seen["key"] == "sgai-vendor-key"
+
+
+def test_scrape_scrapegraphai_reads_the_real_v2_response_shape(monkeypatch):
+    """Live-confirmed 2026-07-30: V2 /api/scrape returns results.markdown.data as a LIST
+    of chunks. Every earlier guess assumed a single string, so real 200s were reported as
+    'no markdown in response'."""
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("SGAI_API_KEY", "sgai-test-key")
+
+    chunks = ["# Teal Drones", "Rugged UAS for defense. " * 20]
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        return _FakeResponse(
+            {
+                "id": "01f01dd3",
+                "results": {"markdown": {"data": chunks}},
+                "metadata": {"contentType": "text/html"},
+            }
+        )
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    assert scrape_scrapegraphai("https://tealdrones.com") == "\n\n".join(chunks)
+
+
+def test_scrape_scrapegraphai_accepts_an_unwrapped_markdown_chunk(monkeypatch):
+    """A bare string where the list is expected must not be joined character-by-character."""
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setenv("SGAI_API_KEY", "sgai-test-key")
+    markdown = "# Teal Drones\n\n" + "Rugged UAS for defense. " * 20
+
+    def fake_post(url, headers=None, json=None, **kwargs):
+        return _FakeResponse({"results": {"markdown": {"data": markdown}}})
+
+    monkeypatch.setattr(scrape_mod.requests, "post", fake_post)
+
+    assert scrape_scrapegraphai("https://tealdrones.com") == markdown
 
 
 def test_scrape_scrapegraphai_raises_when_no_markdown_key_found(monkeypatch):
@@ -481,6 +561,82 @@ def test_scrape_apify_returns_markdown_on_success(monkeypatch):
     assert "call" in argv
     assert "apify/website-content-crawler" in argv
     assert "--output-dataset" in argv
+    # apify-cli 1.7.1: -i is INLINE JSON, a file path must go through -f/--input-file.
+    assert "-i" not in argv
+    assert argv[argv.index("-f") + 1].endswith(".json")
+    # Without --silent the actor's run logs land on stdout and the JSON parse dies.
+    assert "--silent" in argv
+
+
+def test_scrape_apify_bounds_the_call_with_a_timeout(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    seen = {}
+
+    def fake_run(args, capture_output=None, text=None, timeout=None, **kwargs):
+        seen["timeout"] = timeout
+        return subprocess.CompletedProcess(
+            args, 0, stdout=json.dumps([{"markdown": "x " * 200}]), stderr=""
+        )
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    scrape_apify("https://tealdrones.com")
+    assert seen["timeout"] == scrape_mod.APIFY_TIMEOUT_SECONDS
+
+
+def test_scrape_apify_uses_a_dataset_printed_before_the_timeout(monkeypatch):
+    """The CLI can linger long after printing the dataset — if the JSON is already
+    there the scrape succeeded, and throwing it away would waste the actor run."""
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    markdown = "# Something\n\n" + "enough text to pass the length gate. " * 10
+
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            args, 180, output=json.dumps([{"markdown": markdown}]), stderr=""
+        )
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    assert scrape_apify("https://tealdrones.com") == markdown
+
+
+def test_scrape_apify_raises_when_it_times_out_with_no_output(monkeypatch):
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(args, 180, output="", stderr="")
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    with pytest.raises(ScrapeError, match="timed out"):
+        scrape_apify("https://tealdrones.com")
+
+
+def test_scrape_apify_handles_bytes_output_on_timeout(monkeypatch):
+    """TimeoutExpired.stdout is bytes unless text=True reached the child — decode it
+    rather than crashing with a TypeError outside the ScrapeError contract."""
+    import gtm.scrape as scrape_mod
+
+    monkeypatch.setattr(scrape_mod.shutil, "which", lambda name: "/usr/local/bin/apify")
+
+    markdown = "# Something\n\n" + "enough text to pass the length gate. " * 10
+
+    def fake_run(args, **kwargs):
+        raise subprocess.TimeoutExpired(
+            args, 180, output=json.dumps([{"markdown": markdown}]).encode(), stderr=b""
+        )
+
+    monkeypatch.setattr(scrape_mod.subprocess, "run", fake_run)
+
+    assert scrape_apify("https://tealdrones.com") == markdown
 
 
 def test_scrape_apify_raises_when_cli_not_installed(monkeypatch):

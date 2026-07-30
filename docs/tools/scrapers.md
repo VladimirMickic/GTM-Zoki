@@ -6,8 +6,7 @@ or debugging a scraper. Read the per-tool docs (`crawl4ai.md`, `firecrawl.md`,
 `scrapegraphai.md`, `apify.md`) for call shapes; this file only says *when*.
 
 ## The chain
-Intended `FALLBACK_ORDER` (replaces the current code's `["crawl4ai", "firecrawl", "scrapling",
-"apify", "scrapegraphai"]` — scrapling is being dropped, order is being fixed):
+`FALLBACK_ORDER` in `gtm/scrape.py` — live, scrapling dropped, order as below:
 ```
 ["crawl4ai", "firecrawl", "scrapegraphai", "apify"]
 ```

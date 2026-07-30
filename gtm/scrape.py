@@ -22,6 +22,12 @@ MIN_MARKDOWN_CHARS = 200  # anything shorter is a block page / error page, not c
 
 FALLBACK_ORDER = ["crawl4ai", "firecrawl", "scrapegraphai", "apify"]
 
+# Apify's CLI waits on a remote run: the actor itself finishes in seconds, but the
+# call can sit for minutes on platform queueing (observed: a 5.2s run whose CLI
+# invocation had not returned after 5 minutes). Bound it, and salvage the dataset
+# if it was already printed before the timeout hit.
+APIFY_TIMEOUT_SECONDS = int(os.environ.get("APIFY_TIMEOUT_SECONDS", "180"))
+
 SOCIAL_HOSTS = {"linkedin.com", "twitter.com", "x.com", "instagram.com", "facebook.com"}
 
 
@@ -243,12 +249,20 @@ def scrape_firecrawl(url: str) -> str:
 def _extract_scrapegraphai_markdown(payload: dict) -> str | None:
     """Try each candidate key path in order, return the first non-empty str found.
 
-    UNCONFIRMED: ScrapeGraphAI's V2 `/api/scrape` response shape wasn't visible in the
-    primary docs fetch (docs.scrapegraphai.com 404'd on the endpoint pages this session) —
-    see docs/tools/scrapegraphai.md. This candidate list is our best guess pending Task 3.5's
-    live smoke test, which should confirm/prune it against a real response.
+    CONFIRMED live 2026-07-30: V2 `/api/scrape` answers
+    `{"id": ..., "results": {"markdown": {"data": ["# ...", ...]}}, "metadata": {...}}` —
+    a LIST of markdown chunks, which is why every earlier single-string guess missed and
+    this scraper reported "no markdown in response" on a perfectly good 200. That path is
+    first; the older guesses stay behind it in case the shape varies by request type.
     """
+    def _chunks(p):
+        data = p["results"]["markdown"]["data"]
+        if isinstance(data, str):  # single chunk, not wrapped in a list
+            return data
+        return "\n\n".join(s for s in data if isinstance(s, str))
+
     candidates = [
+        _chunks,
         lambda p: p["result"] if isinstance(p.get("result"), str) else None,
         lambda p: p["markdown"],
         lambda p: p["data"]["markdown"],
@@ -269,7 +283,10 @@ def scrape_scrapegraphai(url: str) -> str:
     """Fallback #2: ScrapeGraphAI managed scrape API — last generic resort in the chain
     (see docs/tools/scrapegraphai.md). V2 `/api/scrape` with formats=[{"type": "markdown"}];
     do NOT use the deprecated V1 `markdownify` endpoint."""
-    api_key = os.environ.get("SGAI_API_KEY")
+    # SGAI_API_KEY is the vendor's own name (docs/tools/scrapegraphai.md); this repo's
+    # .env spells it SCRAPEGRAPHAI_API_KEY, so a configured key was silently unread and
+    # this fallback never ran. Accept both, vendor name first.
+    api_key = os.environ.get("SGAI_API_KEY") or os.environ.get("SCRAPEGRAPHAI_API_KEY")
     if not api_key:
         raise ScrapeError("scrapegraphai: no API key configured")
 
@@ -313,33 +330,53 @@ def scrape_apify(url: str) -> str:
             json.dump(
                 {
                     "startUrls": [{"url": url}],
-                    "crawlerType": "adaptive",
+                    # Live-rejected 2026-07-30: bare "adaptive" is not an allowed value —
+                    # the actor takes "playwright:adaptive" | "playwright:firefox" |
+                    # "playwright:chrome" | "cheerio" | "jsdom".
+                    "crawlerType": "playwright:adaptive",
                     "maxCrawlPages": 1,
+                    "maxCrawlDepth": 0,  # this URL only — never follow links onto the paid meter
                     "saveMarkdown": True,
                 },
                 tmp,
             )
 
+        # Confirmed against apify-cli 1.7.1 (live run 2026-07-30): `-i` is INLINE JSON,
+        # a file path needs `-f/--input-file` — the old `-i <tmpfile>` form made the CLI
+        # try to parse a filename as JSON, so this fallback could never have worked.
+        # `--silent` keeps actor logs off stdout so `--output-dataset` prints the bare
+        # JSON array we parse below.
+        argv = [
+            "apify", "call", "apify/website-content-crawler",
+            "-f", tmp_path, "--output-dataset", "--silent",
+        ]
+        stdout = None
         try:
-            # UNCONFIRMED (docs/tools/apify.md): the input flag may be `-i <file>`,
-            # `-i <inline-json>`, or `-f <file>` depending on installed CLI version.
-            # Using `-i <tmpfile-path>` per the brief; Task 3.5's live smoke is the
-            # first real `apify` invocation and will confirm or correct this form.
             result = subprocess.run(
-                ["apify", "call", "apify/website-content-crawler", "-i", tmp_path, "--output-dataset"],
-                capture_output=True,
-                text=True,
+                argv, capture_output=True, text=True, timeout=APIFY_TIMEOUT_SECONDS
             )
+        except subprocess.TimeoutExpired as e:
+            # The CLI can linger long after the dataset has been printed. If we already
+            # have the full JSON, the scrape succeeded — only give up if we don't.
+            stdout = e.stdout.decode(errors="replace") if isinstance(e.stdout, bytes) else e.stdout
+            if not (stdout or "").strip():
+                raise ScrapeError(
+                    f"apify: CLI timed out after {APIFY_TIMEOUT_SECONDS}s with no output"
+                ) from e
+            log.warning("apify CLI timed out after %ss but had printed a dataset — using it",
+                        APIFY_TIMEOUT_SECONDS)
         except (subprocess.SubprocessError, OSError) as e:
             raise ScrapeError(f"apify: subprocess failed: {e}") from e
 
-        if result.returncode != 0:
-            stderr_line = (result.stderr or "").strip().splitlines()[:1]
-            stderr_line = stderr_line[0] if stderr_line else ""
-            raise ScrapeError(f"apify: CLI exited {result.returncode}: {stderr_line}")
+        if stdout is None:
+            if result.returncode != 0:
+                stderr_line = (result.stderr or "").strip().splitlines()[:1]
+                stderr_line = stderr_line[0] if stderr_line else ""
+                raise ScrapeError(f"apify: CLI exited {result.returncode}: {stderr_line}")
+            stdout = result.stdout
 
         try:
-            items = json.loads(result.stdout)
+            items = json.loads(stdout)
         except (ValueError, json.JSONDecodeError) as e:
             raise ScrapeError(f"apify: invalid JSON output: {e}") from e
 
