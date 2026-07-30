@@ -79,9 +79,10 @@ asked for this three times; forgetting it again is a defect, not a style choice.
 Read it back with: `python -c "from gtm.costlog import CostLog; print(CostLog('data/runs/<run>/costs.jsonl').summary_line())"`
 Format the closing line exactly as: `Cost — openai:$0.0412 · serper:15 credits`
 
-## Credentials still needed
-- **Google service-account JSON** (for Sheets, stage 6) — asked when we build it.
-- Have: OPENAI_API_KEY, SERPER_API_KEY. Fallback-scraper keys optional/later.
+## Credentials
+- Have: OPENAI_API_KEY, SERPER_API_KEY, Google service-account JSON
+  (`credentials/service_account.json`) + GTM_SHEET_KEY — stage 6 Sheet push is live.
+  Fallback-scraper keys optional/later.
 
 ## Skills (local)
 company-research (enrichment) · prospect-research · reddit-find · cold-email (later) ·
