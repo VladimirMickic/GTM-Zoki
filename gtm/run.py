@@ -642,6 +642,7 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         OUTREACH_TOKENS,
         SERVICE_ACCOUNT_FILE,
         blocked_row_tokens,
+        by_fit_score,
         no_draft_summary,
         push_contacts_to_sheet,
         push_to_sheet,
@@ -657,6 +658,10 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         for p in prospects:
             p.date_processed = today
         save_state(prospects, run_dir(run))
+        # Best fit first — same order drives the CSVs, both sheet tabs, and the
+        # HubSpot push. A domain already on the Sheet still refreshes in place
+        # (push_to_sheet), so this reorders new appends only, not existing rows.
+        prospects = by_fit_score(prospects)
         csv_path = run_dir(run) / "prospects.csv"
         contacts_csv_path = run_dir(run) / "prospects_contacts.csv"
         n = write_csv(prospects, csv_path)
