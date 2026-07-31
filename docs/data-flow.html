@@ -221,10 +221,10 @@
             <h2>Fit &amp; gate</h2>
             <span class="chip chip--model">◆ claude</span>
           </div>
-          <p>Claude scores the prospect 0–100 against <code>company/ICP.md</code> — does the airframe fit a case line, is it field-deployed, US-made, worth a budget? Hard disqualifiers drop instantly.</p>
+          <p>Two-phase. Claude scores the prospect 80 against <code>company/ICP.md</code> from scrape data only — does the airframe fit a case line, is it field-deployed, is there a displacement opportunity? Budget &amp; procurement (0–20) is scored later, deterministically, from enrichment data. Geography is never scored either way. Hard disqualifiers (size only) drop instantly.</p>
           <p class="rec"><b>record</b> <span class="plus">+=</span> fit_score, fit_reason</p>
           <div class="branch">
-            <span class="tag tag--ok">✓ score ≥ 40 → continue</span>
+            <span class="tag tag--ok">✓ score ≥ 32/80 → continue</span>
             <span class="tag tag--stop">✕ disqualified → denylist</span>
           </div>
         </div>

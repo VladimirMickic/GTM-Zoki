@@ -15,7 +15,7 @@ Python does mechanical work; `gpt-4o-mini` does bulk extraction; Claude does jud
 | 1 | Input / discover | Python + Serper | URLs, or NL search → auto-filter to real makers |
 | 2 | Scrape | crawl4ai (→ markdown) | named in prompt, auto-fallback: Firecrawl→ScrapeGraphAI→Apify (scrapling dropped) |
 | 3 | Extract | `gpt-4o-mini` | markdown → structured drone fields |
-| 4 | Fit score | Claude | 0–100 vs `company/ICP.md`, hard disqualifiers |
+| 4 | Fit score | Claude + Python | two-phase: Claude scores 80 vs `company/ICP.md` from scrape data only (Physical 35 / Field-deployed 25 / Displacement 20); `gtm/budget.py::score_budget` adds a deterministic 0–20 Budget & procurement score post-enrich. Size is the only hard disqualifier |
 | 5a | Contacts (passers) | Serper + crawl4ai | names/titles/LinkedIn (no email yet) |
 | 5b | Enrich (passers) | `gtm/enrich.py` + Serper | 5 Serper credits/company: company LinkedIn · 2 community-signal pain queries · headcount · news. The `company-research` skill is a standalone tool, NOT called here |
 | 6 | Output | Python (gspread) | CSV → Google Sheet (service account) + HubSpot upsert (`gtm/hubspot.py`) |
@@ -24,7 +24,9 @@ Python does mechanical work; `gpt-4o-mini` does bulk extraction; Claude does jud
 
 Built since (past the original demo scope): segment (`gtm/segment.py`), displacement
 (`gtm/displace.py`), persona tiers (`gtm/persona.py`), cold-email drafts (`gtm/draft.py`),
-email waterfall (`gtm/emails.py`, `gtm/email_providers.py`), HubSpot push (`gtm/hubspot.py`).
+email waterfall (`gtm/emails.py`, `gtm/email_providers.py`), HubSpot push (`gtm/hubspot.py`),
+Fit split into two phases — Claude scores 80 from scrape data, `gtm/budget.py::score_budget`
+adds a deterministic 0–20 Budget & procurement score post-enrich (2026-07-31).
 
 ## Build order (each = code + recorded-fixture test + 1 live smoke)
 - **S0 – Scaffold**: Pydantic `Prospect` schema, per-run `brief.md`, cost/token log, secret-scan hook.

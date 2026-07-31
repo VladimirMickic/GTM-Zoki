@@ -180,10 +180,13 @@ class Prospect(BaseModel):
     case_evidence: str = ""  # what they ship in today (state-only, feeds fit; not a sheet column)
     us_made_ndaa: Optional[bool] = None
     # 2026-07-28: the non-US half of "Procurement & compliance fit" (company/ICP.md).
-    # us_made_ndaa is one route into the top scoring band; this field carries the
+    # Geography is not a scoring component (locked 2026-07-28): us_made_ndaa is one of
+    # several procurement-evidence inputs to the Python-scored Budget & procurement
+    # criterion (gtm/budget.py::score_budget, post-enrich); this field carries the
     # others (NATO stock number, national MoD framework, EASA/CAA type cert, BVLOS
     # waiver, awarded gov contract). "" = the hunt found no procurement evidence,
-    # which scores 0-3 — never treat empty as "commercial, therefore mid-band".
+    # which contributes 0 to that criterion — never treat empty as "commercial,
+    # therefore mid-band".
     compliance_evidence: str = ""
     hq_city: str = ""  # state-only; feeds gtm/hubspot.py company city/country properties
     hq_country: str = ""

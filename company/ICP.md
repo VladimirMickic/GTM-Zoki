@@ -60,9 +60,9 @@ inspection · Survey / mapping / GIS · Energy & utilities · Search & rescue.
 the rubric below, because each of them is sometimes wrong:
 - *Non-US company.* Geography is irrelevant to whether a case fits and sells.
 - *Indoor-only / racing.* Racing teams travel constantly; some do need transport.
-- *Software-only, reseller, distributor.* Score Procurement & compliance fit low (they
-  can't buy OEM cases) and let the total fall below 40 on its own — but a "distributor"
-  that also manufactures under its own brand should not be thrown away by a keyword.
+- *Software-only, reseller, distributor.* Score Budget & procurement low (they can't buy
+  OEM cases) and let the total fall below 40 on its own — but a "distributor" that also
+  manufactures under its own brand should not be thrown away by a keyword.
 
 ### Target titles for outreach
 Who we search for and rank (`gtm/contacts.py::_RANK_KEYWORDS`) — ops/product/founders buy

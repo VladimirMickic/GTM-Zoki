@@ -54,7 +54,12 @@ First prospect: **Teal Drones** (tealdrones.com).
 2. **Scrape** — crawl4ai → markdown; named in prompt; auto-fallback (Firecrawl→ScrapeGraphAI→Apify;
    social hosts go straight to Apify). Scrapling dropped — see `docs/tools/scrapers.md`.
 3. **Extract** — `gpt-4o-mini`: markdown → structured drone fields (one place, scraper-agnostic).
-4. **Fit** — Claude scores 0–100 vs `company/ICP.md`; hard disqualifiers.
+4. **Fit** — two-phase. Claude scores 80 vs `company/ICP.md` from scrape data only
+   (Physical 35 / Field-deployed 25 / Displacement 20); `gtm/budget.py::score_budget`
+   adds a deterministic 0-20 Budget & procurement score after enrich, from `headcount`,
+   `key_news` and `compliance_evidence` — fields that do not exist at Fit time. Size is
+   still the only hard disqualifier; a company with no identified airframe is capped at
+   48 (`gtm/fit.py::evidence_cap`) and can never reach priority tier.
 5. **Contacts + Enrich** (passers only) — all Serper + `gpt-4o-mini`, no skill in the loop:
    `gtm/contacts.py` (`site:linkedin.com/in` + team scrape → names/titles/LinkedIn, ranked,
    employment-verified, no email yet), `gtm/enrich.py` (company LinkedIn, community signals,
