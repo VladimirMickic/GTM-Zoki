@@ -990,6 +990,17 @@ def test_find_news_backfills_the_freed_slots_with_distinct_events():
     assert len(news) == 5  # 1 of the 4 dupes + 4 distinct, not 1 + nothing
 
 
+def test_stale_news_ranks_below_fresh_and_only_backfills():
+    results = [
+        {"title": "Old CCA award", "link": "https://x.com/a/2024/04/old/", "snippet": "old"},
+        {"title": "New Army order", "link": "https://y.com/2026/03/new/", "snippet": "new"},
+    ]
+    out = find_news("Acme", website="", search=lambda q, num=10: results,
+                    today="2026-07")
+    assert out[0].startswith("New Army order"), out
+    assert len(out) == 2  # stale still backfills an otherwise-empty slot
+
+
 def test_news_line_stamps_the_date_from_the_url_path():
     results = [{"title": "Army awards Anduril task order", "link": "https://breakingdefense.com/2026/03/army-awards-anduril/", "snippet": "$87 million"}]
     assert find_news("Anduril", search=lambda q, num=10: results)[0].endswith("[date: 2026-03]")

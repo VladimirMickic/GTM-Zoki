@@ -143,19 +143,35 @@ def _is_own_domain(own: str, r: dict) -> bool:
     return link == own or link.endswith(f".{own}")
 
 
-def find_news(company: str, *, website: str = "", search=serper_search) -> list[str]:
+def _months_old(date: str, today: str) -> int:
+    """Whole months between a "YYYY-MM" stamp and today. Undated sorts as fresh —
+    an undated trade-press item is usually recent, and demoting it on a missing
+    stamp would bury good news behind a dated-but-old one."""
+    if not date:
+        return 0
+    (y1, m1), (y2, m2) = (int(x) for x in date.split("-")), (int(x) for x in today.split("-"))
+    return (y2 - y1) * 12 + (m2 - m1)
+
+
+def find_news(company: str, *, website: str = "", search=serper_search,
+              today: str = "") -> list[str]:
+    """Newest-first, with anything older than RECENCY_MONTHS demoted to backfill.
+
+    2026-07-31: run us-drone-20 spent a news slot on an April-2024 CCA item, two
+    years stale, while the freshness rules only ever applied to buying_signals."""
+    today = today or date.today().strftime("%Y-%m")
     q = f'"{company}" drone (contract OR launch OR funding OR award OR NDAA OR "Blue UAS")'
     results = search(q, num=10)
     own = _domain(website)
-    kept: list[dict] = []
+    fresh: list[dict] = []
+    stale: list[dict] = []
     for r in results:
         if _is_own_domain(own, r) or _domain(r.get("link", "")) in _NON_NEWS_HOSTS:
             continue
-        if _is_dupe(r, kept):
+        if _is_dupe(r, fresh + stale):
             continue
-        kept.append(r)
-        if len(kept) >= MAX_NEWS:
-            break
+        (stale if _months_old(_news_date(r), today) > RECENCY_MONTHS else fresh).append(r)
+    kept = (fresh + stale)[:MAX_NEWS]
     return [_news_line(r) for r in kept]
 
 
