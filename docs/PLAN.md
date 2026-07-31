@@ -17,9 +17,10 @@ Python does mechanical work; `gpt-4o-mini` does bulk extraction; Claude does jud
 | 3 | Extract | `gpt-4o-mini` | markdown → structured drone fields |
 | 4 | Fit score | Claude | 0–100 vs `company/ICP.md`, hard disqualifiers |
 | 5a | Contacts (passers) | Serper + crawl4ai | names/titles/LinkedIn (no email yet) |
-| 5b | Enrich (passers) | company-research skill + Serper | 5 Serper credits/company: company LinkedIn · 2 community-signal pain queries · headcount · news |
-| 6 | Output | Python (gspread) | CSV → Google Sheet (service account) |
-| — | Learn | Claude | read `data/feedback.jsonl` → propose ICP/denylist edits |
+| 5b | Enrich (passers) | `gtm/enrich.py` + Serper | 5 Serper credits/company: company LinkedIn · 2 community-signal pain queries · headcount · news. The `company-research` skill is a standalone tool, NOT called here |
+| 6 | Output | Python (gspread) | CSV → Google Sheet (service account) + HubSpot upsert (`gtm/hubspot.py`) |
+| — | Learn | Claude | read `data/feedback.jsonl` → propose ICP/denylist edits (only `origin == "user"` entries may drive one) |
+| — | Postmortem | Python only | `gtm/postmortem.py` mines a finished run's `data/errors.log` slice → `Feedback(origin="run")`; zero LLM cost, never edits ICP |
 
 Built since (past the original demo scope): segment (`gtm/segment.py`), displacement
 (`gtm/displace.py`), persona tiers (`gtm/persona.py`), cold-email drafts (`gtm/draft.py`),
@@ -38,7 +39,7 @@ email waterfall (`gtm/emails.py`, `gtm/email_providers.py`), HubSpot push (`gtm/
   re-judges them in the `signals` step (`build_signal_prompt`/`merge_signals`) — matches the
   model-routing rule below (extraction = gpt-4o-mini, judgment = Claude).
 - **S6 – Output**: CSV writer + Google Sheet push (service account).
-- **S7 – Orchestrate** (done): `gtm/run.py` CLI — `start`/`fit`/`enrich`/`signals`/`emails`/`output`/`learn`,
+- **S7 – Orchestrate** (done): `gtm/run.py` CLI — `start`/`fit`/`enrich`/`signals`/`segment`/`draft`/`redraft`/`emails`/`output`/`learn`/`postmortem`,
   Claude judges between steps via printed prompts + JSON answer files. State = `data/runs/<run>/prospects.json`,
   log&skip → `data/errors.log`, cost log. Live E2E on Teal Drones: fit 85/priority (re-run 2026-07-18 after feedback round 1: split dims/weights, top-3 contacts, news snippets, line-per-point reasons). Commands in CLAUDE.md.
 

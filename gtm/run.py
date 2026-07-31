@@ -7,7 +7,8 @@
   python -m gtm.run segment <run>                    # bucket passers → draft prompts
   python -m gtm.run draft <run> <drafts.json>        # apply Claude's drafts → auto QA
   python -m gtm.run redraft <run> <drafts.json>      # apply fixed drafts for QA-flagged prospects → recheck (final)
-  python -m gtm.run output <run>                     # CSV (+ Sheet push if creds present)
+  python -m gtm.run emails <run>                     # email waterfall (pattern → provider chain → AI hunt)
+  python -m gtm.run output <run> [--dry-run]         # CSV (+ Sheet/HubSpot push unless --dry-run)
   python -m gtm.run learn                            # show feedback for ICP/denylist proposals
   python -m gtm.run postmortem <run>                 # mine this run's errors.log window → feedback(origin="run")
   python -m gtm.run smoke <url> [--live]             # one company, end-to-end; --live also pushes to Sheet
