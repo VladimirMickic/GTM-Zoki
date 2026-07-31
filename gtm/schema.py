@@ -44,8 +44,9 @@ _STATUS_TIER = {"priority": "1", "keep": "2", "drop": "3"}
 # 2026-07-21 (user): keep sheet cells scannable — trim the long-form cells. Full
 # untrimmed detail stays in prospects.json (local state), only the sheet is capped.
 _LONG_LIST_COLS = ("key_news", "buying_signals", "community_signals")
-_LIST_MAX_ITEMS = 3  # top-N entries per long-list cell
-_ENTRY_MAX_CHARS = 180  # per entry
+_LIST_MAX_ITEMS = 5  # was 3 — find_news already caps at MAX_NEWS = 5, and dropping
+                     # two of five hid whole events rather than trimming prose
+_ENTRY_MAX_CHARS = 180  # per entry, prose only (URLs/markers are budgeted separately)
 # 2026-07-29 (user, reviewing the live Sheet: "fit_reason feels weak and vague"):
 # fit_reason is a 5-line rubric dump and the old whole-string 400-char cap cut from
 # the END — so Displacement, the LAST line and the one the outreach angle is built
@@ -102,6 +103,34 @@ def _trim_keep_source(s: str, n: int) -> str:
     if len(s) > budget:
         s = s[:budget].rsplit(" ", 1)[0].rstrip() + "…"
     return s + source + marker
+
+
+_URL_TAIL_RE = re.compile(r"\s\((https?://[^\s()]+)\)")
+_DATE_STAMP_RE = re.compile(r"\s*(\[date:\s*\d{4}-\d{2}\])\s*$")
+
+
+def _trim_news_entry(s: str, n: int) -> str:
+    """Trim a key_news line's prose to n chars, charging neither the trailing URL
+    nor the "[date: YYYY-MM]" stamp to the budget.
+
+    2026-07-31: _trim_keep_source protected the URL parenthetical but counted it —
+    breakingdefense's 103-char URL left 77 chars for the headline, so every news
+    cell in the Sheet read as a fragment. The URL is not prose; a reader scans past
+    it. Budget the words, preserve the link whole."""
+    s = s.strip()
+    stamp = ""
+    m = _DATE_STAMP_RE.search(s)
+    if m:
+        stamp = " " + m.group(1)
+        s = s[: m.start()].rstrip()
+    url = ""
+    m = _URL_TAIL_RE.search(s)
+    if m:
+        url = f" ({m.group(1)})"
+        s = (s[: m.start()] + s[m.end():]).rstrip()
+    if len(s) > n:
+        s = s[:n].rsplit(" ", 1)[0].rstrip() + "…"
+    return s + url + stamp
 
 
 class Feedback(BaseModel):
@@ -290,8 +319,12 @@ class Prospect(BaseModel):
                 row.append(_trim_lines(str(v), _FIT_REASON_LINE_MAX_CHARS))
             elif isinstance(v, list):
                 if col in _LONG_LIST_COLS:
-                    # long-form cells: top-N entries, each trimmed, one per line
-                    items = [_trim_keep_source(str(x), _ENTRY_MAX_CHARS) for x in v[:_LIST_MAX_ITEMS]]
+                    # long-form cells: top-N entries, each trimmed, one per line.
+                    # key_news entries end in "(<url>)" — the URL isn't prose, so
+                    # it's budgeted separately (_trim_news_entry) instead of eating
+                    # into the same char cap as buying/community signals' sources.
+                    trim = _trim_news_entry if col == "key_news" else _trim_keep_source
+                    items = [trim(str(x), _ENTRY_MAX_CHARS) for x in v[:_LIST_MAX_ITEMS]]
                     row.append("\n".join(items))
                 else:
                     row.append("; ".join(str(x) for x in v))  # short specs stay inline

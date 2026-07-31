@@ -230,16 +230,18 @@ def test_news_and_signals_render_one_per_line():
 
 def test_long_sheet_cells_are_trimmed():
     # 2026-07-21 (user): keep the Companies tab scannable — cap long cells.
+    # 2026-07-31: cap raised 3 -> 5 (find_news already caps at MAX_NEWS = 5), so
+    # this needs more than 5 source entries to still exercise the item cap itself.
     p = Prospect(
         company="X", website="https://x.com",
         fit_reason="word " * 200,  # ~1000 chars
-        buying_signals=[f"signal {i} " + "detail " * 40 for i in range(5)],
+        buying_signals=[f"signal {i} " + "detail " * 40 for i in range(7)],
     )
     row = p.to_sheet_row()
     assert len(row[SHEET_COLUMNS.index("fit_reason")]) <= 401  # 400 + ellipsis
     assert row[SHEET_COLUMNS.index("fit_reason")].endswith("…")
     signals_cell = row[SHEET_COLUMNS.index("buying_signals")]
-    assert signals_cell.count("\n") == 2  # only top-3 of 5 entries kept
+    assert signals_cell.count("\n") == 4  # only top-5 of 7 entries kept
     assert all(len(line) <= 181 for line in signals_cell.split("\n"))  # each entry trimmed
     # full detail is untouched on the model itself (only the sheet render is capped)
     assert len(p.fit_reason) > 400
@@ -370,3 +372,22 @@ def test_trim_still_handles_the_no_trailing_punctuation_case():
     signal = "Raised a $110M Series B to scale production (govconwire.com, 2026-02)"
     out = _trim_keep_source(signal, 180)
     assert out == signal  # short enough, untouched
+
+
+def test_news_entry_budget_excludes_the_url():
+    from gtm.schema import _trim_news_entry
+
+    line = (
+        "Army awards Anduril counter-drone task order as first in new $20B contract "
+        "vehicle — WASHINGTON — The Army-run counter-drone task force has selected "
+        "Anduril's Lattice software as the command and control backbone in an $87 "
+        "million award announced Friday "
+        "(https://breakingdefense.com/2026/03/army-awards-anduril-counter-drone-task-"
+        "order-as-first-in-new-20b-contract-vehicle/) [date: 2026-03]"
+    )
+    out = _trim_news_entry(line, 180)
+    assert out.endswith("[date: 2026-03]")
+    assert "breakingdefense.com/2026/03/army-awards" in out
+    # 180 chars of actual prose survive, not 77.
+    prose = out.split(" (http", 1)[0]
+    assert len(prose) >= 170, prose
