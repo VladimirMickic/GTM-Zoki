@@ -7,10 +7,10 @@ from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers,
 from gtm.schema import Prospect
 
 
-def test_fit_score_bounded_0_100():
-    FitResult(fit_score=85, fit_reason="strong", best_case_line="AV-Field")
+def test_fit_score_bounded_0_80():
+    FitResult(fit_score=75, fit_reason="strong", best_case_line="AV-Field")
     with pytest.raises(ValidationError):
-        FitResult(fit_score=150, fit_reason="x", best_case_line="")
+        FitResult(fit_score=81, fit_reason="x", best_case_line="")
     with pytest.raises(ValidationError):
         FitResult(fit_score=-5, fit_reason="x", best_case_line="")
 
@@ -41,7 +41,7 @@ def test_prompt_contains_icp_and_extraction():
 
 @pytest.mark.parametrize(
     "score,disqualified,status",
-    [(85, False, "priority"), (55, False, "keep"), (20, False, "drop"), (85, True, "drop")],
+    [(75, False, "priority"), (55, False, "keep"), (20, False, "drop"), (75, True, "drop")],
 )
 def test_apply_fit_maps_thresholds_to_status(score, disqualified, status):
     p = Prospect(company="X", website="https://x.com")
@@ -216,7 +216,25 @@ def test_a_named_model_lifts_the_cap():
 
 def test_apply_fit_clamps_to_the_cap_and_demotes_the_tier():
     p = Prospect(company="Anduril", website="https://www.anduril.com/")
-    fit = FitResult(fit_score=83, fit_reason="...", best_case_line="AV-Field")
+    fit = FitResult(fit_score=78, fit_reason="...", best_case_line="AV-Field")
     apply_fit(p, fit, cap=60)
     assert p.fit_score == 60
     assert p.status == "keep"
+
+
+# --- 2026-07-31: Anduril run scored 83/100 with "Volume/price" justified by "Anduril is
+# an established defense prime" (training data, not a prompt field) and a 12-15
+# "Procurement" score whose own text admitted "no specific named certification found" —
+# the band it claimed requires one. The prompt must ban prior knowledge and demand every
+# scored line cite the field it came from. ---
+
+
+def test_prompt_bans_prior_knowledge_and_demands_field_citations():
+    prompt = build_fit_prompt("ICP TEXT", "Anduril", DroneExtraction())
+    lowered = prompt.lower()
+    assert "not evidence" in lowered
+    assert "already know" in lowered
+    assert "[field:" in prompt
+    # 80-point scale: budget is scored later, in Python
+    assert "80" in prompt
+    assert "Budget & procurement" not in prompt

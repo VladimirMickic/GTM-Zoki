@@ -879,7 +879,7 @@ def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
     fit_json_path = tmp_path / "fit.json"
     fit_json_path.write_text(json.dumps({
         "Tealdrones": {
-            "fit_score": 85,
+            "fit_score": 78,
             "fit_reason": "strong match",
             "best_case_line": "AV-Field",
             "disqualified": False,
@@ -891,7 +891,7 @@ def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
     prospects = load_state(run_dir("teal-demo-6"))
     assert len(prospects) == 1
     p = prospects[0]
-    assert p.fit_score == 85
+    assert p.fit_score == 78
     assert p.best_case_line == "AV-Field"
     assert p.status == "priority"  # apply_fit: score >= 70 -> priority
 

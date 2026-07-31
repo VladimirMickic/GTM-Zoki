@@ -42,7 +42,7 @@ _UNFOLDED = re.compile(r"\bunfolded|deployed|rotors? (?:out|extended)|arms? (?:o
 
 
 class FitResult(BaseModel):
-    fit_score: int = Field(ge=0, le=100)
+    fit_score: int = Field(ge=0, le=80)
     fit_reason: str
     best_case_line: str  # AV-Micro / AV-Field / AV-Ops / AV-Convoy / ""
     disqualified: bool = False
@@ -153,13 +153,35 @@ size problem the dimension parser could not (e.g. the spec sheet describes a 6-m
 wingspan in prose with no L×W×H triple). Do NOT set it for being foreign, indoor-only,
 software-only, or a reseller — those are score penalties inside the rubric.
 
-fit_reason format — one line per ICP scoring signal, newline-separated ("\\n" in the JSON
-string): "<Criterion> <score>/<max> — <plain-English why>". Plain English only: expand any
-jargon/acronym on first use (e.g. "SRR (Short Range Reconnaissance)"), and say so explicitly
-when a judgment is inferred rather than published (e.g. dimensions inferred from weight).
+Score ONLY the three scrape-phase criteria, out of 80 total: Physical fit /35,
+Field-deployed /25, Displacement opportunity /20. Budget/procurement is scored later,
+in Python, from enrichment data you do not have — do not score it and do not mention it.
+
+Score ONLY from the fields listed above. What you already know about this company from
+training is NOT evidence, however confident you are and however famous the company. If a
+field is empty, the criterion it feeds scores its bottom band — the ICP's bottom band is
+always "no evidence found", never a midpoint. A score you cannot trace to a field above
+is the failure this instruction exists to prevent: it looks like a finding, and on a
+company you have never heard of it silently collapses to zero.
+
+Never score a band whose stated evidence requirement you did not find. If the band table
+says "named programme or certification" and you found none, you are not in that band, no
+matter what else the company is.
+
+fit_reason format — one line per scrape-phase criterion, newline-separated ("\\n" in the
+JSON string):
+
+  "<Criterion> <score>/<max> — [field: <field name>] <plain-English why>"
+
+<field name> is the exact field you read it from: description, drone_models,
+drone_dimensions, drone_weights, case_evidence, compliance_evidence, us_made_ndaa — or
+the literal "none found" when nothing supported the score, which must then be the bottom
+band. Plain English only: expand any jargon or acronym on first use (e.g. "SRR (Short
+Range Reconnaissance)"), and say "inferred" explicitly when a judgment is inferred rather
+than published.
 
 Reply with ONLY this JSON (no prose):
-{{"fit_score": <0-100>, "fit_reason": "<one line per signal, as specified above>",
+{{"fit_score": <0-80>, "fit_reason": "<one line per criterion, as specified above>",
 "best_case_line": "<AV-Micro|AV-Field|AV-Ops|AV-Convoy|>", "disqualified": <true|false>}}"""
 
 
