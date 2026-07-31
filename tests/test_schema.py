@@ -334,3 +334,39 @@ def test_prospect_carries_an_inhouse_case_label():
     p = Prospect(company="X", website="https://x.com", inhouse_case="docking station")
     assert p.inhouse_case == "docking station"
     assert Prospect(company="Y", website="https://y.com").inhouse_case == ""
+
+
+def test_trim_keeps_source_when_a_full_stop_follows_the_parenthetical():
+    from gtm.schema import _trim_keep_source
+
+    signal = (
+        "Army awarded Anduril an $87M counter-drone task order, the first task order "
+        "under a new $20B Army contract vehicle — a real dollar award (not the "
+        "vehicle's ceiling), evidence of an active, well-funded gov relationship "
+        "(breakingdefense.com, 2026-03)."
+    )
+    out = _trim_keep_source(signal, 180)
+    assert "breakingdefense.com, 2026-03" in out
+    assert "…" in out
+
+
+def test_trim_keeps_marker_when_a_full_stop_follows_it():
+    from gtm.schema import _trim_keep_source
+
+    signal = (
+        "Air Force awarded Anduril a production contract for autonomous fighter "
+        "aircraft (CCA — Collaborative Combat Aircraft), with the line capable of "
+        "delivering up to 150 aircraft/year — signals major sustained gov demand and "
+        "production scale-up (airandspaceforces.com, jpost.com) [undated]."
+    )
+    out = _trim_keep_source(signal, 180)
+    assert out.rstrip().endswith("[undated]")
+    assert "airandspaceforces.com" in out
+
+
+def test_trim_still_handles_the_no_trailing_punctuation_case():
+    from gtm.schema import _trim_keep_source
+
+    signal = "Raised a $110M Series B to scale production (govconwire.com, 2026-02)"
+    out = _trim_keep_source(signal, 180)
+    assert out == signal  # short enough, untouched

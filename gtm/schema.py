@@ -56,7 +56,11 @@ _FIT_REASON_LINE_MAX_CHARS = 150
 
 # A trailing recency marker written by gtm/enrich.py's signal-dating logic:
 # "[stale]", "[undated]". Short and bracketed, so it can't collide with prose.
-_RECENCY_MARKER_RE = re.compile(r"\s*(\[[^\[\]]{1,20}\])\s*$")
+# Trailing sentence punctuation is tolerated after it: Claude routinely writes
+# "... (source) [undated]." and an anchored-to-$ match silently fell through to
+# the plain trimmer, deleting source, date and marker together (us-drone-20).
+_RECENCY_MARKER_RE = re.compile(r"\s*(\[[^\[\]]{1,20}\])\s*[.;,]?\s*$")
+_SOURCE_TAIL_RE = re.compile(r"\s\(([^()]{1,120})\)\s*[.;,]?\s*$")
 
 
 def _trim(s: str, n: int) -> str:
@@ -79,10 +83,10 @@ def _trim_keep_source(s: str, n: int) -> str:
 
     2026-07-24 fix: a cut source link is why community signals read as "no sources".
     2026-07-29 fix: the ")"-suffix test silently failed to fire on buying_signals,
-    which end with the recency MARKER, not the parenthetical — so on every signal
-    long enough to trim, plain _trim ate the source, the date and the marker
-    together. That is the whole of the "buying_signals feel vague" report: the
-    Sheet was deleting exactly the tokens a reader judges a signal by."""
+    which end with the recency MARKER, not the parenthetical.
+    2026-07-31 fix: both protections were last-character tests, so a trailing full
+    stop ("... (breakingdefense.com, 2026-03).") defeated them and re-opened the
+    exact same hole. Both are regexes now, and both tolerate trailing punctuation."""
     s = s.strip()
     marker = ""
     m = _RECENCY_MARKER_RE.search(s)
@@ -90,9 +94,10 @@ def _trim_keep_source(s: str, n: int) -> str:
         marker = " " + m.group(1)
         s = s[: m.start()].rstrip()
     source = ""
-    if s.endswith(")") and " (" in s:
-        text, _, src = s[:-1].rpartition(" (")
-        source, s = f" ({src})", text
+    m = _SOURCE_TAIL_RE.search(s)
+    if m:
+        source = f" ({m.group(1)})"
+        s = s[: m.start()].rstrip()
     budget = max(n - len(source) - len(marker), 0)
     if len(s) > budget:
         s = s[:budget].rsplit(" ", 1)[0].rstrip() + "…"
