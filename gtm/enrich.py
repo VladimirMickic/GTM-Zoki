@@ -83,22 +83,40 @@ def _title_tokens(title: str) -> set[str]:
     return {w for w in words if len(w) > 2 and w not in _TITLE_STOPWORDS}
 
 
-_DUPE_OVERLAP = 0.6  # Jaccard over headline content words
+_DUPE_OVERLAP = 0.35  # Jaccard over headline content words. Was 0.6 until 2026-07-31:
+                      # measured against the us-drone-20 Anduril SERP, every pair in a
+                      # 5-result set scored 0.07-0.30, including two write-ups of the
+                      # same CCA award at 0.30. 0.6 only caught syndicated duplicates.
+
+# Rare, event-naming tokens. Two headlines sharing two of these are almost always the
+# same story: the company name plus a programme/agency/dollar figure pins an event far
+# more reliably than generic verbs like "awards" or "wins" do.
+_ENTITY_RE = re.compile(r"\b(?:[A-Z]{2,}|\$[\d.]+[MBK]?)\b")
+
+
+def _entities(title: str) -> set[str]:
+    """Acronyms (CCA, NDAA, USAF) and dollar figures ($87M) from a headline."""
+    return set(_ENTITY_RE.findall(title))
 
 
 def _is_dupe(r: dict, kept: list[dict]) -> bool:
     """Same event, different outlet. Run us-drone-20 filled 5 news slots with 2 real
     events — the CCA contract appeared 3 times (YouTube, airandspaceforces, jpost) —
-    so the signal stage saw far less than the slot count suggested."""
+    so the signal stage saw far less than the slot count suggested.
+
+    Two independent tests, either sufficient: headline-word Jaccard, and a shared
+    rare entity (an acronym or a dollar figure). The entity test is what catches
+    "Air Force Selects ... for CCA" against "Air Force awards ... for CCA", which
+    share only 0.30 of their words but name the same programme."""
     tokens = _title_tokens(r.get("title", ""))
+    ents = _entities(r.get("title", ""))
     if not tokens:
         return False
     for k in kept:
         other = _title_tokens(k.get("title", ""))
-        if not other:
-            continue
-        overlap = len(tokens & other) / len(tokens | other)
-        if overlap >= _DUPE_OVERLAP:
+        if other and len(tokens & other) / len(tokens | other) >= _DUPE_OVERLAP:
+            return True
+        if ents and ents & _entities(k.get("title", "")):
             return True
     return False
 

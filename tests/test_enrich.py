@@ -1010,3 +1010,22 @@ def test_signal_prompt_forbids_undated_on_a_dated_news_line():
     prompt = build_signal_prompt(p)
     assert "[date: YYYY-MM]" in prompt
     assert "EXACTLY" in prompt
+
+
+def test_same_event_different_outlet_is_deduped():
+    results = [
+        {"title": "Army awards Anduril counter-drone task order as first in new vehicle",
+         "link": "https://breakingdefense.com/2026/03/army-awards-anduril/",
+         "snippet": "The Army-run counter-drone task force has selected Anduril's Lattice"},
+        {"title": "Air Force Selects General Atomics and Anduril for CCA production",
+         "link": "https://www.airandspaceforces.com/air-force-anduril-cca-production/",
+         "snippet": "In April 2024, the Air Force awarded contracts to continue designing"},
+        {"title": "US Air Force awards production contracts to Anduril for CCA",
+         "link": "https://www.jpost.com/defense-and-tech/article-899781",
+         "snippet": "Anduril says the production line can deliver up to 150 aircraft/year"},
+    ]
+    out = find_news("Anduril", website="https://www.anduril.com/",
+                    search=lambda q, num=10: results)
+    assert len(out) == 2, out
+    assert any("counter-drone" in line for line in out)
+    assert sum("CCA" in line for line in out) == 1
