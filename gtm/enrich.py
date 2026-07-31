@@ -116,7 +116,7 @@ def _is_dupe(r: dict, kept: list[dict]) -> bool:
         other = _title_tokens(k.get("title", ""))
         if other and len(tokens & other) / len(tokens | other) >= _DUPE_OVERLAP:
             return True
-        if ents and ents & _entities(k.get("title", "")):
+        if ents and len(ents & _entities(k.get("title", ""))) >= 2:
             return True
     return False
 

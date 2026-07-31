@@ -1029,3 +1029,24 @@ def test_same_event_different_outlet_is_deduped():
     assert len(out) == 2, out
     assert any("counter-drone" in line for line in out)
     assert sum("CCA" in line for line in out) == 1
+
+
+def test_single_shared_entity_does_not_cause_false_positive_dedup():
+    # Two genuinely distinct news stories about Teal Drones that both mention "US"
+    # but are about completely different events. They should NOT be deduped, even
+    # though they share the generic entity "US". Entity matching requires 2+ shared
+    # rare entities to avoid false positives on country/region/agency acronyms.
+    results = [
+        {"title": "Teal Drones wins US Army contract for surveillance drones",
+         "link": "https://example.com/army-contract",
+         "snippet": "contract award for surveillance drone system"},
+        {"title": "Teal Drones opens new US manufacturing facility in Utah",
+         "link": "https://example.com/facility",
+         "snippet": "company expands domestic production capacity"},
+    ]
+    out = find_news("Teal Drones", website="https://www.tealdrones.com/",
+                    search=lambda q, num=10: results)
+    # Both stories should be kept; they share only the generic entity "US", not 2+
+    assert len(out) == 2, f"Expected 2 distinct news items, got {len(out)}: {out}"
+    assert any("Army contract" in line for line in out)
+    assert any("manufacturing" in line for line in out)
