@@ -103,6 +103,24 @@ def check_disqualifiers(ex: DroneExtraction) -> str | None:
     return None
 
 
+# A company whose airframe was never identified cannot be a top-tier prospect for a
+# case built around a specific airframe. Run us-drone-20 scored Anduril 83/100 —
+# priority tier, full drafted outreach — from a one-sentence description, with
+# drone_models and drone_dimensions both empty. Three of its five rubric lines were
+# scored from prior knowledge of a famous company; on an unknown maker they'd be 0.
+NO_AIRFRAME_CAP = 60  # top of the "keep" band — still worth a look, never a priority
+
+
+def evidence_cap(ex: DroneExtraction) -> int | None:
+    """NO_AIRFRAME_CAP when neither a model name nor a dimension triple was found,
+    else None. Deliberately does NOT consider drone_weights: a weight in prose
+    ("approximately 12 lbs") is not an identified airframe, it's a number in a
+    sentence — that is exactly the evidence Anduril was scored 22/30 on."""
+    if not ex.drone_models and not ex.drone_dimensions:
+        return NO_AIRFRAME_CAP
+    return None
+
+
 def build_fit_prompt(icp_text: str, company: str, ex: DroneExtraction) -> str:
     return f"""Score this drone manufacturer against our ICP. Apply the scoring weights and
 hard disqualifiers exactly as written in the ICP.
@@ -145,13 +163,18 @@ Reply with ONLY this JSON (no prose):
 "best_case_line": "<AV-Micro|AV-Field|AV-Ops|AV-Convoy|>", "disqualified": <true|false>}}"""
 
 
-def apply_fit(p: Prospect, fit: FitResult) -> Prospect:
-    p.fit_score = fit.fit_score
+def apply_fit(p: Prospect, fit: FitResult, *, cap: int | None = None) -> Prospect:
+    p.fit_score = min(fit.fit_score, cap) if cap is not None else fit.fit_score
     p.fit_reason = fit.fit_reason
+    if cap is not None and fit.fit_score > cap:
+        p.fit_reason += (
+            f"\nEvidence cap applied — no airframe identified (no model name, no "
+            f"dimensions); raw score {fit.fit_score} capped to {cap}."
+        )
     p.best_case_line = fit.best_case_line
-    if fit.disqualified or fit.fit_score < 40:
+    if fit.disqualified or p.fit_score < 40:
         p.status = "drop"
-    elif fit.fit_score >= 70:
+    elif p.fit_score >= 70:
         p.status = "priority"
     else:
         p.status = "keep"

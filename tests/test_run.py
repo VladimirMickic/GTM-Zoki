@@ -112,7 +112,13 @@ def test_process_company_toy_drone_auto_dropped():
 
 
 def test_merge_fit_by_company():
-    ps = [Prospect(company="A", website="https://a.com"), Prospect(company="B", website="https://b.com")]
+    # drone_models is set so the new evidence cap (gtm/fit.py::evidence_cap) doesn't
+    # clamp this score — that behavior has its own dedicated tests in test_fit.py;
+    # this test is only about merge_fit's by-company threshold-to-status mapping.
+    ps = [
+        Prospect(company="A", website="https://a.com", drone_models=["Model X"]),
+        Prospect(company="B", website="https://b.com"),
+    ]
     fits = {"A": FitResult(fit_score=80, fit_reason="good", best_case_line="AV-Field")}
     merge_fit(ps, fits)
     assert ps[0].status == "priority"

@@ -45,7 +45,7 @@ from gtm.draft import (
     qa_check,
 )
 from gtm.extract import DroneExtraction, extract
-from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
+from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers, evidence_cap
 from gtm.schema import DraftSet, Prospect
 from gtm.scrape import scrape, scrape_deep
 from gtm.segment import assign_segment
@@ -280,7 +280,12 @@ def process_company(
 def merge_fit(prospects: list[Prospect], fits: dict[str, FitResult]) -> None:
     for p in prospects:
         if p.company in fits and p.status not in ("drop", "error"):
-            apply_fit(p, fits[p.company])
+            apply_fit(
+                p,
+                fits[p.company],
+                cap=evidence_cap(DroneExtraction(drone_models=p.drone_models,
+                                                  drone_dimensions=p.drone_dimensions)),
+            )
 
 
 def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:

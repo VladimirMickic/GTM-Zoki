@@ -3,7 +3,7 @@ import pytest
 from pydantic import ValidationError
 
 from gtm.extract import DroneExtraction
-from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers
+from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers, evidence_cap
 from gtm.schema import Prospect
 
 
@@ -196,3 +196,27 @@ def test_icp_fit_scoring_table_has_four_criteria_weighted_35_25_20_20():
         weights.append(int(match.group(1)))
     assert weights == [35, 25, 20, 20]
     assert sum(weights) == 100
+
+
+def test_no_airframe_identified_caps_the_score_below_priority():
+    ex = DroneExtraction(
+        company_description="Anduril develops advanced defense technologies, "
+                            "including drones, for military applications.",
+        drone_models=[],
+        drone_dimensions=[],
+        drone_weights=["approximately 12 lbs"],
+    )
+    assert evidence_cap(ex) == 60
+
+
+def test_a_named_model_lifts_the_cap():
+    ex = DroneExtraction(drone_models=["Ghost-X"], drone_dimensions=[])
+    assert evidence_cap(ex) is None
+
+
+def test_apply_fit_clamps_to_the_cap_and_demotes_the_tier():
+    p = Prospect(company="Anduril", website="https://www.anduril.com/")
+    fit = FitResult(fit_score=83, fit_reason="...", best_case_line="AV-Field")
+    apply_fit(p, fit, cap=60)
+    assert p.fit_score == 60
+    assert p.status == "keep"
