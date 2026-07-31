@@ -439,7 +439,8 @@ def _relevance_filter(results: list[dict], *, client=None, costlog=None) -> list
     return [f'"{s.quote}" ({s.source})' for s in kept[:MAX_COMMUNITY_SIGNALS]]
 
 
-def find_community_signals(p: Prospect, *, search=serper_search, client=None, costlog=None) -> list[str]:
+def find_community_signals(p: Prospect, *, search=serper_search, client=None,
+                           costlog=None, trace: dict | None = None) -> list[str]:
     """Pain-focused, not mention-focused (2026-07-27 redesign): airframe-specific
     and ICP-category queries, pooled and deduped, then a cheap gpt-4o-mini pass
     narrows to candidate pain quotes, rewritten as '"<quote>" (<source>)'.
@@ -447,7 +448,12 @@ def find_community_signals(p: Prospect, *, search=serper_search, client=None, co
     tell genuine pain from a satisfied setup described in the same vocabulary.
     These candidates get shown to Claude in build_signal_prompt, whose reply
     (merged via gtm/run.py::merge_signals) is what actually lands in
-    p.community_signals — ammo for gtm/draft.py's pain block, not raw SERP noise."""
+    p.community_signals — ammo for gtm/draft.py's pain block, not raw SERP noise.
+
+    `trace`, when passed, is filled with per-stage counts. Added 2026-07-31: this
+    funnel has returned zero for every passer since run us-drone-8 (0 of 13) and
+    nothing logged which of its three stages — Serper, the gpt-4o-mini gates, or
+    Claude's re-judgment in build_signal_prompt — was dropping everything."""
     pooled, seen_links = [], set()
     for q in _pain_queries(p):
         for r in search(q, num=10):
@@ -457,7 +463,10 @@ def find_community_signals(p: Prospect, *, search=serper_search, client=None, co
             seen_links.add(link)
             pooled.append(r)
     third_party = [r for r in pooled if not _is_own_post(p.company, r)]
-    return _relevance_filter(third_party, client=client, costlog=costlog)
+    kept = _relevance_filter(third_party, client=client, costlog=costlog)
+    if trace is not None:
+        trace.update(pooled=len(pooled), third_party=len(third_party), kept=len(kept))
+    return kept
 
 
 class _Headcount(BaseModel):
@@ -551,9 +560,12 @@ def find_headcount(
     return _parse_headcount(company, website, results, client=client, costlog=costlog)
 
 
-def enrich(p: Prospect, *, search=serper_search, client=None, costlog=None) -> Prospect:
+def enrich(p: Prospect, *, search=serper_search, client=None, costlog=None,
+          community_trace: dict | None = None) -> Prospect:
     p.linkedin = find_company_linkedin(p.company, search=search)
-    p.community_signals = find_community_signals(p, search=search, client=client, costlog=costlog)
+    p.community_signals = find_community_signals(
+        p, search=search, client=client, costlog=costlog, trace=community_trace
+    )
     p.headcount = find_headcount(
         p.company, website=p.website, search=search, client=client, costlog=costlog
     )

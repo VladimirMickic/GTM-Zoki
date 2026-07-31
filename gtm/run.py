@@ -465,7 +465,14 @@ def cmd_enrich(run: str) -> None:
             if p.status not in ("priority", "keep"):
                 continue
             try:
-                enrich(p, costlog=costlog)
+                community_trace: dict = {}
+                enrich(p, costlog=costlog, community_trace=community_trace)
+                if community_trace:
+                    t = community_trace
+                    print(
+                        f"  community candidates {p.company}: "
+                        f"pooled={t['pooled']} third_party={t['third_party']} kept={t['kept']}"
+                    )
                 contacts = find_contacts(p.company)
                 if contacts:
                     p.contact_name, p.contact_title, p.contact_linkedin = top_contact_fields(contacts)

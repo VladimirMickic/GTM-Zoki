@@ -1061,3 +1061,29 @@ def test_single_shared_entity_does_not_cause_false_positive_dedup():
     assert len(out) == 2, f"Expected 2 distinct news items, got {len(out)}: {out}"
     assert any("Army contract" in line for line in out)
     assert any("manufacturing" in line for line in out)
+
+
+def test_trace_records_each_funnel_stage():
+    # Task B1: the community-signal funnel has 3 stages (Serper pool -> third-party
+    # filter -> gpt-4o-mini relevance gate) and none of them logged a count, so a
+    # silent zero (us-drone-8 onward, 0 of 13 passers) couldn't be traced to a stage.
+    # `trace` records pooled/third_party/kept so the dead stage is identifiable.
+    p = Prospect(company="Acme", website="https://acme.com/",
+                 description="public safety drone maker", drone_models=["Falcon 3"])
+    results = [{"title": "case cracked", "snippet": "my Falcon 3 case cracked in transit",
+                "link": "https://reddit.com/r/drones/1"}]
+
+    # Brief's original fake raised AssertionError on `.parse(...)`, assuming the
+    # relevance filter is never reached — but the one seeded result survives
+    # _is_own_post (it's a third-party reddit post, not the company's own handle),
+    # so third_party is non-empty and _relevance_filter (gtm/enrich.py:408) does
+    # not hit its `if not results: return []` early exit — it calls
+    # client.chat.completions.parse. Reuse this file's FakeClient (already shaped
+    # for that call) returning an empty _SignalList, which keeps kept == 0 and
+    # satisfies the brief's `"kept" in trace` assertion without asserting a value.
+    trace = {}
+    find_community_signals(p, search=lambda q, num=10: results,
+                           client=FakeClient(_SignalList(signals=[])), costlog=None, trace=trace)
+    assert trace["pooled"] == 1
+    assert trace["third_party"] == 1
+    assert "kept" in trace
