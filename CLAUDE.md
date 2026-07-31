@@ -56,10 +56,12 @@ First prospect: **Teal Drones** (tealdrones.com).
 3. **Extract** — `gpt-4o-mini`: markdown → structured drone fields (one place, scraper-agnostic).
 4. **Fit** — two-phase. Claude scores 80 vs `company/ICP.md` from scrape data only
    (Physical 35 / Field-deployed 25 / Displacement 20); `gtm/budget.py::score_budget`
-   adds a deterministic 0-20 Budget & procurement score after enrich, from `headcount`,
-   `key_news` and `compliance_evidence` — fields that do not exist at Fit time. Size is
-   still the only hard disqualifier; a company with no identified airframe is capped at
-   48 (`gtm/fit.py::evidence_cap`) and can never reach priority tier.
+   adds a deterministic 0-20 Budget & procurement score after enrich, from `headcount`
+   and `key_news` (both written only by `gtm/enrich.py`, so don't exist at Fit time)
+   plus `compliance_evidence` (extracted earlier and shown to Claude, but deliberately
+   withheld from Claude's score — scored by Python instead). Size is still the only
+   hard disqualifier; a company with no identified airframe is capped at 48
+   (`gtm/fit.py::evidence_cap`) and can never reach priority tier.
 5. **Contacts + Enrich** (passers only) — all Serper + `gpt-4o-mini`, no skill in the loop:
    `gtm/contacts.py` (`site:linkedin.com/in` + team scrape → names/titles/LinkedIn, ranked,
    employment-verified, no email yet), `gtm/enrich.py` (company LinkedIn, community signals,

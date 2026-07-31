@@ -81,8 +81,8 @@ def check_disqualifiers(ex: DroneExtraction) -> str | None:
 
     Both checks are size bounds, because size is the only hard constraint
     (company/ICP.md, locked 2026-07-28). Geography is deliberately NOT checked —
-    ex.us_made_ndaa is evidence for the Procurement & compliance rubric signal, never
-    a gate."""
+    ex.us_made_ndaa is one route into the Budget & procurement criterion, scored in
+    Python after enrich (gtm/budget.py), never a gate."""
     weights = _weights_g(ex.drone_weights)
     if weights and max(weights) < TOY_WEIGHT_G:
         return f"toy/hobby: heaviest airframe {max(weights):.0f}g < {TOY_WEIGHT_G}g"

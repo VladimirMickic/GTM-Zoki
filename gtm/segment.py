@@ -46,7 +46,7 @@ def assign_segment(p: Prospect) -> str:
     if any(kw in s.lower() for s in p.buying_signals for kw in _LAUNCH_KEYWORDS):
         return "new-model-launch"
 
-    # Geography-neutral (ICP.md "Procurement & compliance fit"): NDAA is one
+    # Geography-neutral (ICP.md "Budget & procurement"): NDAA is one
     # route into this bucket, a NATO stock number or national MoD framework is
     # another. The segment name is interpolated straight into the draft prompt,
     # so it must not carry US program wording onto a non-US prospect.
