@@ -206,7 +206,7 @@ def test_no_airframe_identified_caps_the_score_below_priority():
         drone_dimensions=[],
         drone_weights=["approximately 12 lbs"],
     )
-    assert evidence_cap(ex) == 60
+    assert evidence_cap(ex) == 48
 
 
 def test_a_named_model_lifts_the_cap():
@@ -217,8 +217,8 @@ def test_a_named_model_lifts_the_cap():
 def test_apply_fit_clamps_to_the_cap_and_demotes_the_tier():
     p = Prospect(company="Anduril", website="https://www.anduril.com/")
     fit = FitResult(fit_score=78, fit_reason="...", best_case_line="AV-Field")
-    apply_fit(p, fit, cap=60)
-    assert p.fit_score == 60
+    apply_fit(p, fit, cap=48)
+    assert p.fit_score == 48
     assert p.status == "keep"
 
 

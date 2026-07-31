@@ -9,7 +9,7 @@ from gtm.contacts import find_contacts, top_contact_fields, top_contact_flags
 from gtm.control import writes_enabled
 from gtm.enrich import enrich
 from gtm.extract import DroneExtraction
-from gtm.fit import FitResult, apply_fit, build_fit_prompt
+from gtm.fit import FitResult, apply_fit, build_fit_prompt, evidence_cap
 from gtm.output import push_to_sheet, write_csv
 from gtm.run import ICP, company_from_url, emails_for_prospect, process_company, run_dir, save_state
 from gtm.schema import Prospect
@@ -86,7 +86,7 @@ def run_smoke(url: str, *, live: bool = False, run: str = "smoke") -> Prospect:
             case_evidence=p.case_evidence,
             us_made_ndaa=p.us_made_ndaa,
         )
-        apply_fit(p, auto_fit(ICP.read_text(), p.company, ex))
+        apply_fit(p, auto_fit(ICP.read_text(), p.company, ex), cap=evidence_cap(ex))
 
     if p.status in ("priority", "keep"):
         print(f"[smoke] enrich — {p.company}")

@@ -1509,6 +1509,33 @@ def test_cmd_learn_regenerates_lessons_file(tmp_path, monkeypatch, capsys):
     assert "wrote" in capsys.readouterr().out
 
 
+def test_budget_is_added_after_enrich_and_the_tier_is_recomputed():
+    from gtm.run import apply_budget_scores
+
+    p = Prospect(company="Anduril", website="https://www.anduril.com/", status="keep")
+    p.fit_score = 55  # provisional, out of 80
+    p.fit_reason = "Physical fit 8/35 — [field: none found] no airframe identified."
+    p.headcount = "7000"
+    p.key_news = ["Army awards Anduril counter-drone task order (breakingdefense.com)"]
+    apply_budget_scores([p])
+    assert p.fit_score == 70
+    assert p.status == "priority"
+    assert "Budget & procurement 15/20" in p.fit_reason
+
+
+def test_budget_is_not_applied_twice_on_a_rerun():
+    from gtm.run import apply_budget_scores
+
+    p = Prospect(company="X", website="https://x.com/", status="keep")
+    p.fit_score = 55
+    p.fit_reason = "Physical fit 30/35 — [field: drone_dimensions] fits AV-Field."
+    p.headcount = "60"
+    apply_budget_scores([p])
+    apply_budget_scores([p])
+    assert p.fit_score == 62
+    assert p.fit_reason.count("Budget & procurement") == 1
+
+
 def test_cmd_start_prints_lessons_file_when_present(tmp_path, monkeypatch, capsys):
     import gtm.run as run_mod
 

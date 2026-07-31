@@ -53,7 +53,8 @@ def test_why_fit_summarizes_company_in_one_line():
         buying_signals=["Pentagon awarded an $80.5M task order (defensescoop.com, 2026-07-06) — a production ramp"],
     )
     wf = p.why_fit
-    assert wf.startswith("Strong fit (78/100)")
+    # provisional (no "Budget & procurement" line in fit_reason yet) — /80, not /100
+    assert wf.startswith("Strong fit (78/80)")
     assert "AV-Field case" in wf
     assert "Pentagon awarded an $80.5M task order" in wf
     assert " — " not in wf and "(defensescoop" not in wf  # rationale/source trimmed off
@@ -64,8 +65,32 @@ def test_why_fit_summarizes_company_in_one_line():
 
 
 def test_why_fit_bands_and_unscored():
-    assert Prospect(company="X", website="https://x.com", status="drop", fit_score=12).why_fit.startswith("Dropped (12/100)")
+    # provisional (no fit_reason at all here) — /80, not /100
+    assert Prospect(company="X", website="https://x.com", status="drop", fit_score=12).why_fit.startswith("Dropped (12/80)")
     assert Prospect(company="X", website="https://x.com").why_fit == "Unscored"
+
+
+def test_why_fit_renders_slash_80_when_provisional_pre_enrich():
+    # 2026-07-31: fit_score is only the 0-80 scrape-phase score until
+    # gtm/run.py::apply_budget_scores folds in the deterministic 20 and stamps a
+    # "Budget & procurement" line — rendering "/100" before that overstates a
+    # perfect scrape-phase score as if it were the assembled total.
+    p = Prospect(
+        company="X", website="https://x.com", status="keep", fit_score=48,
+        fit_reason="Physical fit 8/35 — [field: none found] no airframe identified.",
+    )
+    assert p.why_fit.startswith("Possible fit (48/80)")
+
+
+def test_why_fit_renders_slash_100_once_budget_has_been_folded_in():
+    p = Prospect(
+        company="X", website="https://x.com", status="priority", fit_score=70,
+        fit_reason=(
+            "Physical fit 8/35 — [field: none found] no airframe identified.\n"
+            "Budget & procurement 15/20 — [field: headcount] headcount 7000."
+        ),
+    )
+    assert p.why_fit.startswith("Strong fit (70/100)")
 
 
 # --- 2026-07-29 (user, live-Sheet review): "why_fit / fit_reason / buying_signals /
@@ -144,7 +169,8 @@ def test_why_fit_leads_with_the_airframe_and_the_displacement_finding():
         buying_signals=["Awarded a $2.5M contract by the US Army's RCCTO — real procurement (dronelife, 2022-12-14) [stale]"],
     )
     wf = p.why_fit
-    assert wf.startswith("Strong fit (79/100)")
+    # provisional (no "Budget & procurement" line in fit_reason yet) — /80, not /100
+    assert wf.startswith("Strong fit (79/80)")
     assert "Dronut DD1: 7.5 in diameter x 4.5 in H" in wf
     assert "AV-Micro" in wf
     assert "builds own case" in wf         # displacement beats the news headline

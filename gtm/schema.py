@@ -265,7 +265,16 @@ class Prospect(BaseModel):
         they stay in talking_points, where a rep needs the exact codes for the call
         (and stay banned from email bodies by gtm/draft.py::check_spec_jargon)."""
         band = {"1": "Strong fit", "2": "Possible fit", "3": "Dropped"}.get(self.tier, "Unscored")
-        head = f"{band} ({self.fit_score}/100)" if self.fit_score is not None else band
+        # Two-phase fit (2026-07-31): pre-enrich, fit_score is only the 0-80 scrape-phase
+        # score, and rendering it as "/100" overstates a perfect scrape-phase score as
+        # 80/100 rather than what it actually is. gtm/run.py::apply_budget_scores stamps
+        # a "Budget & procurement" line into fit_reason the moment it folds in the last
+        # 20 points, so that marker (not a separate flag) is the signal the total is now
+        # the assembled 100-point score — same idempotency key apply_budget_scores itself
+        # uses to detect "already scored".
+        assembled = "Budget & procurement" in (self.fit_reason or "")
+        denom = 100 if assembled else 80
+        head = f"{band} ({self.fit_score}/{denom})" if self.fit_score is not None else band
         parts = [head]
 
         # Prefer the dimension string: gtm/extract.py writes it as "<model>: <dims>",

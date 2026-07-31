@@ -108,7 +108,8 @@ def check_disqualifiers(ex: DroneExtraction) -> str | None:
 # priority tier, full drafted outreach — from a one-sentence description, with
 # drone_models and drone_dimensions both empty. Three of its five rubric lines were
 # scored from prior knowledge of a famous company; on an unknown maker they'd be 0.
-NO_AIRFRAME_CAP = 60  # top of the "keep" band — still worth a look, never a priority
+NO_AIRFRAME_CAP = 48  # 0-80 provisional scale (rescaled from 60/100 on 2026-07-31);
+# top of the provisional "keep" band — still worth a look, never a priority
 
 
 def evidence_cap(ex: DroneExtraction) -> int | None:
@@ -196,9 +197,13 @@ def apply_fit(p: Prospect, fit: FitResult, *, cap: int | None = None) -> Prospec
             f"dimensions); raw score {fit.fit_score} capped to {cap}."
         )
     p.best_case_line = fit.best_case_line
-    if fit.disqualified or p.fit_score < 40:
+    # Provisional (pre-enrich) gate on the 0-80 scrape-phase scale — rescaled 2026-07-31
+    # from the old 70/40 (0-100) thresholds: 70*0.8=56, 40*0.8=32. This is deliberately
+    # NOT the same as the final 70/40 bands applied to the assembled 100-point total
+    # after gtm/run.py::apply_budget_scores runs — do not "fix" these back to 70/40.
+    if fit.disqualified or p.fit_score < 32:
         p.status = "drop"
-    elif p.fit_score >= 70:
+    elif p.fit_score >= 56:
         p.status = "priority"
     else:
         p.status = "keep"

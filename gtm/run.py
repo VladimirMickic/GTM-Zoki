@@ -277,6 +277,26 @@ def process_company(
     return p
 
 
+def apply_budget_scores(prospects: list[Prospect]) -> int:
+    """Fold the deterministic Budget & procurement score into each passer's total and
+    recompute its tier. Idempotent — a rerun of `gtm.run enrich` must not stack a
+    second Budget line or double the points."""
+    from gtm.budget import score_budget
+
+    scored = 0
+    for p in prospects:
+        if p.status not in ("priority", "keep"):
+            continue
+        if "Budget & procurement" in (p.fit_reason or ""):
+            continue
+        points, line = score_budget(p)
+        p.fit_score = min(p.fit_score + points, 100)
+        p.fit_reason = f"{p.fit_reason}\n{line}".strip()
+        p.status = "priority" if p.fit_score >= 70 else "keep" if p.fit_score >= 40 else "drop"
+        scored += 1
+    return scored
+
+
 def merge_fit(prospects: list[Prospect], fits: dict[str, FitResult]) -> None:
     for p in prospects:
         if p.company in fits and p.status not in ("drop", "error"):
@@ -463,6 +483,8 @@ def cmd_enrich(run: str) -> None:
                 p.inhouse_case = detect_inhouse_case(p.case_evidence)
             except Exception as e:
                 _log_error(ERROR_LOG, p.company, "enrich/contacts", e)
+        n_scored = apply_budget_scores(prospects)
+        print(f"budget scored for {n_scored} prospect(s)")
         save_state(prospects, run_dir(run))
         print("\n=== SIGNAL PROMPTS — Claude: answer each, save {company: {...}} to signals.json ===")
         needs_signals = False

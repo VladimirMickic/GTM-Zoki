@@ -56,8 +56,15 @@ def test_cli_smoke_live_flag_dispatches_to_run_smoke(monkeypatch):
 def test_run_smoke_skips_sink_when_not_live(monkeypatch, tmp_path):
     calls = {"push": 0}
     monkeypatch.setattr("gtm.smoke.push_to_sheet", lambda *a, **k: calls.__setitem__("push", calls["push"] + 1))
-    # stub every live stage with a fast fake
-    monkeypatch.setattr("gtm.smoke.process_company", lambda p, **k: p)
+
+    # stub every live stage with a fast fake. A named model means evidence_cap(ex)
+    # is None here — the smoke path now applies the same cap as the run.py path
+    # (Additional Requirement 2), and this test is about the sink gate, not the cap.
+    def fake_process_company(p, **k):
+        p.drone_models = ["Teal 2"]
+        return p
+
+    monkeypatch.setattr("gtm.smoke.process_company", fake_process_company)
     monkeypatch.setattr("gtm.smoke.enrich", lambda p, **k: p)
     monkeypatch.setattr("gtm.smoke.find_contacts", lambda c: [])
     monkeypatch.setattr("gtm.smoke.emails_for_prospect", lambda p, **k: p)
