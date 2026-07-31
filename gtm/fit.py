@@ -138,14 +138,15 @@ hard disqualifiers exactly as written in the ICP.
 - compliance_evidence (non-US procurement credentials): {ex.compliance_evidence or "none found"}
 - hq_country: {ex.hq_country or "unknown"}
 
-Geography is NOT a scoring factor. We ship worldwide, and where a company is
-headquartered tells us nothing about whether our case fits its airframe or whether it
-can pay for one. Score `us_made_ndaa: true` as one route into the top band of
-"Procurement & compliance fit" — never as a bonus in its own right — and score a non-US
-company on its own credentials (compliance_evidence) using exactly the same band table.
-A non-US company with a national defense framework scores the same 12-15 as a US company
-with Blue UAS. Never deduct points for a foreign HQ, and never mention the US as a
-requirement in fit_reason.
+Geography is NOT a scoring factor, in either direction. We ship worldwide, and where a
+company is headquartered tells us nothing about whether our case fits its airframe or
+whether it can pay for one. Never award points for a US HQ and never deduct points for a
+foreign one, and never mention geography or the US as a requirement in fit_reason. If a
+run's brief asked for US/NDAA companies only, that filtering already happened before this
+prospect reached you — it is not something to re-apply here as a score. `us_made_ndaa`
+and `compliance_evidence` are procurement evidence, not geography, but they are also not
+yours to score: like the rest of Budget/procurement, they are scored later, in Python,
+from enrichment data you do not have — do not score them and do not mention them here.
 
 Size is the only hard disqualifier, and both of its bounds are already checked
 deterministically before you see this. Set `disqualified: true` only if the text shows a
@@ -174,11 +175,12 @@ JSON string):
   "<Criterion> <score>/<max> — [field: <field name>] <plain-English why>"
 
 <field name> is the exact field you read it from: description, drone_models,
-drone_dimensions, drone_weights, case_evidence, compliance_evidence, us_made_ndaa — or
-the literal "none found" when nothing supported the score, which must then be the bottom
-band. Plain English only: expand any jargon or acronym on first use (e.g. "SRR (Short
-Range Reconnaissance)"), and say "inferred" explicitly when a judgment is inferred rather
-than published.
+drone_dimensions, drone_weights, case_evidence — or the literal "none found" when
+nothing supported the score, which must then be the bottom band. (compliance_evidence and
+us_made_ndaa feed Budget/procurement, which you do not score — never cite them here.)
+Plain English only: expand any jargon or acronym on first use (e.g. "SRR (Short Range
+Reconnaissance)"), and say "inferred" explicitly when a judgment is inferred rather than
+published.
 
 Reply with ONLY this JSON (no prose):
 {{"fit_score": <0-80>, "fit_reason": "<one line per criterion, as specified above>",

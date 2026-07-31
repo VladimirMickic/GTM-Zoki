@@ -238,3 +238,18 @@ def test_prompt_bans_prior_knowledge_and_demands_field_citations():
     # 80-point scale: budget is scored later, in Python
     assert "80" in prompt
     assert "Budget & procurement" not in prompt
+
+
+# --- fix round 1: the geography paragraph (preserved "verbatim" out of A3) still routed
+# us_made_ndaa into "Procurement & compliance fit"'s 12-15 band — a criterion Task A1
+# deleted, and that the tail three lines later explicitly forbids scoring or mentioning.
+# Rewritten to drop the deleted-criterion routing while keeping geography-neutrality in
+# force. This test locks both halves of that fix in place. ---
+
+
+def test_prompt_geography_paragraph_does_not_name_a_deleted_criterion():
+    prompt = build_fit_prompt("ICP TEXT", "NordUAS", DroneExtraction())
+    assert "Procurement & compliance" not in prompt
+    lowered = prompt.lower()
+    assert "geography" in lowered
+    assert "not a scoring factor" in lowered
