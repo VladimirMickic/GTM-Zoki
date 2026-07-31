@@ -12,12 +12,30 @@ of these (even under caveman/terse mode — compress wording, never drop a fact)
 Fires once at session start only — no real wake-word/background listener in Claude Code,
 "hey zoki" typed mid-conversation is just a normal message, not a re-trigger.
 
-**Challenge vague asks.** A request like "find me 3 drone companies" has no region —
-ask before writing the brief/running discover (`gtm/discover.py` has no region field to
-fall back on, and a Serper credit spent on the wrong geography is wasted). Ask, don't
-assume, when a request is missing: region, count, or segment (e.g. defense vs
-industrial/survey). Don't ask when the brief/URLs already specify it, or the user has
-already answered in this conversation.
+**Assume, state, proceed — don't interrogate** (2026-07-30, user: "I do not want to answer
+that many questions"). This replaces the old "challenge vague asks / ask before writing the
+brief" rule, which cost two round-trips on every run. A missing detail now takes the default
+and gets stated in one line, e.g. "Assuming US, mixed segment — say otherwise and I rerun":
+- **region** — defaults to `us` (`Brief.region`), so a missing region is no longer a reason
+  to stop. It was one only because `gtm/discover.py` had nothing to fall back on.
+- **segment** — default is mixed; the fit rubric scores both anyway.
+Only two questions are still worth stopping for, because a wrong guess costs more than a
+rerun: **company count** when unspecified, and **final approval before any Sheet/HubSpot
+push**. Everything else: pick the default, say what you picked, keep going.
+
+## Shell rules (these cause most permission prompts, not the pipeline)
+Audit of a real session, 2026-07-30: 8 of 10 interruptions were permission prompts triggered
+by shell *style*, none by pipeline design. All avoidable:
+- **Never prefix `cd "/Users/hugorabbit/GTM Helper" &&`.** The Bash tool already starts in the
+  project root. That prefix alone fired "compound command contains cd with write/redirection"
+  four times in one session, for nothing.
+- **No heredocs** (`python3 << 'EOF'`) and **no process substitution** (`diff <(...) <(...)`).
+  Write a `.py`/`.sh` to the session scratchpad and run that file instead.
+- **Temp output goes to the session scratchpad, not `/tmp`** — reading back from `/tmp` prompts.
+- Prefer Read/Grep/Glob tools over `cat`/`grep`/`find` shells; they never prompt.
+Widening `.claude/settings.json`'s allow-list is the **user's** action — Claude editing its own
+permission grants is blocked by the harness classifier, by design. Run `/fewer-permission-prompts`
+to generate that list.
 
 ## How we build
 - **Vertical slices**: one stage fully built + tested before the next. Never build-all-then-test.
@@ -41,12 +59,24 @@ First prospect: **Teal Drones** (tealdrones.com).
    `gtm/contacts.py` (`site:linkedin.com/in` + team scrape → names/titles/LinkedIn, ranked,
    employment-verified, no email yet), `gtm/enrich.py` (company LinkedIn, community signals,
    headcount, news). The `company-research` skill is a standalone research tool, NOT called
-   by this stage — don't assume the pipeline runs it.
+   by this stage — don't assume the pipeline runs it. News is deduped by event and video
+   hosts are dropped (5 slots used to hold 2 stories), and a datable result is stamped
+   `[date: YYYY-MM]` from its URL/prose — so a dated source can't be written up `[undated]`.
+   The recency marker must be EXACTLY `[stale]`/`[undated]`; `gtm.run signals` rejects the
+   file otherwise (`gtm/draft.py::bad_markers`). Dead/guessed domains are dropped by a free
+   DNS preflight before any scrape is spent (`gtm/run.py::resolves`).
 6. **Output** — CSV → Google Sheet (service account) + HubSpot (company/contact upsert,
    `gtm/hubspot.py`, gated on `HUBSPOT_SERVICE_KEY`).
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.
+- **Postmortem** — `gtm/postmortem.py` mines a finished run's own slice of `data/errors.log`
+  (recovered via that run's `costs.jsonl` time window — errors.log has no run field of its
+  own) and records one `Feedback(origin="run")` entry per distinct failure stage. Pure log
+  parsing, zero LLM cost, never edits code or ICP.md. `gtm.run learn` folds `origin in
+  ("user","run")` entries into a capped `data/lessons.md` (≤20 lines), which `gtm.run start`
+  prints. This is deliberately narrow — a printed reminder, not a second memory system, and
+  it never proposes an ICP/denylist edit on its own (only `origin="user"` still does that).
 
 ## Decisions locked
 - Demo, Python, Claude orchestrates. Model routing: gpt-4o-mini = extraction, Claude = judgment.
@@ -73,7 +103,8 @@ python -m gtm.run enrich <run>                     # passers: contacts + enrichm
 python -m gtm.run signals <run> <signals.json>     # apply Claude's buying_signals/outreach_angle
 python -m gtm.run emails <run>                     # email waterfall (pattern → provider chain → AI hunt)
 python -m gtm.run output <run>                     # CSV (+ Sheet push if credentials present)
-python -m gtm.run learn                            # show feedback for ICP/denylist proposals
+python -m gtm.run learn                            # show feedback for ICP/denylist proposals + regenerate data/lessons.md
+python -m gtm.run postmortem <run>                 # mine this run's errors.log window → feedback(origin="run")
 ```
 Failures are logged to `data/errors.log` and that company is skipped (`status="error"`) — never
 the whole run. Example brief: `data/runs/teal-demo/brief.md`.

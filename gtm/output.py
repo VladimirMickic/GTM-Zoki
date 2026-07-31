@@ -63,11 +63,18 @@ CONTACT_COLUMNS = [
 ]
 
 
+def by_fit_score(prospects: list[Prospect]) -> list[Prospect]:
+    """Highest fit_score first; unscored (error/never-fit) rows sort last, in
+    their original order among themselves — a reader scanning top to bottom
+    sees the best prospects first without hunting through the fit_score column."""
+    return sorted(prospects, key=lambda p: (p.fit_score is None, -(p.fit_score or 0)))
+
+
 def write_csv(prospects: list[Prospect], path: str | Path, include_drops: bool = True) -> int:
     # 2026-07-21: main sheet is the full funnel (Tier 1/2/3) — drops included by
     # default, tagged tier "3" via the tier column. Pass include_drops=False to
     # get only the qualified (Tier 1/2) rows.
-    keep = [p for p in prospects if include_drops or p.status != "drop"]
+    keep = by_fit_score([p for p in prospects if include_drops or p.status != "drop"])
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:

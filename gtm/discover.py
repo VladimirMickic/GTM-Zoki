@@ -90,6 +90,22 @@ def load_denylist(path: str | Path = DENYLIST_FILE) -> set[str]:
 
 _US_CLAUSE = '(NDAA OR "Blue UAS" OR "made in USA" OR "US-made")'
 
+# Region codes worth spelling out for a search engine; anything else is used verbatim,
+# so `region: "Nordics"` works without a code change.
+_REGION_PHRASES = {"us": "United States", "uk": "United Kingdom", "eu": "Europe", "ca": "Canada"}
+
+
+def region_query(query: str, region: str, *, require_us: bool = False) -> str:
+    """Append the region phrase unless the query already carries it, or `require_us`
+    already narrowed the search to the US (stacking both over-constrains the SERP)."""
+    region = (region or "").strip()
+    if not region or (require_us and region.lower() == "us"):
+        return query
+    phrase = _REGION_PHRASES.get(region.lower(), region)
+    if phrase.lower() in query.lower() or region.lower() in query.lower().split():
+        return query
+    return f"{query} {phrase}"
+
 
 def discover(
     query: str,
@@ -100,15 +116,18 @@ def discover(
     costlog: CostLog | None = None,
     denylist: set[str] | None = None,
     require_us: bool = False,
+    region: str = "",
 ) -> list[Candidate]:
-    """`require_us` is the only place geography enters the pipeline (2026-07-28). It
-    narrows the *search*, so a US-only run costs the same and the fit rubric downstream
-    stays geography-blind. Off by default: the ICP has no country constraint, only a
-    size one."""
+    """`require_us` and `region` are the only places geography enters the pipeline. Both
+    narrow the *search*, so a geography-scoped run costs the same and the fit rubric
+    downstream stays geography-blind. `require_us` is the strict NDAA/Blue-UAS form;
+    `region` (2026-07-30, `Brief.region`, default "us") is the soft default that stops a
+    missing region from being a blocking question."""
     if denylist is None:
         denylist = load_denylist()
     if require_us and "ndaa" not in query.lower():
         query = f"{query} {_US_CLAUSE}"
+    query = region_query(query, region, require_us=require_us)
     results = search(query, num=max(10, max_companies * 4))
     if not results:
         return []

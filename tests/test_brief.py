@@ -87,3 +87,16 @@ def test_brief_can_opt_into_us_only(tmp_path):
         "---\nrun: us-only\nquery: NDAA drone makers\nrequire_us: true\n---\nbody\n"
     )
     assert load_brief(path).require_us is True
+
+
+def test_brief_defaults_to_the_us_region(tmp_path):
+    """A brief with no region is no longer a reason to stop and ask (2026-07-30)."""
+    b = tmp_path / "brief.md"
+    b.write_text("---\nrun: r1\nquery: drone maker\n---\nbody\n")
+    assert load_brief(b).region == "us"
+
+
+def test_brief_region_is_overridable(tmp_path):
+    b = tmp_path / "brief.md"
+    b.write_text('---\nrun: r1\nquery: drone maker\nregion: ""\n---\nbody\n')
+    assert load_brief(b).region == ""

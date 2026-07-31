@@ -24,6 +24,7 @@ from gtm.run import (
     merge_fit,
     merge_signals,
     process_company,
+    resolves,
     run_dir,
     save_state,
 )
@@ -1412,3 +1413,109 @@ def test_cmd_learn_says_no_edit_should_be_proposed_when_nothing_is_user_sourced(
 
     cmd_learn()
     assert "no ICP/denylist edit should be proposed" in capsys.readouterr().out
+
+
+# 2026-07-30: run us-drone-20 spent a scrape each on pdw.aero and firestormlabs.io.
+# Neither domain exists — both were guessed from a company name. DNS is free.
+
+
+def test_resolves_is_false_for_a_dead_domain():
+    def lookup(host):
+        raise OSError("nodename nor servname provided")
+    assert resolves("https://pdw.aero/", lookup=lookup) is False
+
+
+def test_resolves_is_true_when_dns_answers():
+    assert resolves("https://pdw.ai/", lookup=lambda host: "1.2.3.4") is True
+
+
+def test_resolves_is_false_without_a_host():
+    assert resolves("not-a-url", lookup=lambda host: "1.2.3.4") is False
+
+
+def test_process_company_skips_the_scrape_when_the_domain_is_dead():
+    calls = []
+    p = Prospect(company="Performance Drone Works", website="https://pdw.aero/", source="brief")
+    process_company(
+        p,
+        scrape_fn=lambda u: calls.append(u) or "md",
+        extract_fn=lambda md, costlog=None: (_ for _ in ()).throw(AssertionError("must not extract")),
+        resolves_fn=lambda url: False,
+    )
+    assert p.status == "error"
+    assert calls == []  # no scrape spent
+
+
+def test_merge_signals_rejects_a_near_miss_recency_marker():
+    prospects = [Prospect(company="American Robotics", website="https://x.com", status="keep")]
+    signals = {"American Robotics": {"buying_signals": ["Blue UAS listing (src) [undated, year not confirmed in source]"]}}
+    with pytest.raises(ValueError, match="exactly"):
+        merge_signals(prospects, signals)
+    assert prospects[0].buying_signals == []  # aborted before any state was written
+
+
+def test_merge_signals_accepts_the_exact_marker():
+    prospects = [Prospect(company="American Robotics", website="https://x.com", status="keep")]
+    merge_signals(prospects, {"American Robotics": {"buying_signals": ["Blue UAS listing (src) [undated]"]}})
+    assert prospects[0].buying_signals == ["Blue UAS listing (src) [undated]"]
+
+
+def test_main_dispatches_postmortem(monkeypatch):
+    import gtm.run as run_mod
+
+    calls = []
+    monkeypatch.setattr(run_mod, "cmd_postmortem", lambda run: calls.append(run))
+    monkeypatch.setattr("sys.argv", ["gtm.run", "postmortem", "us-drone-20"])
+    main()
+    assert calls == ["us-drone-20"]
+
+
+def test_cmd_postmortem_reports_zero_on_a_clean_run(monkeypatch, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr("gtm.postmortem.run_postmortem", lambda run: 0)
+    run_mod.cmd_postmortem("r1")
+    assert "nothing new" in capsys.readouterr().out
+
+
+def test_cmd_postmortem_reports_the_count_when_it_finds_something(monkeypatch, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr("gtm.postmortem.run_postmortem", lambda run: 2)
+    run_mod.cmd_postmortem("r1")
+    out = capsys.readouterr().out
+    assert "recorded 2 failure-pattern entries" in out
+
+
+def test_cmd_learn_regenerates_lessons_file(tmp_path, monkeypatch, capsys):
+    import gtm.run as run_mod
+
+    feedback = tmp_path / "feedback.jsonl"
+    feedback.write_text(
+        '{"date": "2026-07-30", "run": "r1", "company": "X", "feedback": "watch for dead domains", "origin": "user"}\n'
+    )
+    lessons = tmp_path / "lessons.md"
+    monkeypatch.setattr(run_mod, "FEEDBACK", feedback)
+    monkeypatch.setattr("gtm.learn.LESSONS_FILE", lessons)
+    run_mod.cmd_learn()
+    assert lessons.exists()
+    assert "watch for dead domains" in lessons.read_text()
+    assert "wrote" in capsys.readouterr().out
+
+
+def test_cmd_start_prints_lessons_file_when_present(tmp_path, monkeypatch, capsys):
+    import gtm.run as run_mod
+
+    lessons = tmp_path / "lessons.md"
+    lessons.write_text("# Lessons\n\n- 2026-07-30 [user] X: watch for dead domains\n")
+    monkeypatch.setattr("gtm.learn.LESSONS_FILE", lessons)
+
+    def fake_load_brief(path):
+        raise SystemExit("stop before the real pipeline runs")
+
+    monkeypatch.setattr(run_mod, "load_brief", fake_load_brief)
+    try:
+        run_mod.cmd_start("unused.md")
+    except SystemExit:
+        pass
+    assert "watch for dead domains" in capsys.readouterr().out

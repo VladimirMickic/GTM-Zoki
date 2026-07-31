@@ -50,9 +50,11 @@ def test_load_outreach_config_reads_the_repo_file():
     # config. A sender that silently stops parsing blocks every row in every run.
     cfg = load_outreach_config()
     assert cfg.sender_name and "todo" not in cfg.sender_name.lower()
-    # No named reference is approved yet (naming an unapproved customer is worse than
-    # naming none), so the category-level fallback is what fills the token.
-    assert cfg.reference_customers == []
+    # 2026-07-31: 3 fictional demo references approved (repo's AeroVault is itself
+    # fictional). Assert non-empty and clean rather than a fixed list, so adding or
+    # renaming an approved reference doesn't break this test.
+    assert cfg.reference_customers
+    assert all("todo" not in name.lower() for name in cfg.reference_customers)
     # Singular on purpose — drafts are written around one company name in the slot.
     assert cfg.fallback_reference == "a defense sUAS maker we work with"
 

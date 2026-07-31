@@ -5,6 +5,7 @@ from gtm.output import (
     CONTACT_COLUMNS,
     _open_worksheet,
     build_contact_rows,
+    by_fit_score,
     push_contacts_to_sheet,
     push_to_sheet,
     unrendered_summary,
@@ -81,6 +82,27 @@ def test_write_csv_includes_all_tiers_including_drops(tmp_path):
     assert "BadCo" in body
     badco = next(r for r in rows if r[SHEET_COLUMNS.index("company")] == "BadCo")
     assert badco[SHEET_COLUMNS.index("tier")] == "3"
+
+
+def test_by_fit_score_sorts_highest_first_and_unscored_last():
+    low = TEAL.model_copy(update={"company": "LowCo", "fit_score": 40})
+    high = TEAL.model_copy(update={"company": "HighCo", "fit_score": 90})
+    errored = TEAL.model_copy(update={"company": "ErrCo", "fit_score": None, "status": "error"})
+    mid = TEAL.model_copy(update={"company": "MidCo", "fit_score": 65})
+
+    ordered = by_fit_score([low, errored, high, mid])
+
+    assert [p.company for p in ordered] == ["HighCo", "MidCo", "LowCo", "ErrCo"]
+
+
+def test_write_csv_orders_rows_by_fit_score_descending(tmp_path):
+    low = TEAL.model_copy(update={"company": "LowCo", "fit_score": 40})
+    high = TEAL.model_copy(update={"company": "HighCo", "fit_score": 90})
+    path = tmp_path / "out.csv"
+    write_csv([low, high], path)
+    rows = list(csv.reader(path.open()))
+    companies = [r[SHEET_COLUMNS.index("company")] for r in rows[1:]]
+    assert companies == ["HighCo", "LowCo"]
 
 
 class FakeWorksheet:

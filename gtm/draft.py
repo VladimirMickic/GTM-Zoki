@@ -35,6 +35,26 @@ def fresh_signals(p: Prospect) -> list[str]:
     return [s for s in p.buying_signals if not any(m in s.lower() for m in _SIGNAL_MARKERS)]
 
 
+# fresh_signals matches the marker as a literal substring, so ANY extra text inside the
+# brackets makes the marker invisible and silently promotes a stale signal to fresh.
+# Run us-drone-20 wrote "[undated, year not confirmed in source]" and the signal was
+# treated as a fresh trigger — caught by eye, one step before it opened a live email
+# with an unconfirmed-date congratulation. A near-miss marker is now a hard error at
+# `gtm.run signals` rather than a thing to notice.
+_NEAR_MISS_MARKER_RE = re.compile(r"\[([^\[\]]*(?:stale|undated)[^\[\]]*)\]", re.I)
+
+
+def bad_markers(signals: list[str]) -> list[str]:
+    """Signals carrying a recency marker that isn't EXACTLY '[stale]' or '[undated]'."""
+    bad = []
+    for s in signals:
+        for group in _NEAR_MISS_MARKER_RE.findall(s):
+            if f"[{group.strip().lower()}]" not in _SIGNAL_MARKERS:
+                bad.append(s)
+                break
+    return bad
+
+
 class QAError(Exception):
     pass
 

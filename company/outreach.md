@@ -21,7 +21,9 @@ company from a pipeline run: naming one prospect to another is the failure
 `gtm/draft.py::check_reference_customer` exists to catch. `gtm/render.py` additionally
 drops any name matching the recipient or a run-mate before picking one.
 
-- TODO — no named reference is approved yet
+- Northfield Autonomy
+- Vantage Point Robotics
+- Ironline Defense Systems
 
 ## Fallback reference
 Used when no approved name survives the filter. Category-level only, never a logo — this

@@ -23,6 +23,11 @@ class Brief(BaseModel):
     # frontmatter when the run genuinely needs NDAA/Blue-UAS-eligible manufacturers.
     # It filters *input*, before scoring; the fit rubric itself never sees it.
     require_us: bool = False
+    # 2026-07-30: a missing region used to stop the run and cost a question ("no region
+    # field to fall back on"). Now it falls back here. `us` is the default because every
+    # run to date has been US; set `region: uk` / `region: ""` (worldwide) to change it.
+    # Shapes the discover query only — `urls:` runs and the fit rubric never see it.
+    region: str = "us"
 
     @model_validator(mode="after")
     def _needs_input(self) -> "Brief":

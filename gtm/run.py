@@ -7,8 +7,10 @@
   python -m gtm.run segment <run>                    # bucket passers → draft prompts
   python -m gtm.run draft <run> <drafts.json>        # apply Claude's drafts → auto QA
   python -m gtm.run redraft <run> <drafts.json>      # apply fixed drafts for QA-flagged prospects → recheck (final)
-  python -m gtm.run output <run>                     # CSV (+ Sheet push if creds present)
+  python -m gtm.run emails <run>                     # email waterfall (pattern → provider chain → AI hunt)
+  python -m gtm.run output <run> [--dry-run]         # CSV (+ Sheet/HubSpot push unless --dry-run)
   python -m gtm.run learn                            # show feedback for ICP/denylist proposals
+  python -m gtm.run postmortem <run>                 # mine this run's errors.log window → feedback(origin="run")
   python -m gtm.run smoke <url> [--live]             # one company, end-to-end; --live also pushes to Sheet
 
 State = data/runs/<run>/prospects.json. Failures are logged to data/errors.log and the
@@ -17,6 +19,7 @@ company is skipped (status="error"), never the whole run.
 from __future__ import annotations
 
 import json
+import socket
 import sys
 import time
 from contextlib import contextmanager
@@ -30,6 +33,7 @@ from gtm.costlog import CostLog
 from gtm.discover import _domain, _name_matches_domain
 from gtm.draft import (
     NO_DRAFT_FLAG,
+    bad_markers as draft_bad_markers,
     build_draft_prompt,
     build_redraft_prompt,
     check_batch_repetition,
@@ -184,6 +188,23 @@ def _track_stage(run: str, stage: str):
             github_state.set_stage_labels(issue, run, stage, "complete")
 
 
+def resolves(url: str, *, lookup=socket.gethostbyname) -> bool:
+    """DNS-only preflight: does this host exist at all? Free, no API credit, ~ms.
+
+    2026-07-30: run us-drone-20 spent scrapes on `pdw.aero` and `firestormlabs.io`,
+    neither of which resolves — both were domains guessed from a company name. A
+    guessed domain is cheap to propose and expensive to scrape, so check first.
+    """
+    host = _domain(url)
+    if not host:
+        return False
+    try:
+        lookup(host)
+    except OSError:
+        return False
+    return True
+
+
 def process_company(
     p: Prospect,
     *,
@@ -192,8 +213,16 @@ def process_company(
     hunt_fn=hunt_specs,
     error_log: Path = ERROR_LOG,
     costlog: CostLog | None = None,
+    resolves_fn=resolves,
 ) -> Prospect:
     """Scrape + extract + deterministic disqualifiers for one company. Log & skip."""
+    if not resolves_fn(p.website):
+        _log_error(
+            error_log, p.company, "preflight",
+            ValueError(f"{p.website} does not resolve — guessed/dead domain, no scrape spent"),
+        )
+        p.status = "error"
+        return p
     try:
         md = scrape_fn(p.website)
         ex: DroneExtraction = extract_fn(md, costlog=costlog)
@@ -255,6 +284,20 @@ def merge_fit(prospects: list[Prospect], fits: dict[str, FitResult]) -> None:
 
 
 def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
+    # Reject near-miss recency markers before anything is written to state — see
+    # gtm/draft.py::bad_markers. Whole-stage abort, not log-and-skip: the file is
+    # Claude's own output, so it's a fixable typo, not an unreachable third party.
+    offenders = {
+        company: bad
+        for company, s in signals.items()
+        if (bad := draft_bad_markers(s.get("buying_signals", []) or []))
+    }
+    if offenders:
+        lines = "\n".join(f"  {c}: {b[0]}" for c, b in offenders.items())
+        raise ValueError(
+            "recency marker must be exactly '[stale]' or '[undated]', nothing else inside "
+            f"the brackets:\n{lines}"
+        )
     for p in prospects:
         s = signals.get(p.company)
         if s:
@@ -314,6 +357,10 @@ def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
 # ---------------------------------------------------------------- CLI stages
 
 def cmd_start(brief_path: str) -> None:
+    from gtm.learn import LESSONS_FILE
+
+    if LESSONS_FILE.exists():
+        print(LESSONS_FILE.read_text())  # bounded to _LESSONS_MAX_LINES by write_lessons, no cost
     brief = load_brief(brief_path)
     freeze_brief(brief, run_dir(brief.run))
     # `run` (brief.run) only becomes known above, mid-body — the tracking
@@ -325,7 +372,11 @@ def cmd_start(brief_path: str) -> None:
             from gtm.discover import discover
 
             for c in discover(
-                brief.query, brief.max_companies, costlog=costlog, require_us=brief.require_us
+                brief.query,
+                brief.max_companies,
+                costlog=costlog,
+                require_us=brief.require_us,
+                region=brief.region,
             ):
                 prospects.append(Prospect(company=c.company, website=c.website, source=f"serper:{brief.query}"))
         prospects = prospects[: brief.max_companies]
@@ -591,6 +642,7 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         OUTREACH_TOKENS,
         SERVICE_ACCOUNT_FILE,
         blocked_row_tokens,
+        by_fit_score,
         no_draft_summary,
         push_contacts_to_sheet,
         push_to_sheet,
@@ -606,6 +658,10 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
         for p in prospects:
             p.date_processed = today
         save_state(prospects, run_dir(run))
+        # Best fit first — same order drives the CSVs, both sheet tabs, and the
+        # HubSpot push. A domain already on the Sheet still refreshes in place
+        # (push_to_sheet), so this reorders new appends only, not existing rows.
+        prospects = by_fit_score(prospects)
         csv_path = run_dir(run) / "prospects.csv"
         contacts_csv_path = run_dir(run) / "prospects_contacts.csv"
         n = write_csv(prospects, csv_path)
@@ -701,7 +757,7 @@ def cmd_emails(run: str) -> None:
 
 
 def cmd_learn() -> None:
-    from gtm.learn import eligible_for_proposal, load_feedback
+    from gtm.learn import LESSONS_FILE, eligible_for_proposal, load_feedback, write_lessons
 
     entries = load_feedback(FEEDBACK, limit=50)  # bounded read (credit rule)
     if not entries:
@@ -722,6 +778,20 @@ def cmd_learn() -> None:
         print(f"\n--- {len(session_entries)} session/smoke-test notes — context only, not actionable ---")
         for e in session_entries:
             print(e.model_dump_json())
+
+    path = write_lessons(entries, LESSONS_FILE)
+    print(f"\nwrote {path} ({sum(1 for _ in path.read_text().splitlines())} lines)")
+
+
+def cmd_postmortem(run: str) -> None:
+    from gtm.postmortem import run_postmortem
+
+    n = run_postmortem(run)
+    if n == 0:
+        print(f"postmortem {run}: nothing new (clean run, or already postmortemed)")
+    else:
+        print(f"postmortem {run}: recorded {n} failure-pattern entr{'y' if n == 1 else 'ies'} to {FEEDBACK}")
+        print("run `python -m gtm.run learn` to fold these into data/lessons.md")
 
 
 def main() -> None:
@@ -753,6 +823,8 @@ def main() -> None:
                 cmd_output(run, dry_run=True)
             case ["learn"]:
                 cmd_learn()
+            case ["postmortem", run]:
+                cmd_postmortem(run)
             case ["smoke", url]:
                 from gtm.smoke import run_smoke
 

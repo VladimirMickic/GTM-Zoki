@@ -44,10 +44,75 @@ def find_company_linkedin(company: str, *, search=serper_search) -> str:
     return ""
 
 
+# Video/social hosts rank alongside trade press in the SERP but carry no reportable
+# detail — a YouTube clip took a news slot on run us-drone-20 while restating a story
+# two written sources already covered. Not news for our purpose.
+_NON_NEWS_HOSTS = {
+    "youtube.com", "m.youtube.com", "youtu.be", "tiktok.com", "vimeo.com",
+    "facebook.com", "instagram.com", "pinterest.com", "reddit.com",
+}
+
+_MONTHS = ("january february march april may june july august september october "
+           "november december").split()
+# Most trade press dates its own URL (breakingdefense.com/2026/03/army-awards-...),
+# which is free and unambiguous; prose is the fallback ("In April 2024, the Air Force…").
+_URL_DATE_RE = re.compile(r"/(20\d{2})[/-](0[1-9]|1[0-2])(?:[/-]\d{1,2})?(?:/|$|[?#])")
+_PROSE_DATE_RE = re.compile(rf"\b({'|'.join(_MONTHS)})\s+(20\d{{2}})\b", re.I)
+
+
+def _news_date(r: dict) -> str:
+    """'YYYY-MM' if the result dates itself in its URL or snippet, else ''."""
+    m = _URL_DATE_RE.search(r.get("link", ""))
+    if m:
+        return f"{m.group(1)}-{m.group(2)}"
+    m = _PROSE_DATE_RE.search(r.get("snippet", "") or r.get("title", ""))
+    if m:
+        return f"{m.group(2)}-{_MONTHS.index(m.group(1).lower()) + 1:02d}"
+    return ""
+
+
+_TITLE_STOPWORDS = {
+    "the", "for", "and", "with", "from", "its", "his", "her", "their", "new", "first",
+    "says", "said", "will", "has", "have", "after", "over", "into", "that", "this",
+}
+
+
+def _title_tokens(title: str) -> set[str]:
+    """Content words of a headline, for near-duplicate detection."""
+    words = re.findall(r"[a-z0-9$]+", title.lower())
+    return {w for w in words if len(w) > 2 and w not in _TITLE_STOPWORDS}
+
+
+_DUPE_OVERLAP = 0.6  # Jaccard over headline content words
+
+
+def _is_dupe(r: dict, kept: list[dict]) -> bool:
+    """Same event, different outlet. Run us-drone-20 filled 5 news slots with 2 real
+    events — the CCA contract appeared 3 times (YouTube, airandspaceforces, jpost) —
+    so the signal stage saw far less than the slot count suggested."""
+    tokens = _title_tokens(r.get("title", ""))
+    if not tokens:
+        return False
+    for k in kept:
+        other = _title_tokens(k.get("title", ""))
+        if not other:
+            continue
+        overlap = len(tokens & other) / len(tokens | other)
+        if overlap >= _DUPE_OVERLAP:
+            return True
+    return False
+
+
 def _news_line(r: dict) -> str:
     title, link = r.get("title", ""), r.get("link", "")
     snippet = r.get("snippet", "").strip()
-    return f"{title} — {snippet} ({link})" if snippet else f"{title} ({link})"
+    # Google truncates its own titles/snippets with "..."; that ellipsis is upstream and
+    # is NOT ours to fix (fetching the article costs a scrape per item). What we can add
+    # is the date, so a datable source can never be written up as "[undated]" downstream.
+    date = _news_date(r)
+    stamp = f" [date: {date}]" if date else ""
+    body = f"{title} — {snippet} ({link})" if snippet else f"{title} ({link})"
+    return body + stamp
 
 
 def _is_own_domain(own: str, r: dict) -> bool:
@@ -64,8 +129,16 @@ def find_news(company: str, *, website: str = "", search=serper_search) -> list[
     q = f'"{company}" drone (contract OR launch OR funding OR award OR NDAA OR "Blue UAS")'
     results = search(q, num=10)
     own = _domain(website)
-    third_party = [r for r in results if not _is_own_domain(own, r)]
-    return [_news_line(r) for r in third_party[:MAX_NEWS]]
+    kept: list[dict] = []
+    for r in results:
+        if _is_own_domain(own, r) or _domain(r.get("link", "")) in _NON_NEWS_HOSTS:
+            continue
+        if _is_dupe(r, kept):
+            continue
+        kept.append(r)
+        if len(kept) >= MAX_NEWS:
+            break
+    return [_news_line(r) for r in kept]
 
 
 MAX_COMMUNITY_SIGNALS = 3  # 2026-07-27: cap tightened when signals became pain-quote-shaped
@@ -587,6 +660,13 @@ def build_signal_prompt(p: Prospect, *, today: date | None = None) -> str:
   for the pitch — but they may not be used as an email opener, so the marker has to be
   there. Run test-batch-1 opened a July-2026 email with "congrats" on a 2025 event; that is
   the failure these markers prevent.
+
+  A news line ending `[date: YYYY-MM]` is already dated — that date came from the article's
+  own URL or text, so it is evidence. Use it; do not mark such a signal " [undated]".
+  The marker, when you need one, must be EXACTLY " [stale]" or " [undated]" — nothing else
+  inside the brackets. `gtm/draft.py::fresh_signals` matches the literal string, so
+  "[undated, year not confirmed]" reads as NO marker at all and promotes the signal to a
+  usable email opener. `gtm.run signals` now rejects the file outright if this is violated.
 
   **Not a buying signal — never list these, marked or otherwise:**
   · an unawarded bid or proposal ("is proposing", "has bid", "submitted a proposal", an
