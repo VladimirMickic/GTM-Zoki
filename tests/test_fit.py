@@ -169,5 +169,30 @@ def test_fit_prompt_carries_non_us_compliance_evidence():
 
 def test_icp_scores_procurement_fit_not_us_origin():
     text = Path("company/ICP.md").read_text()
-    assert "Procurement & compliance fit" in text
+    assert "Budget & procurement" in text
     assert "| US-made / NDAA / defense/gov buyers | 15 |" not in text
+
+
+# --- 2026-07-31: rubric reweighted 30/25/15/15/15 -> 35/25/20/20, every criterion
+# banded, "Volume/price" + "Procurement & compliance fit" merged into one post-enrich
+# "Budget & procurement" criterion scored deterministically by gtm/budget.py. ---
+
+
+def test_icp_fit_scoring_table_has_four_criteria_weighted_35_25_20_20():
+    import re
+
+    text = Path("company/ICP.md").read_text()
+    labels = [
+        "Airframe physically fits a case line",
+        "Field-deployed / rugged use case",
+        "Displacement opportunity",
+        "Budget & procurement",
+    ]
+    weights = []
+    for label in labels:
+        assert label in text, f"missing criterion label in company/ICP.md: {label}"
+        match = re.search(r"\|\s*" + re.escape(label) + r"\s*\|\s*(\d+)\s*\|", text)
+        assert match, f"could not find a weight-table row for: {label}"
+        weights.append(int(match.group(1)))
+    assert weights == [35, 25, 20, 20]
+    assert sum(weights) == 100

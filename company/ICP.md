@@ -91,48 +91,78 @@ per tier lives in `company/voice-guide.md`'s "Persona tailoring" section).
 ---
 
 ## Fit scoring (used by the pipeline)
-Score each scraped prospect 0–100. Auto-reject on any disqualifier regardless of score.
 
-| Signal | Weight | Source |
-|---|---|---|
-| Airframe physically fits a case line | 30 | Scrape (drone dimensions) |
-| Field-deployed / rugged use case | 25 | Scrape + enrichment |
-| Volume / price point signals real budget | 15 | Enrichment |
-| Procurement & compliance fit | 15 | Scrape + enrichment |
-| Displacement opportunity — named competitor case, or blank slate | 15 | Scrape + enrichment |
+Scored in two phases. Claude scores 80 points from **scrape data only**; Python adds
+the remaining 20 after the enrich stage, from fields that do not exist at Fit time.
 
-**Procurement & compliance fit /15** replaced "US-made / NDAA" on 2026-07-28. The old
-signal handed 15 points to every US company and 0 to every non-US one, which is a
-geography bias, not a business signal — and since NDAA compliance is near-universal
-among US makers in this ICP, it also failed to discriminate *within* the US set. What
-we actually care about is whether this buyer's procurement is serious enough to pay for
-a custom case. Score on evidence, in any country:
+| Signal | Weight | Phase | Source |
+|---|---|---|---|
+| Airframe physically fits a case line | 35 | Fit (Claude) | Scrape — dimensions/weights |
+| Field-deployed / rugged use case | 25 | Fit (Claude) | Scrape — description, models, case_evidence |
+| Displacement opportunity | 20 | Fit (Claude) | Scrape — case_evidence |
+| Budget & procurement | 20 | Post-enrich (Python) | headcount, key_news, compliance_evidence |
+
+**Every criterion's bottom band is "no evidence".** Missing evidence scores the bottom
+band, never the midpoint — the rule Displacement has carried since 2026-07-28, now
+applied to all four. A score the fields cannot support is worse than a low score: it
+reads as a finding, and on a company Claude has never heard of it silently becomes 0.
+
+### Airframe physically fits a case line /35
 
 | Band | Evidence |
 |---|---|
-| 12–15 | Named defense/gov program or certification — NDAA / Blue UAS (US), NATO stock number, national MoD or ministry framework, EU/allied defense program, awarded gov contract |
-| 8–11 | Regulated commercial procurement — BVLOS or national equivalent waiver, utility/energy framework agreement, aviation-authority type certification, public-safety agency sales |
-| 4–7 | Commercial sales, no certification or program evidence found |
-| 0–3 | Unknown after the web hunt, **or** the company cannot buy OEM cases at all (software-only, pure reseller/distributor) |
+| 30-35 | Published folded L×W×H fits a named case line — cite the line and the source |
+| 20-29 | Inferred from weight/class alone, no published dimensions — write "inferred" |
+| 8-19 | Airframe named but neither dimensions nor weight found |
+| 0-7 | No airframe identified at all (`drone_models` and `drone_dimensions` both empty) |
 
-`us_made_ndaa: true` maps to the 12–15 band, but it is one route into that band, not the
-band's definition — a Norwegian maker on a NATO framework or a German maker selling to
-the Bundespolizei scores the same. Never award points for being US-based per se, and
-never deduct for being foreign. If a run's brief explicitly asks for US/NDAA companies,
-that is an input *filter* applied before scoring, not a change to this rubric.
+Dimensions found by the web hunt (spec pages, reviews, Reddit) count as published —
+cite the source. The 20-29 cap on weight-only inference is the old 26/30 rule rescaled.
 
-Physical-fit scoring must cite published folded dimensions when available; when inferring
-from weight/class alone, cap at 26/30 and say "inferred" in fit_reason. Dimensions found by
-the web hunt (specs pages, reviews, Reddit) count as published — cite the source.
+### Field-deployed / rugged use case /25
+
+Score **what the airframe survives, not who buys it.** A category word — "military",
+"defense", "industrial" — is not evidence of field deployment. An agricultural sprayer
+trucked to a field daily, eating dust and chemical wash, scores above a defense company
+that names no airframe and no mission. All six strong-fit segments score on the same
+table: defense/tactical, public safety, industrial inspection, survey/mapping, energy
+and utilities, and search & rescue carry no inherent advantage over each other.
+
+| Band | Evidence |
+|---|---|
+| 21-25 | Named harsh-environment duty cycle — daily field transport, vehicle-borne or backpack-carried, launched away from a hangar, weather/dust/chemical exposure |
+| 15-20 | Field or outdoor use clearly stated, but no duty-cycle or environment detail |
+| 8-14 | Mixed indoor/outdoor, or commercial/cinema use with no ruggedness claim |
+| 0-7 | Indoor-only, racing, benchtop, or no use case found after the web hunt |
+
+### Budget & procurement /20 (post-enrich, deterministic)
+
+Replaced "Volume / price point" (15) and "Procurement & compliance fit" (15) on
+2026-07-31. Both measured the same thing — can this buyer fund tooled custom foam —
+and both were sourced from enrichment data that the Fit stage never sees, because
+enrich runs after Fit and only on passers. On run us-drone-20 that produced a line
+reading "no unit-price/volume evidence was captured this run" attached to a score of
+10/15, filled in from what the model already knew about a famous company.
+
+Scored by `gtm/budget.py::score_budget`, no LLM call, no prose judgment:
+
+| Points | Component | Evidence |
+|---|---|---|
+| 8 | Procurement evidence | `us_made_ndaa` true, OR non-empty `compliance_evidence`, OR an award-shaped `key_news` line (contract, task order, NDAA, Blue UAS, framework, NATO stock number) |
+| 7 / 4 / 1 / 0 | Scale | headcount >=50 / 11-49 / 1-10 / unknown |
+| 5 | Capital event | a `key_news` line naming a funding round, Series, or raise |
+
+Geography is not a component. A national MoD framework, a NATO stock number and a US
+Blue UAS listing all satisfy "procurement evidence" identically.
 
 Displacement-opportunity scoring must cite case_evidence:
 
 | Band | Evidence |
 |---|---|
-| 13–15 | **In-house enclosure** — they tool and warehouse their own housing (drone-in-a-box, dock, base station, self-molded hard case). Highest value: a recurring OEM line, not a one-off swap, and no incumbent vendor defending the account |
-| 11–14 | Named rugged-case competitor (Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer) — a concrete displacement target with researchable weaknesses |
-| 8–10 | Soft bag / generic case / no case at all — a real upgrade opportunity, but no named incumbent to research |
-| 3 | case_evidence still unknown after the web hunt — write "unknown"; never award midpoint points for missing evidence |
+| 17–20 | **In-house enclosure** — they tool and warehouse their own housing (drone-in-a-box, dock, base station, self-molded hard case). Highest value: a recurring OEM line, not a one-off swap, and no incumbent vendor defending the account |
+| 14–17 | Named rugged-case competitor (Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer) — a concrete displacement target with researchable weaknesses |
+| 10–13 | Soft bag / generic case / no case at all — a real upgrade opportunity, but no named incumbent to research |
+| 0–4 | case_evidence still unknown after the web hunt — write "unknown"; never award midpoint points for missing evidence |
 
 An in-house enclosure outranks a named competitor because the sale replaces a
 manufacturing cost centre (tooling, molds, spares, a revision every time the airframe
