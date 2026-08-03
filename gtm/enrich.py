@@ -77,10 +77,16 @@ _TITLE_STOPWORDS = {
 }
 
 
-def _title_tokens(title: str) -> set[str]:
-    """Content words of a headline, for near-duplicate detection."""
+def _title_tokens(title: str, drop: frozenset[str] | set[str] = frozenset()) -> set[str]:
+    """Content words of a headline, for near-duplicate detection.
+
+    `drop` removes the company's own name tokens. Every headline in a "<company> drone ..."
+    SERP names the company, so those tokens are shared by construction and measure nothing:
+    a 3-word name like "Performance Drone Works" hands every pair 3 free shared tokens and
+    pushes unrelated stories over _DUPE_OVERLAP on their own. Stripping them makes the
+    Jaccard measure what is left — the event."""
     words = re.findall(r"[a-z0-9$]+", title.lower())
-    return {w for w in words if len(w) > 2 and w not in _TITLE_STOPWORDS}
+    return {w for w in words if len(w) > 2 and w not in _TITLE_STOPWORDS and w not in drop}
 
 
 _DUPE_OVERLAP = 0.35  # Jaccard over headline content words. Was 0.6 until 2026-07-31:
@@ -93,13 +99,23 @@ _DUPE_OVERLAP = 0.35  # Jaccard over headline content words. Was 0.6 until 2026-
 # more reliably than generic verbs like "awards" or "wins" do.
 _ENTITY_RE = re.compile(r"\b(?:[A-Z]{2,}|\$[\d.]+[MBK]?)\b")
 
+# Acronyms common enough to pin nothing. The entity test assumes a shared acronym names a
+# specific programme or agency, which is true of CCA/NDAA/USAF and false of these: two
+# unrelated stories can share "US" and "AI" and be about different companies, agencies and
+# events. Verified — "US Army Taps AI Drone Startup" vs "AI Firm Wins US Navy Deal" has a
+# headline Jaccard of 0.000 and was deduped on {US, AI} alone. Keep this list to genuinely
+# generic terms; anything that names a programme belongs on the other side of the test.
+_ENTITY_STOPWORDS = frozenset({"US", "USA", "AI", "ML", "UK", "EU", "UN", "UAV", "UAS",
+                               "CEO", "CTO", "COO", "CFO", "VP", "LLC", "INC"})
+
 
 def _entities(title: str) -> set[str]:
-    """Acronyms (CCA, NDAA, USAF) and dollar figures ($87M) from a headline."""
-    return set(_ENTITY_RE.findall(title))
+    """Acronyms (CCA, NDAA, USAF) and dollar figures ($87M) from a headline, minus the
+    generic ones that name no particular programme (_ENTITY_STOPWORDS)."""
+    return set(_ENTITY_RE.findall(title)) - _ENTITY_STOPWORDS
 
 
-def _is_dupe(r: dict, kept: list[dict]) -> bool:
+def _is_dupe(r: dict, kept: list[dict], company: str = "") -> bool:
     """Same event, different outlet. Run us-drone-20 filled 5 news slots with 2 real
     events — the CCA contract appeared 3 times (YouTube, airandspaceforces, jpost) —
     so the signal stage saw far less than the slot count suggested.
@@ -107,13 +123,17 @@ def _is_dupe(r: dict, kept: list[dict]) -> bool:
     Two independent tests, either sufficient: headline-word Jaccard, and a shared
     rare entity (an acronym or a dollar figure). The entity test is what catches
     "Air Force Selects ... for CCA" against "Air Force awards ... for CCA", which
-    share only 0.30 of their words but name the same programme."""
-    tokens = _title_tokens(r.get("title", ""))
+    share only 0.30 of their words but name the same programme.
+
+    `company` is stripped from both sides of the Jaccard — see _title_tokens. Both
+    tests were tuned on a 1-word company name and false-positived on longer ones."""
+    own = _title_tokens(company)
+    tokens = _title_tokens(r.get("title", ""), drop=own)
     ents = _entities(r.get("title", ""))
     if not tokens:
         return False
     for k in kept:
-        other = _title_tokens(k.get("title", ""))
+        other = _title_tokens(k.get("title", ""), drop=own)
         if other and len(tokens & other) / len(tokens | other) >= _DUPE_OVERLAP:
             return True
         if ents and len(ents & _entities(k.get("title", ""))) >= 2:
@@ -127,10 +147,12 @@ def _news_line(r: dict) -> str:
     # Google truncates its own titles/snippets with "..."; that ellipsis is upstream and
     # is NOT ours to fix (fetching the article costs a scrape per item). What we can add
     # is the date, so a datable source can never be written up as "[undated]" downstream.
-    date = _news_date(r)
-    stamp = f" [date: {date}]" if date else ""
+    # `stamp`, not `date` — the module-level `from datetime import date` is shadowed
+    # otherwise (same reason as _months_old below).
+    stamp = _news_date(r)
+    marker = f" [date: {stamp}]" if stamp else ""
     body = f"{title} — {snippet} ({link})" if snippet else f"{title} ({link})"
-    return body + stamp
+    return body + marker
 
 
 def _is_own_domain(own: str, r: dict) -> bool:
@@ -143,19 +165,26 @@ def _is_own_domain(own: str, r: dict) -> bool:
     return link == own or link.endswith(f".{own}")
 
 
-def _months_old(date: str, today: str) -> int:
+def _months_old(stamp: str, today: str) -> int:
     """Whole months between a "YYYY-MM" stamp and today. Undated sorts as fresh —
     an undated trade-press item is usually recent, and demoting it on a missing
-    stamp would bury good news behind a dated-but-old one."""
-    if not date:
+    stamp would bury good news behind a dated-but-old one.
+
+    The parameter is `stamp`, not `date`: this module does `from datetime import date`
+    at the top, and shadowing it here means the next edit reaching for `date.today()`
+    inside this function gets a confusing TypeError on a string."""
+    if not stamp:
         return 0
-    (y1, m1), (y2, m2) = (int(x) for x in date.split("-")), (int(x) for x in today.split("-"))
+    (y1, m1), (y2, m2) = (int(x) for x in stamp.split("-")), (int(x) for x in today.split("-"))
     return (y2 - y1) * 12 + (m2 - m1)
 
 
 def find_news(company: str, *, website: str = "", search=serper_search,
               today: str = "") -> list[str]:
-    """Newest-first, with anything older than RECENCY_MONTHS demoted to backfill.
+    """Serper's own order, with anything older than RECENCY_MONTHS demoted to backfill.
+
+    Two buckets, not a sort: fresh items keep Serper's (roughly relevance-ranked) order,
+    stale ones follow. Nothing is ordered by date within a bucket.
 
     2026-07-31: run us-drone-20 spent a news slot on an April-2024 CCA item, two
     years stale, while the freshness rules only ever applied to buying_signals."""
@@ -168,7 +197,7 @@ def find_news(company: str, *, website: str = "", search=serper_search,
     for r in results:
         if _is_own_domain(own, r) or _domain(r.get("link", "")) in _NON_NEWS_HOSTS:
             continue
-        if _is_dupe(r, fresh + stale):
+        if _is_dupe(r, fresh + stale, company=company):
             continue
         (stale if _months_old(_news_date(r), today) > RECENCY_MONTHS else fresh).append(r)
     kept = (fresh + stale)[:MAX_NEWS]

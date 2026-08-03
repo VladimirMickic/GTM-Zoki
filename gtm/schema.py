@@ -247,6 +247,24 @@ class Prospect(BaseModel):
         return _STATUS_TIER.get(self.status, "")
 
     @property
+    def fit_denominator(self) -> int:
+        """100 once the Budget & procurement points are folded in, else 80.
+
+        Two-phase fit (2026-07-31): pre-enrich, fit_score is only the 0-80 scrape-phase
+        score, and rendering it as "/100" overstates a perfect scrape-phase score as
+        80/100 rather than what it actually is. gtm/run.py::apply_budget_scores stamps
+        a "Budget & procurement" line into fit_reason the moment it folds in the last
+        20 points, so that marker (not a separate flag) is the signal the total is now
+        the assembled 100-point score — same idempotency key apply_budget_scores itself
+        uses to detect "already scored".
+
+        One helper, two renderers. `why_fit` and `to_sheet_row` both write the score into
+        the SAME sheet row, two columns apart; when each carried its own copy of this test
+        they disagreed, and a drop row read "30/100" next to "Dropped (30/80)". Any future
+        third renderer must call this rather than re-derive it."""
+        return 100 if "Budget & procurement" in (self.fit_reason or "") else 80
+
+    @property
     def why_fit(self) -> str:
         """One-line scannable summary for the Companies tab, so a reader gets the
         gist without opening the long fit_reason/buying_signals/key_news cells.
@@ -268,15 +286,7 @@ class Prospect(BaseModel):
         they stay in talking_points, where a rep needs the exact codes for the call
         (and stay banned from email bodies by gtm/draft.py::check_spec_jargon)."""
         band = {"1": "Strong fit", "2": "Possible fit", "3": "Dropped"}.get(self.tier, "Unscored")
-        # Two-phase fit (2026-07-31): pre-enrich, fit_score is only the 0-80 scrape-phase
-        # score, and rendering it as "/100" overstates a perfect scrape-phase score as
-        # 80/100 rather than what it actually is. gtm/run.py::apply_budget_scores stamps
-        # a "Budget & procurement" line into fit_reason the moment it folds in the last
-        # 20 points, so that marker (not a separate flag) is the signal the total is now
-        # the assembled 100-point score — same idempotency key apply_budget_scores itself
-        # uses to detect "already scored".
-        assembled = "Budget & procurement" in (self.fit_reason or "")
-        denom = 100 if assembled else 80
+        denom = self.fit_denominator
         head = f"{band} ({self.fit_score}/{denom})" if self.fit_score is not None else band
         parts = [head]
 
@@ -324,7 +334,11 @@ class Prospect(BaseModel):
                 # the compliance column is one a reader acts on, so say which it is.
                 row.append("unknown" if col == "us_made_ndaa" else "")
             elif col == "fit_score":
-                row.append(f"{v}/100")
+                # Same denominator why_fit uses, from the same helper — the two land two
+                # columns apart in one row and must never disagree. Drop rows and fit-only
+                # runs (start → fit → output, which never calls apply_budget_scores) are
+                # both still on the 0-80 scrape-phase scale here.
+                row.append(f"{v}/{self.fit_denominator}")
             elif isinstance(v, bool):
                 row.append("yes" if v else "no")
             elif col == "fit_reason":

@@ -19,6 +19,10 @@ TEAL = Prospect(
     website="https://tealdrones.com",
     drone_models=["Teal 2", "Black Widow"],
     fit_score=87,
+    # 87 is an *assembled* 0-100 score, so the fixture carries the "Budget & procurement"
+    # line apply_budget_scores stamps in — that marker is what makes the sheet render
+    # "/100" rather than the provisional "/80" (gtm/schema.py::fit_denominator).
+    fit_reason="Budget & procurement 15/20 — [field: headcount] headcount 51-200.",
     status="priority",
 )
 
@@ -68,6 +72,20 @@ def test_write_csv_header_and_row(tmp_path):
     assert rows[1][SHEET_COLUMNS.index("company")] == "Teal Drones"
     assert rows[1][SHEET_COLUMNS.index("drone_models")] == "Teal 2; Black Widow"
     assert rows[1][SHEET_COLUMNS.index("fit_score")] == "87/100"
+
+
+def test_write_csv_renders_an_unbudgeted_score_on_the_80_scale(tmp_path):
+    # A drop row never reaches apply_budget_scores (gtm/run.py::apply_budget_scores skips
+    # anything outside priority/keep), and start → fit → output skips it for every row —
+    # so those scores are still the 0-80 scrape-phase score and must not read "/100".
+    provisional = TEAL.model_copy(update={"company": "BadCo", "status": "drop",
+                                          "fit_score": 30, "fit_reason": "Physical fit 8/35."})
+    path = tmp_path / "out.csv"
+    write_csv([provisional], path)
+    rows = list(csv.reader(path.open()))
+    assert rows[1][SHEET_COLUMNS.index("fit_score")] == "30/80"
+    # the two cells that render the same number must agree on the denominator
+    assert "(30/80)" in rows[1][SHEET_COLUMNS.index("why_fit")]
 
 
 def test_write_csv_includes_all_tiers_including_drops(tmp_path):

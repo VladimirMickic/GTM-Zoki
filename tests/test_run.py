@@ -893,7 +893,9 @@ def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
     p = prospects[0]
     assert p.fit_score == 78
     assert p.best_case_line == "AV-Field"
-    assert p.status == "priority"  # apply_fit: score >= 70 -> priority
+    # apply_fit's provisional gate is on the 0-80 scrape-phase scale: >= 56 -> priority.
+    # Not the assembled 0-100 bands (70/40) apply_budget_scores applies after enrich.
+    assert p.status == "priority"
 
 
 def test_cmd_enrich_then_cmd_signals_resumes_cleanly(monkeypatch, tmp_path):
@@ -1534,6 +1536,62 @@ def test_budget_is_not_applied_twice_on_a_rerun():
     apply_budget_scores([p])
     assert p.fit_score == 62
     assert p.fit_reason.count("Budget & procurement") == 1
+
+
+def test_budget_demotes_a_mid_band_keep_with_no_evidence_to_drop():
+    # The highest-consequence branch on the two-phase design: a provisional keep that
+    # enriches to nothing genuinely is a drop — 35 + 0 = 35, below the assembled 40.
+    from gtm.run import apply_budget_scores
+
+    p = Prospect(company="NoEvidence", website="https://n.com/", status="keep")
+    p.fit_score = 35  # provisional, out of 80 — mid keep band
+    p.fit_reason = "Physical fit 20/35 — [field: drone_dimensions] fits AV-Field."
+    assert apply_budget_scores([p]) == 1
+    assert p.fit_score == 35
+    assert p.status == "drop"
+    assert "no procurement, scale or capital evidence after enrichment" in p.fit_reason
+
+
+def test_budget_skips_prospects_that_did_not_pass_fit():
+    # Only passers are enriched, so only passers have budget evidence to score. A drop or
+    # an error must come out the far side byte-for-byte unchanged.
+    from gtm.run import apply_budget_scores
+
+    dropped = Prospect(company="Dropped", website="https://d.com/", status="drop")
+    dropped.fit_score = 20
+    dropped.fit_reason = "Physical fit 5/35 — [field: none found] no airframe identified."
+    errored = Prospect(company="Errored", website="https://e.com/", status="error")
+    errored.fit_score = 44
+    errored.fit_reason = "Physical fit 30/35 — [field: drone_dimensions] fits AV-Field."
+    errored.headcount = "7000"  # evidence present, but the status still bars scoring
+    assert apply_budget_scores([dropped, errored]) == 0
+    assert (dropped.fit_score, dropped.status) == (20, "drop")
+    assert (errored.fit_score, errored.status) == (44, "error")
+    assert "Budget & procurement" not in (dropped.fit_reason + errored.fit_reason)
+
+
+def test_budget_skips_a_prospect_whose_enrich_raised():
+    # I5: cmd_enrich is log-and-continue, so a company whose enrich() threw arrives here
+    # still "keep" with empty headcount/key_news. Scoring it would read the empty fields
+    # as evidence of absence and reband it to drop — and neither an `enrich` rerun
+    # (priority/keep only) nor a `fit` rerun (drop/error only) could ever undo that.
+    from gtm.run import apply_budget_scores
+
+    failed = Prospect(company="Serper429", website="https://s.com/", status="keep")
+    failed.fit_score = 35
+    failed.fit_reason = "Physical fit 20/35 — [field: drone_dimensions] fits AV-Field."
+    ok = Prospect(company="Fine", website="https://f.com/", status="keep")
+    ok.fit_score = 35
+    ok.fit_reason = "Physical fit 20/35 — [field: drone_dimensions] fits AV-Field."
+    ok.headcount = "7000"
+    assert apply_budget_scores([failed, ok], skip={"Serper429"}) == 1
+    # untouched: same score, same status, no Budget line laundering a network error
+    assert (failed.fit_score, failed.status) == (35, "keep")
+    assert "Budget & procurement" not in failed.fit_reason
+    # and still re-scorable, because it is still a passer cmd_enrich will revisit
+    assert failed.status in ("priority", "keep")
+    # its neighbour scored normally
+    assert (ok.fit_score, ok.status) == (42, "keep")
 
 
 def test_cmd_start_prints_lessons_file_when_present(tmp_path, monkeypatch, capsys):

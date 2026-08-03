@@ -1063,6 +1063,59 @@ def test_single_shared_entity_does_not_cause_false_positive_dedup():
     assert any("manufacturing" in line for line in out)
 
 
+def test_two_generic_shared_acronyms_do_not_cause_false_positive_dedup():
+    # M1. The 2-shared-entity threshold assumed a shared acronym names a programme.
+    # These two share {US, AI} and nothing else — headline Jaccard is 0.000 — yet they
+    # are about different companies, agencies and events. Fixed by _ENTITY_STOPWORDS,
+    # NOT by moving the threshold, which is load-bearing for the CCA case above.
+    results = [
+        {"title": "US Army Taps AI Drone Startup",
+         "link": "https://example.com/army-ai",
+         "snippet": "the service picks a machine-learning vendor"},
+        {"title": "AI Firm Wins US Navy Deal",
+         "link": "https://example.com/navy-ai",
+         "snippet": "a separate maritime autonomy award"},
+    ]
+    out = find_news("SomeCo", website="https://someco.com/",
+                    search=lambda q, num=10: results)
+    assert len(out) == 2, f"two unrelated stories collapsed into one: {out}"
+
+
+def test_a_three_word_company_name_does_not_cause_false_positive_dedup():
+    # M2. Every headline in a "<company> drone ..." SERP names the company, so a 3-word
+    # name hands each pair 3 free shared tokens: these two scored Jaccard 0.375 against a
+    # 0.35 threshold and collapsed. The survivor also feeds gtm/budget.py::score_budget,
+    # so the company lost either its capital points or its award points. Fixed by
+    # stripping the company's own tokens, NOT by raising _DUPE_OVERLAP.
+    results = [
+        {"title": "Performance Drone Works Raises $10M",
+         "link": "https://example.com/raise",
+         "snippet": "a Series A led by an undisclosed investor"},
+        {"title": "Performance Drone Works Wins Army Deal",
+         "link": "https://example.com/army",
+         "snippet": "a separate procurement award"},
+    ]
+    out = find_news("Performance Drone Works", website="https://pdw.com/",
+                    search=lambda q, num=10: results)
+    assert len(out) == 2, f"two distinct events collapsed into one: {out}"
+    assert any("Raises" in line for line in out)
+    assert any("Army Deal" in line for line in out)
+
+
+def test_stripping_the_company_name_still_dedupes_a_real_syndicated_duplicate():
+    # The guard on the M2 fix: removing shared company tokens must not blind the Jaccard
+    # to two write-ups of the same event.
+    results = [
+        {"title": "Performance Drone Works Raises $10M in Series B Funding",
+         "link": "https://outlet-a.com/x", "snippet": "s"},
+        {"title": "Performance Drone Works Raises $10M Series B Round",
+         "link": "https://outlet-b.com/y", "snippet": "s"},
+    ]
+    out = find_news("Performance Drone Works", website="https://pdw.com/",
+                    search=lambda q, num=10: results)
+    assert len(out) == 1, f"same event kept twice: {out}"
+
+
 def test_trace_records_each_funnel_stage():
     # Task B1: the community-signal funnel has 3 stages (Serper pool -> third-party
     # filter -> gpt-4o-mini relevance gate) and none of them logged a count, so a

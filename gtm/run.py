@@ -277,16 +277,36 @@ def process_company(
     return p
 
 
-def apply_budget_scores(prospects: list[Prospect]) -> int:
+def apply_budget_scores(prospects: list[Prospect], skip: set[str] | None = None) -> int:
     """Fold the deterministic Budget & procurement score into each passer's total and
     recompute its tier. Idempotent — a rerun of `gtm.run enrich` must not stack a
-    second Budget line or double the points."""
+    second Budget line or double the points.
+
+    `skip` names companies whose `enrich()` raised (see cmd_enrich). Scoring those would
+    read their empty headcount/key_news as *evidence of absence* and write a 0/20 line
+    claiming "no procurement, scale or capital evidence after enrichment" — a factual
+    claim about the company, when what actually happened was an HTTP error. A mid-band
+    keep (32-39 provisional) would be rebanded to drop on the strength of it, and a drop
+    is a dead end: `cmd_enrich` only revisits priority/keep, and `merge_fit` only revisits
+    drop/error, so no rerun of any stage could ever undo it. Skipping instead leaves the
+    prospect at its provisional keep and its 0-80 score, which `Prospect.fit_denominator`
+    renders as "/80" — so the sheet shows plainly that this row is not yet assembled, and
+    a later `gtm.run enrich` picks it up and scores it for real."""
     from gtm.budget import score_budget
 
+    skip = skip or set()
     scored = 0
     for p in prospects:
         if p.status not in ("priority", "keep"):
             continue
+        if p.company in skip:
+            continue
+        # Substring match on LLM-authored prose is safe here *by construction*: where the
+        # fit prompt names this criterion it deliberately spells it "Budget/procurement"
+        # with a slash (gtm/fit.py:149,159), never with the ampersand, so a model echoing
+        # the instruction back into fit_reason cannot reproduce this key. Only
+        # score_budget writes the "&" spelling. A future prompt edit that "fixes" the
+        # slash to an ampersand would silently break this guard — keep the slash.
         if "Budget & procurement" in (p.fit_reason or ""):
             continue
         points, line = score_budget(p)
@@ -461,6 +481,11 @@ def cmd_enrich(run: str) -> None:
     with _track_stage(run, "enrich"):
         costlog = run_costlog(run)  # arms serper credit logging for enrich + contacts
         prospects = load_state(run_dir(run))
+        # Companies whose enrich/contacts raised. Log-and-skip as always, but the skip has
+        # to reach apply_budget_scores too — otherwise the empty headcount/key_news left
+        # behind get scored as evidence of absence and demote a keep to an unrecoverable
+        # drop on the strength of a transient network error. See apply_budget_scores.
+        failed: set[str] = set()
         for p in prospects:
             if p.status not in ("priority", "keep"):
                 continue
@@ -489,9 +514,13 @@ def cmd_enrich(run: str) -> None:
                 # is a manufacturing line we take over instead.
                 p.inhouse_case = detect_inhouse_case(p.case_evidence)
             except Exception as e:
+                failed.add(p.company)
                 _log_error(ERROR_LOG, p.company, "enrich/contacts", e)
-        n_scored = apply_budget_scores(prospects)
+        n_scored = apply_budget_scores(prospects, skip=failed)
         print(f"budget scored for {n_scored} prospect(s)")
+        if failed:
+            print(f"not budget scored (enrich failed, rerun `enrich` to retry): "
+                  f"{', '.join(sorted(failed))}")
         save_state(prospects, run_dir(run))
         print("\n=== SIGNAL PROMPTS — Claude: answer each, save {company: {...}} to signals.json ===")
         needs_signals = False

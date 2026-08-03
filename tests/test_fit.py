@@ -167,6 +167,33 @@ def test_fit_prompt_carries_non_us_compliance_evidence():
     assert "none found" in build_fit_prompt("ICP", "X", DroneExtraction())
 
 
+def test_field_citation_list_excludes_the_python_scored_fields():
+    """The [field: ...] citation list must not offer compliance_evidence or us_made_ndaa.
+
+    A citation asserts the score was *derived* from that field, so listing either one
+    licenses exactly the behavior the rest of the prompt forbids ("not yours to score ...
+    do not mention them here") — and it is the hook Anduril's bogus procurement line hung
+    on. Scoped to the citation sentence on purpose: both names legitimately appear earlier
+    in the prompt as data fields, which
+    test_fit_prompt_carries_non_us_compliance_evidence pins.
+    """
+    prompt = build_fit_prompt("ICP", "X", DroneExtraction())
+    _, sep, tail = prompt.partition("<field name> is the exact field you read it from:")
+    assert sep, "citation sentence not found — did the prompt wording change?"
+    sentence = tail.split("Plain English only")[0]
+    # the enumerated allowlist, i.e. everything before the "none found" fallback clause
+    allowlist = sentence.split("— or")[0]
+    assert "compliance_evidence" not in allowlist
+    assert "us_made_ndaa" not in allowlist
+    # the legitimate scrape-phase fields are still offered
+    for field in ("description", "drone_models", "drone_dimensions", "drone_weights",
+                  "case_evidence"):
+        assert field in allowlist
+    assert "none found" in sentence
+    # naming them is fine — required, even — as long as it is to forbid citing them
+    assert "never cite them here" in sentence
+
+
 def test_icp_scores_procurement_fit_not_us_origin():
     text = Path("company/ICP.md").read_text()
     assert "Budget & procurement" in text

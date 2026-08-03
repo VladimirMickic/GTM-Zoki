@@ -23,23 +23,33 @@ MAX_BUDGET = 20
 # Award-shaped news. Deliberately country-neutral: a NATO stock number, a national MoD
 # framework and a US Blue UAS listing satisfy this identically (company/ICP.md).
 _AWARD_RE = re.compile(
-    r"\b(contract|task order|awarded?|procurement|framework|NDAA|Blue UAS|"
+    # award(?:s|ed|ee)? — NOT `awarded?`, which parses as `awarde` + optional `d` and so
+    # matches neither the bare noun "award" nor the far more common verb "awards".
+    r"\b(contracts?|task order|award(?:s|ed|ee)?|procurement|framework|NDAA|Blue UAS|"
     r"NATO stock number|type certification|BVLOS)\b",
     re.IGNORECASE,
 )
+# The word alternatives each carry their own \b; the dollar alternative must NOT, because
+# a leading \b before "$" demands a word character immediately before the "$" — which never
+# happens in prose, so the whole branch was dead. Keep the two halves separated at the top
+# level of the alternation.
 _CAPITAL_RE = re.compile(
-    r"\b(series\s+[a-h]\b|raise[sd]?|raising|funding round|seed round|"
-    r"\$[\d.]+\s*(?:m|b|million|billion)\b)",
+    r"\b(?:series\s+[a-h]\b|raise[sd]?\b|raising\b|funding round\b|seed round\b)"
+    r"|\$[\d.]+\s*(?:m|b|million|billion)\b",
     re.IGNORECASE,
 )
 _FIRST_INT = re.compile(r"\d+")
+# Thousands separators inside a number, e.g. the comma in LinkedIn's own band labels
+# ("1,001-5,000", "10,001+"), which _HEADCOUNT_PROMPT asks enrichment to reproduce verbatim.
+_GROUPING = re.compile(r"[,\s](?=\d)")
 
 
 def _headcount_points(headcount: str) -> tuple[int, str]:
     """Bands off the first integer in the string — enrichment writes exact counts
-    ("7000") and LinkedIn-style ranges ("51-200") interchangeably, and the low end
-    of a range is the conservative read."""
-    m = _FIRST_INT.search(headcount or "")
+    ("7000") and LinkedIn-style ranges ("51-200", "5,001-10,000") interchangeably, and the
+    low end of a range is the conservative read. Separators are stripped first, so a
+    comma-grouped band reads as one number rather than as its leading digit run."""
+    m = _FIRST_INT.search(_GROUPING.sub("", headcount or ""))
     if not m:
         return 0, ""
     n = int(m.group())

@@ -22,6 +22,9 @@ def test_sheet_row_matches_locked_column_order():
         website="https://tealdrones.com",
         drone_models=["Black Widow", "Hellcat"],
         fit_score=87,
+        # 87 is an assembled 0-100 score, so the fixture carries the "Budget & procurement"
+        # line apply_budget_scores stamps in — the marker fit_denominator reads.
+        fit_reason="Budget & procurement 15/20 — [field: headcount] headcount 7000.",
         source="manual",
     )
     row = p.to_sheet_row()
@@ -80,6 +83,8 @@ def test_why_fit_renders_slash_80_when_provisional_pre_enrich():
         fit_reason="Physical fit 8/35 — [field: none found] no airframe identified.",
     )
     assert p.why_fit.startswith("Possible fit (48/80)")
+    # both renderers read fit_denominator, so the two cells can never disagree
+    assert p.to_sheet_row()[SHEET_COLUMNS.index("fit_score")] == "48/80"
 
 
 def test_why_fit_renders_slash_100_once_budget_has_been_folded_in():
@@ -91,6 +96,7 @@ def test_why_fit_renders_slash_100_once_budget_has_been_folded_in():
         ),
     )
     assert p.why_fit.startswith("Strong fit (70/100)")
+    assert p.to_sheet_row()[SHEET_COLUMNS.index("fit_score")] == "70/100"
 
 
 # --- 2026-07-29 (user, live-Sheet review): "why_fit / fit_reason / buying_signals /
