@@ -60,9 +60,14 @@ inspection · Survey / mapping / GIS · Energy & utilities · Search & rescue.
 the rubric below, because each of them is sometimes wrong:
 - *Non-US company.* Geography is irrelevant to whether a case fits and sells.
 - *Indoor-only / racing.* Racing teams travel constantly; some do need transport.
-- *Software-only, reseller, distributor.* Score Budget & procurement low (they can't buy
-  OEM cases) and let the total fall below 40 on its own — but a "distributor" that also
-  manufactures under its own brand should not be thrown away by a keyword.
+- *Software-only, reseller, distributor.* They have no airframe of their own, so they land
+  in the 0-7 "no airframe identified" band of **Airframe physically fits a case line** and
+  pick up the no-airframe cap (`gtm/fit.py::evidence_cap`, 48) — which puts priority tier
+  out of reach and lets the total fall below the keep line on its own. Score it there, on
+  the airframe evidence, not by inferring a budget; Budget & procurement is Python's and
+  has no reseller signal. But a "distributor" that also manufactures under its own brand
+  names an airframe, so it scores that airframe on the ordinary bands and should not be
+  thrown away by a keyword.
 
 ### Target titles for outreach
 Who we search for and rank (`gtm/contacts.py::_RANK_KEYWORDS`) — ops/product/founders buy
@@ -135,7 +140,27 @@ and utilities, and search & rescue carry no inherent advantage over each other.
 | 8-14 | Mixed indoor/outdoor, or commercial/cinema use with no ruggedness claim |
 | 0-7 | Indoor-only, racing, benchtop, or no use case found after the web hunt |
 
+### Displacement opportunity /20
+
+Displacement-opportunity scoring must cite case_evidence:
+
+| Band | Evidence |
+|---|---|
+| 17–20 | **In-house enclosure** — they tool and warehouse their own housing (drone-in-a-box, dock, base station, self-molded hard case). Highest value: a recurring OEM line, not a one-off swap, and no incumbent vendor defending the account |
+| 14–17 | Named rugged-case competitor (Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer) — a concrete displacement target with researchable weaknesses |
+| 10–13 | Soft bag / generic case / no case at all — a real upgrade opportunity, but no named incumbent to research |
+| 0–4 | case_evidence still unknown after the web hunt — write "unknown"; never award midpoint points for missing evidence |
+
+An in-house enclosure outranks a named competitor because the sale replaces a
+manufacturing cost centre (tooling, molds, spares, a revision every time the airframe
+changes) rather than another vendor's SKU. It is the harder pitch and the larger one —
+see `company/voice-guide.md` for how to make it.
+
 ### Budget & procurement /20 (post-enrich, deterministic)
+
+Last on purpose: the three criteria above are Claude's, this one is Python's. The fit
+prompt tells Claude to skip this section, so nothing Claude must score may be nested
+under it.
 
 Replaced "Volume / price point" (15) and "Procurement & compliance fit" (15) on
 2026-07-31. Both measured the same thing — can this buyer fund tooled custom foam —
@@ -154,20 +179,6 @@ Scored by `gtm/budget.py::score_budget`, no LLM call, no prose judgment:
 
 Geography is not a component. A national MoD framework, a NATO stock number and a US
 Blue UAS listing all satisfy "procurement evidence" identically.
-
-Displacement-opportunity scoring must cite case_evidence:
-
-| Band | Evidence |
-|---|---|
-| 17–20 | **In-house enclosure** — they tool and warehouse their own housing (drone-in-a-box, dock, base station, self-molded hard case). Highest value: a recurring OEM line, not a one-off swap, and no incumbent vendor defending the account |
-| 14–17 | Named rugged-case competitor (Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer) — a concrete displacement target with researchable weaknesses |
-| 10–13 | Soft bag / generic case / no case at all — a real upgrade opportunity, but no named incumbent to research |
-| 0–4 | case_evidence still unknown after the web hunt — write "unknown"; never award midpoint points for missing evidence |
-
-An in-house enclosure outranks a named competitor because the sale replaces a
-manufacturing cost centre (tooling, molds, spares, a revision every time the airframe
-changes) rather than another vendor's SKU. It is the harder pitch and the larger one —
-see `company/voice-guide.md` for how to make it.
 
 - **Tier 1 (70–100)** → `status="priority"` — push to sheet, full personalized outreach (drafted).
 - **Tier 2 (40–69)** → `status="keep"` — push to sheet, lower priority, still gets a personalized draft.

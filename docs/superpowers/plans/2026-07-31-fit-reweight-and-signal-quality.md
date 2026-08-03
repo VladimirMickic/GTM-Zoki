@@ -746,9 +746,10 @@ JSON string):
   "<Criterion> <score>/<max> — [field: <field name>] <plain-English why>"
 
 <field name> is the exact field you read it from: description, drone_models,
-drone_dimensions, drone_weights, case_evidence, compliance_evidence, us_made_ndaa — or
-the literal "none found" when nothing supported the score, which must then be the bottom
-band. Plain English only: expand any jargon or acronym on first use (e.g. "SRR (Short
+drone_dimensions, drone_weights, case_evidence — or the literal "none found" when
+nothing supported the score, which must then be the bottom band. (compliance_evidence and
+us_made_ndaa feed Budget/procurement, which you do not score — never cite them here.)
+Plain English only: expand any jargon or acronym on first use (e.g. "SRR (Short
 Range Reconnaissance)"), and say "inferred" explicitly when a judgment is inferred rather
 than published.
 
@@ -756,6 +757,16 @@ Reply with ONLY this JSON (no prose):
 {{"fit_score": <0-80>, "fit_reason": "<one line per criterion, as specified above>",
 "best_case_line": "<AV-Micro|AV-Field|AV-Ops|AV-Convoy|>", "disqualified": <true|false>}}"""
 ```
+
+> **Citation list — corrected 2026-08-02, do not re-add the two fields.** An earlier draft
+> of this template listed `compliance_evidence` and `us_made_ndaa` as citable. That
+> contradicted the same prompt three paragraphs up, which tells Claude these two are "not
+> yours to score ... do not score them and do not mention them here" — and a `[field: ...]`
+> citation asserts a score *was* derived from that field, which is exactly the Anduril
+> failure mode A3 exists to eliminate. The citation list intentionally excludes every
+> Python-scored field; `gtm/budget.py::score_budget` consumes both, and no Claude-scored
+> band table references either. Pinned by
+> `tests/test_fit.py::test_field_citation_list_excludes_the_python_scored_fields`.
 
 Update `FitResult.fit_score` to `Field(ge=0, le=80)` at `gtm/fit.py:45`.
 
