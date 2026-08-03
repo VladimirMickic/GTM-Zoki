@@ -98,3 +98,27 @@ a director never share talking points. Company-level cells repeat per row so eac
 
 ## Deps (add per slice)
 `pydantic`, `python-dotenv`, `pytest`, `requests`, `crawl4ai`, `openai`, `gspread`, `google-auth`
+
+## Known follow-ups (filed 2026-08-02, after the fit-reweight/signal-quality branch)
+Shipped deliberately, each verified by execution, none blocking:
+- `gtm/enrich.py::_ENTITY_RE` — the `\$[\d.]+[MBK]?` branch is unreachable (leading `\b`
+  distributes over the alternation), so entity dedup has never fired on a shared dollar figure
+  despite its docstring. Fixing it makes dedup strictly more aggressive on the token most likely
+  to be shared by two different stories (a $10M raise and a $10M award) — measure before fixing.
+- `gtm/budget.py::_CAPITAL_RE` — the now-live `$Nm/bn` branch also matches product prices and
+  market-size headlines ("Drone market to hit $12 billion"). Net positive (the branch caught
+  nothing before), but it is a new false-positive class.
+- `gtm/budget.py::_AWARD_RE` — bare `award` also matches industry awards ("Edison Award" → 8
+  procurement points). Narrow fix if it proves noisy: negative lookahead on `Award for|Awards
+  season`, not a retreat to `awarded?`.
+- `gtm/run.py::cmd_enrich` — a prospect whose `enrich()` raised now stays in the funnel (correct)
+  but still gets a signal prompt with empty news/community/LinkedIn. Skip the prompt for a failed
+  company and say why.
+- `company/ICP.md` reseller bullet — the stated mechanism ("no airframe of their own") does not
+  cover a *pure* reseller, whose site names the airframes it resells, so `evidence_cap` never
+  fires. Needs a signal Claude can actually score, or an explicit accept.
+- Community signals (Task B2, unwritten) — `kept` is 1-3 for every company yet `signals.json`
+  comes back empty. The B1 diagnosis is plausible, NOT confirmed: it compared two different
+  candidate pools. B2 must capture its own pool and re-run the signals stage against it. Note
+  `trace["kept"]` is post-cap (`MAX_COMMUNITY_SIGNALS=3`), so it cannot separate "returned 3 of
+  20" from "returned 12, cut to 3" — report `len(parsed.signals)` too.
