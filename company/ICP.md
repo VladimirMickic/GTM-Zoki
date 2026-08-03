@@ -175,7 +175,7 @@ Scored by `gtm/budget.py::score_budget`, no LLM call, no prose judgment:
 |---|---|---|
 | 8 | Procurement evidence | `us_made_ndaa` true, OR non-empty `compliance_evidence`, OR an award-shaped `key_news` line (contract, task order, NDAA, Blue UAS, framework, NATO stock number) |
 | 7 / 4 / 1 / 0 | Scale | headcount >=50 / 11-49 / 1-10 / unknown |
-| 5 | Capital event | a `key_news` line naming a funding round, Series, or raise |
+| 5 | Capital event | a `key_news` line naming a funding round, Series, or raise — or a stated dollar figure of any kind (a $12M award is funding capacity too, and scores both components) |
 
 Geography is not a component. A national MoD framework, a NATO stock number and a US
 Blue UAS listing all satisfy "procurement evidence" identically.

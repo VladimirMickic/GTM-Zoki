@@ -287,7 +287,7 @@ def apply_budget_scores(prospects: list[Prospect], skip: set[str] | None = None)
     claiming "no procurement, scale or capital evidence after enrichment" — a factual
     claim about the company, when what actually happened was an HTTP error. A mid-band
     keep (32-39 provisional) would be rebanded to drop on the strength of it, and a drop
-    is a dead end: `cmd_enrich` only revisits priority/keep, and `merge_fit` only revisits
+    is a dead end: `cmd_enrich` only revisits priority/keep, and `merge_fit` skips
     drop/error, so no rerun of any stage could ever undo it. Skipping instead leaves the
     prospect at its provisional keep and its 0-80 score, which `Prospect.fit_denominator`
     renders as "/80" — so the sheet shows plainly that this row is not yet assembled, and
