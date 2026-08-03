@@ -1,6 +1,7 @@
 """S5 — enrichment: Serper-sourced raw signals + Claude synthesis prompt."""
 from gtm.enrich import (
     _Headcount,
+    _Signal,
     _SignalDate,
     _SignalList,
     build_signal_prompt,
@@ -1140,3 +1141,102 @@ def test_trace_records_each_funnel_stage():
     assert trace["pooled"] == 1
     assert trace["third_party"] == 1
     assert "kept" in trace
+
+
+# --- 2026-08-03, follow-up 6: `kept` is post-cap (MAX_COMMUNITY_SIGNALS), so it cannot
+# tell "the model returned 3 of 20" from "the model returned 12 and we cut to 3". B2 needs
+# the model's own output size to place the loss, so the trace carries the pre-gate count
+# (`returned`) and the post-problem-gate count (`with_problem`) as well. ---
+
+
+def test_trace_separates_the_models_own_output_from_the_cap():
+    p = Prospect(company="Acme", website="https://acme.com/",
+                 description="public safety drone maker", drone_models=["Falcon 3"])
+    results = [{"title": f"case cracked {i}", "snippet": "my Falcon 3 case cracked in transit",
+                "link": f"https://reddit.com/r/drones/{i}"} for i in range(5)]
+    # Five signals with a problem — more than MAX_COMMUNITY_SIGNALS (3).
+    parsed = _SignalList(signals=[
+        _Signal(quote=f"case cracked {i}", source="reddit.com", problem="the case cracked")
+        for i in range(5)
+    ])
+
+    trace = {}
+    out = find_community_signals(p, search=lambda q, num=10: results,
+                                 client=FakeClient(parsed), costlog=None, trace=trace)
+    assert trace["returned"] == 5      # what gpt-4o-mini actually gave back
+    assert trace["with_problem"] == 5  # survived _has_problem
+    assert trace["kept"] == 3 == len(out)  # post-cap — the number the old trace showed
+
+
+def test_trace_shows_the_problem_gate_when_that_is_what_drops_them():
+    p = Prospect(company="Acme", website="https://acme.com/",
+                 description="public safety drone maker", drone_models=["Falcon 3"])
+    results = [{"title": "case cracked", "snippet": "my Falcon 3 case cracked in transit",
+                "link": "https://reddit.com/r/drones/1"}]
+    # The model answered, but every signal left `problem` empty — the prompt's own
+    # instruction for "no pain here". That is a different failure from "returned nothing".
+    parsed = _SignalList(signals=[
+        _Signal(quote="nice case", source="reddit.com", problem=""),
+        _Signal(quote="works fine", source="reddit.com", problem="n/a"),
+    ])
+
+    trace = {}
+    find_community_signals(p, search=lambda q, num=10: results,
+                           client=FakeClient(parsed), costlog=None, trace=trace)
+    assert trace["returned"] == 2
+    assert trace["with_problem"] == 0
+    assert trace["kept"] == 0
+
+
+# --- 2026-08-03, follow-up 1: the dollar-figure half of _ENTITY_RE was unreachable.
+# `\b(?:[A-Z]{2,}|\$[\d.]+[MBK]?)\b` distributes the leading \b over both alternatives,
+# and a \b before "$" demands a word character immediately before the "$", which never
+# happens in prose. Same bug, same fix, as gtm/budget.py::_CAPITAL_RE. ---
+
+
+def test_entities_finds_a_dollar_figure():
+    from gtm.enrich import _entities
+
+    assert _entities("Teal wins $87M SRR deal") == {"$87M", "SRR"}
+
+
+def test_entities_finds_a_bare_and_a_decimal_dollar_figure():
+    from gtm.enrich import _entities
+
+    assert _entities("Anduril raises $1.5B Series G") == {"$1.5B"}
+    assert _entities("Skydio lands $170 million") == {"$170"}
+
+
+def test_entities_still_drops_the_generic_acronyms():
+    from gtm.enrich import _entities
+
+    assert _entities("US Army Taps AI Drone Startup") == set()
+
+
+def test_a_shared_dollar_figure_plus_a_shared_programme_dedupes():
+    # The case the entity test exists for, now reachable through the dollar branch:
+    # two write-ups of one award whose headlines share only 0.2 of their words.
+    results = [
+        {"title": "Army picks Teal in $12M SRR order", "link": "https://outlet-a.com/x",
+         "snippet": "s"},
+        {"title": "SRR Tranche 2: Teal takes the $12M", "link": "https://outlet-b.com/y",
+         "snippet": "s"},
+    ]
+    out = find_news("Teal", website="https://tealdrones.com/",
+                    search=lambda q, num=10: results)
+    assert len(out) == 1, f"same event kept twice: {out}"
+
+
+def test_a_shared_dollar_figure_alone_does_not_dedupe():
+    # The risk the follow-up flagged before fixing the regex: a $10M raise and a $10M
+    # award are different events. The 2-entity threshold is what keeps them apart, so
+    # the reachable dollar branch must not collapse them on its own.
+    results = [
+        {"title": "Skydio raises $10M from Acme", "link": "https://outlet-a.com/x",
+         "snippet": "a Series A"},
+        {"title": "Navy hands Skydio a $10M order", "link": "https://outlet-b.com/y",
+         "snippet": "a separate procurement"},
+    ]
+    out = find_news("Skydio", website="https://skydio.com/",
+                    search=lambda q, num=10: results)
+    assert len(out) == 2, f"two distinct events collapsed into one: {out}"

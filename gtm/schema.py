@@ -188,6 +188,11 @@ class Prospect(BaseModel):
     # which contributes 0 to that criterion — never treat empty as "commercial,
     # therefore mid-band".
     compliance_evidence: str = ""
+    # 2026-08-03: False only when the site shows the company resells other makers'
+    # airframes and names none of its own. Carried on the Prospect because merge_fit
+    # rebuilds a DroneExtraction from these fields to compute the evidence cap, and the
+    # reseller cap is unreachable without it. None = unstated, which never caps.
+    own_brand: Optional[bool] = None
     hq_city: str = ""  # state-only; feeds gtm/hubspot.py company city/country properties
     hq_country: str = ""
     # stage 4 — fit

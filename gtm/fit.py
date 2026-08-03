@@ -112,11 +112,36 @@ NO_AIRFRAME_CAP = 48  # 0-80 provisional scale (rescaled from 60/100 on 2026-07-
 # top of the provisional "keep" band — still worth a look, never a priority
 
 
+_NO_AIRFRAME_REASON = ("no airframe identified (no model name, no dimensions)")
+_RESELLER_REASON = ("resells third-party airframes and names none of its own "
+                    "(own_brand: false)")
+
+
+def cap_reason(ex: DroneExtraction) -> str:
+    """Why evidence_cap fired, for the fit_reason line. "" when it didn't."""
+    if ex.own_brand is False:
+        return _RESELLER_REASON
+    if not ex.drone_models and not ex.drone_dimensions:
+        return _NO_AIRFRAME_REASON
+    return ""
+
+
 def evidence_cap(ex: DroneExtraction) -> int | None:
-    """NO_AIRFRAME_CAP when neither a model name nor a dimension triple was found,
-    else None. Deliberately does NOT consider drone_weights: a weight in prose
-    ("approximately 12 lbs") is not an identified airframe, it's a number in a
-    sentence — that is exactly the evidence Anduril was scored 22/30 on."""
+    """NO_AIRFRAME_CAP when the scrape gave us no airframe we can sell a case for,
+    else None. Two ways to land there:
+
+    1. Neither a model name nor a dimension triple was found. Deliberately does NOT
+       consider drone_weights: a weight in prose ("approximately 12 lbs") is not an
+       identified airframe, it's a number in a sentence — that is exactly the evidence
+       Anduril was scored 22/30 on.
+    2. `own_brand is False` — a pure reseller (2026-08-03). Its site names every airframe
+       it stocks, so drone_models is full and test 1 never fired, which is why ICP.md's
+       stated mechanism ("they have no airframe of their own") never worked on the case
+       it was written for. The case still fits the foam; the company still isn't the
+       buyer, because the OEM commissions the case, not the shop that resells it.
+       `None` is not `False` here: an unstated own_brand is silence, not a reseller."""
+    if ex.own_brand is False:
+        return NO_AIRFRAME_CAP
     if not ex.drone_models and not ex.drone_dimensions:
         return NO_AIRFRAME_CAP
     return None
@@ -188,13 +213,18 @@ Reply with ONLY this JSON (no prose):
 "best_case_line": "<AV-Micro|AV-Field|AV-Ops|AV-Convoy|>", "disqualified": <true|false>}}"""
 
 
-def apply_fit(p: Prospect, fit: FitResult, *, cap: int | None = None) -> Prospect:
+def apply_fit(p: Prospect, fit: FitResult, *, cap: int | None = None,
+              cap_reason: str = _NO_AIRFRAME_REASON) -> Prospect:
+    """`cap_reason` names which of evidence_cap's two triggers fired, so the appended
+    line doesn't tell a reader "no airframe identified" about a company whose row lists
+    four of them. Defaults to the no-airframe wording — the only trigger before
+    2026-08-03 — so existing callers keep their message unchanged."""
     p.fit_score = min(fit.fit_score, cap) if cap is not None else fit.fit_score
     p.fit_reason = fit.fit_reason
     if cap is not None and fit.fit_score > cap:
         p.fit_reason += (
-            f"\nEvidence cap applied — no airframe identified (no model name, no "
-            f"dimensions); raw score {fit.fit_score} capped to {cap}."
+            f"\nEvidence cap applied — {cap_reason}; "
+            f"raw score {fit.fit_score} capped to {cap}."
         )
     p.best_case_line = fit.best_case_line
     # Provisional (pre-enrich) gate on the 0-80 scrape-phase scale — rescaled 2026-07-31

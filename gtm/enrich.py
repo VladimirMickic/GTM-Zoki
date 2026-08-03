@@ -97,7 +97,13 @@ _DUPE_OVERLAP = 0.35  # Jaccard over headline content words. Was 0.6 until 2026-
 # Rare, event-naming tokens. Two headlines sharing two of these are almost always the
 # same story: the company name plus a programme/agency/dollar figure pins an event far
 # more reliably than generic verbs like "awards" or "wins" do.
-_ENTITY_RE = re.compile(r"\b(?:[A-Z]{2,}|\$[\d.]+[MBK]?)\b")
+# The acronym alternative carries its own \b; the dollar alternative must NOT have one in
+# front, because a leading \b before "$" demands a word character immediately before the
+# "$" — which never happens in prose, so that half was dead from the day it was written
+# (fixed 2026-08-03). Same bug and same fix as gtm/budget.py::_CAPITAL_RE. Reviving it is
+# safe only because _is_dupe requires TWO shared entities: a $10M raise and a $10M award
+# are different events and still share just one.
+_ENTITY_RE = re.compile(r"\b[A-Z]{2,}\b|\$[\d.]+[MBK]?\b")
 
 # Acronyms common enough to pin nothing. The entity test assumes a shared acronym names a
 # specific programme or agency, which is true of CCA/NDAA/USAF and false of these: two
@@ -434,7 +440,8 @@ For each kept result:
 Keep at most 3, most concrete/specific first. If nothing qualifies, return an empty list."""
 
 
-def _relevance_filter(results: list[dict], *, client=None, costlog=None) -> list[str]:
+def _relevance_filter(results: list[dict], *, client=None, costlog=None,
+                      trace: dict | None = None) -> list[str]:
     if not results:
         return []
     if client is None:
@@ -463,8 +470,16 @@ def _relevance_filter(results: list[dict], *, client=None, costlog=None) -> list
         )
     parsed = completion.choices[0].message.parsed
     if parsed is None:
+        if trace is not None:
+            trace.update(returned=0, with_problem=0)
         return []
     kept = [s for s in parsed.signals if _has_problem(s)]
+    # `returned` and `with_problem` bracket the two gates inside this function, which the
+    # caller's post-cap `kept` cannot separate (2026-08-03, follow-up 6): "the model gave
+    # back 3 of 20" and "the model gave back 12 and MAX_COMMUNITY_SIGNALS cut it to 3"
+    # both showed as kept=3. Task B2 needs to know which, so record both counts here.
+    if trace is not None:
+        trace.update(returned=len(parsed.signals), with_problem=len(kept))
     return [f'"{s.quote}" ({s.source})' for s in kept[:MAX_COMMUNITY_SIGNALS]]
 
 
@@ -492,7 +507,12 @@ def find_community_signals(p: Prospect, *, search=serper_search, client=None,
             seen_links.add(link)
             pooled.append(r)
     third_party = [r for r in pooled if not _is_own_post(p.company, r)]
-    kept = _relevance_filter(third_party, client=client, costlog=costlog)
+    # `returned`/`with_problem` are written by _relevance_filter itself; they stay 0 when
+    # it takes its `if not results` early exit, which is the honest reading — the model
+    # was never asked. `kept` is post-cap and stays last so the numbers read as a funnel.
+    if trace is not None:
+        trace.update(returned=0, with_problem=0)
+    kept = _relevance_filter(third_party, client=client, costlog=costlog, trace=trace)
     if trace is not None:
         trace.update(pooled=len(pooled), third_party=len(third_party), kept=len(kept))
     return kept

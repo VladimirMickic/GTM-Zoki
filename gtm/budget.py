@@ -38,6 +38,60 @@ _CAPITAL_RE = re.compile(
     r"|\$[\d.]+\s*(?:m|b|million|billion)\b",
     re.IGNORECASE,
 )
+
+# --- False-positive vetoes (2026-08-03). Both regexes above were widened on 2026-08-02
+# and each widening brought a class of headline that is not evidence this company can pay
+# for or procure anything. Both vetoes are applied per news item, never to the joined
+# blob, so one bad headline cannot lend its points to an unrelated one. ---
+
+# Market-size and forecast journalism: "Drone market to hit $12 billion by 2030". The
+# dollar figure is the industry's, not the company's. Deliberately keyed on the subject
+# noun (market/industry/sector) or the analyst framing, NOT on the word "billion" — a real
+# raise can be that big, and Anduril's $1.5B Series G must keep its points.
+_MARKET_SIZE_RE = re.compile(
+    r"\b(?:market|industry|sector|segment)\b[^.]{0,60}?\$[\d.]+\s*(?:m|b|million|billion)\b"
+    r"|\$[\d.]+\s*(?:m|b|million|billion)\b[^.]{0,60}?\b(?:market|industry|sector|segment)\b"
+    r"|\b(?:forecast|projected|projection|expected to reach|to reach|to hit|estimated at|"
+    r"valued at|worth|cagr|analysts?)\b[^.]{0,60}?\$[\d.]+\s*(?:m|b|million|billion)\b",
+    re.IGNORECASE,
+)
+
+# Trophies, not contracts: "wins an Edison Award", "award-winning". These veto ONLY the
+# weak bare-`award` branch of _AWARD_RE (see _has_award below) — a headline naming a real
+# contract, task order or certification keeps its points even when it also mentions a
+# trophy. Known cost: a genuinely procurement-flavoured "Innovation Award" (AFWERX and
+# friends) loses its points here, which is acceptable because those items almost always
+# also say "contract" or "SBIR" and are caught by the strong branch instead.
+_TROPHY_RE = re.compile(
+    r"\baward[- ]winning\b"
+    r"|\bawards?\s+(?:season|show|ceremony|gala|night|finalists?|categor\w+)\b"
+    r"|\b(?:finalist|shortlisted|nominee|nominated|honou?ree)\b[^.]{0,40}?\bawards?\b"
+    r"|\b(?:edison|innovation|design|product|startup|excellence|breakthrough|"
+    r"best[- ]of[- ]\w+|people'?s\s+choice|readers'?\s+choice)\s+awards?\b",
+    re.IGNORECASE,
+)
+# The half of _AWARD_RE that survives a trophy veto — everything except bare `award(s)`.
+# `awarded`/`awardee` stay here: nobody is "awarded" an Edison, they win one.
+_STRONG_AWARD_RE = re.compile(
+    r"\b(contracts?|task order|award(?:ed|ee)|procurement|framework|NDAA|Blue UAS|"
+    r"NATO stock number|type certification|BVLOS)\b",
+    re.IGNORECASE,
+)
+
+
+def _has_award(item: str) -> bool:
+    """Procurement evidence in one news item. The strong tokens stand on their own; the
+    bare noun/verb `award(s)` only counts when the item is not trophy-shaped."""
+    if _STRONG_AWARD_RE.search(item):
+        return True
+    return bool(_AWARD_RE.search(item)) and not _TROPHY_RE.search(item)
+
+
+def _has_capital(item: str) -> bool:
+    """Capital evidence in one news item, minus market-size journalism."""
+    return bool(_CAPITAL_RE.search(item)) and not _MARKET_SIZE_RE.search(item)
+
+
 _FIRST_INT = re.compile(r"\d+")
 # Thousands separators inside a number, e.g. the comma in LinkedIn's own band labels
 # ("1,001-5,000", "10,001+"), which _HEADCOUNT_PROMPT asks enrichment to reproduce verbatim.
@@ -66,8 +120,14 @@ def score_budget(p: Prospect) -> tuple[int, str]:
     fields: list[str] = []
     whys: list[str] = []
 
-    news = " | ".join(p.key_news or [])
-    if p.us_made_ndaa or (p.compliance_evidence or "").strip() or _AWARD_RE.search(news):
+    # Per item, not over the joined list: the vetoes in _has_award/_has_capital are
+    # judgments about one headline, and a blob lets a vetoed headline's neighbours
+    # supply the words that clear it (2026-08-03).
+    items = p.key_news or []
+    news_award = any(_has_award(i) for i in items)
+    news_capital = any(_has_capital(i) for i in items)
+
+    if p.us_made_ndaa or (p.compliance_evidence or "").strip() or news_award:
         points += PROCUREMENT_POINTS
         if p.us_made_ndaa:
             fields.append("us_made_ndaa")
@@ -75,7 +135,7 @@ def score_budget(p: Prospect) -> tuple[int, str]:
         if (p.compliance_evidence or "").strip():
             fields.append("compliance_evidence")
             whys.append(p.compliance_evidence.strip()[:60])
-        elif _AWARD_RE.search(news):
+        elif news_award:
             fields.append("key_news")
             whys.append("award/procurement evidence in the news")
 
@@ -85,7 +145,7 @@ def score_budget(p: Prospect) -> tuple[int, str]:
         fields.append("headcount")
         whys.append(head_why)
 
-    if _CAPITAL_RE.search(news):
+    if news_capital:
         points += CAPITAL_POINTS
         if "key_news" not in fields:
             fields.append("key_news")

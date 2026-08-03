@@ -60,8 +60,9 @@ First prospect: **Teal Drones** (tealdrones.com).
    and `key_news` (both written only by `gtm/enrich.py`, so don't exist at Fit time)
    plus `compliance_evidence` (extracted earlier and shown to Claude, but deliberately
    withheld from Claude's score — scored by Python instead). Size is still the only
-   hard disqualifier; a company with no identified airframe is capped at 48
-   (`gtm/fit.py::evidence_cap`) and can never reach priority tier.
+   hard disqualifier; `gtm/fit.py::evidence_cap` caps at 48 (no priority tier) on either
+   of two triggers — no identified airframe, or `own_brand is False`, the pure-reseller
+   signal extraction now answers. Unstated `own_brand` (None) never caps.
 5. **Contacts + Enrich** (passers only) — all Serper + `gpt-4o-mini`, no skill in the loop:
    `gtm/contacts.py` (`site:linkedin.com/in` + team scrape → names/titles/LinkedIn, ranked,
    employment-verified, no email yet), `gtm/enrich.py` (company LinkedIn, community signals,

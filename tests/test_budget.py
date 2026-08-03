@@ -97,3 +97,67 @@ def test_geography_is_not_a_component():
     us = _p(us_made_ndaa=True)
     foreign = _p(compliance_evidence="Bundeswehr framework agreement")
     assert score_budget(us)[0] == score_budget(foreign)[0]
+
+
+# --- 2026-08-03, follow-ups 2 and 3. Both regexes were widened on 2026-08-02 and both
+# widenings brought a false-positive class with them: `$Nm/bn` also matches a market-size
+# headline, and bare `award` also matches an industry award. Neither is evidence that this
+# company can pay for or procure anything, and each is worth 5 and 8 points respectively.
+#
+# Both guards are per-news-item, not per-blob: score_budget used to join key_news into one
+# string, so a market-size headline in slot 3 could hand capital points to a company whose
+# only other news was unrelated. ---
+
+
+@pytest.mark.parametrize("headline", [
+    "Drone market to hit $12 billion by 2030 (marketwatch.com)",
+    "Global counter-UAS market worth $4.5 billion, report says (globenewswire.com)",
+    "Commercial drone industry projected to reach $58 billion (forbes.com)",
+    "Analysts size the sUAS sector at $9.2 billion (marketsandmarkets.com)",
+])
+def test_a_market_size_headline_is_not_a_capital_event(headline):
+    assert score_budget(_p(key_news=[headline]))[0] == 0
+
+
+def test_a_market_size_headline_does_not_lend_capital_points_to_other_news():
+    # The per-blob bug: the airframe item carries no evidence at all, and the market item
+    # is about the industry, not this company. Together they must still score 0.
+    p = _p(key_news=["Foo Drones ships a new airframe (dronelife.com)",
+                     "Drone market to hit $12 billion by 2030 (marketwatch.com)"])
+    assert score_budget(p)[0] == 0
+
+
+def test_a_real_raise_in_the_same_list_as_a_market_headline_still_scores():
+    # The guard vetoes the market item, not the list.
+    p = _p(key_news=["Drone market to hit $12 billion by 2030 (marketwatch.com)",
+                     "Foo Drones lands $87M (techcrunch.com)"])
+    assert score_budget(p)[0] == 5
+
+
+@pytest.mark.parametrize("headline", [
+    "Foo Drones wins an Edison Award (prnewswire.com)",
+    "Foo Drones named a finalist for the Innovation Award (suasnews.com)",
+    "Foo Drones takes home a Best of CES award (theverge.com)",
+    "Award-winning Foo Drones unveils its new airframe (dronelife.com)",
+    "Foo Drones shortlisted in the 2026 Awards season (dronelife.com)",
+])
+def test_an_industry_award_is_not_procurement_evidence(headline):
+    assert score_budget(_p(key_news=[headline]))[0] == 0
+
+
+def test_a_real_procurement_award_in_the_same_list_as_a_trophy_still_scores():
+    # 13, not 8: the "$12M" also clears _CAPITAL_RE. That is pre-existing and deliberate —
+    # a named eight-figure defence contract is evidence of procurement capacity twice over
+    # — and it is not what the trophy veto is about. The assertion that matters here is
+    # that the Edison item did not cost the real one its procurement points.
+    p = _p(key_news=["Foo Drones wins an Edison Award (prnewswire.com)",
+                     "Army awards Foo Drones $12M for SRR Tranche 2 (dronelife.com)"])
+    assert score_budget(p)[0] == 13
+    assert score_budget(_p(key_news=[p.key_news[0]]))[0] == 0  # the trophy alone is worth 0
+
+
+def test_a_contract_award_is_not_vetoed_by_a_trophy_word_in_the_same_headline():
+    # The veto applies to the weak bare-`award` branch only. A headline naming a real
+    # contract keeps its points even when it also mentions a trophy.
+    p = _p(key_news=["Award-winning Foo Drones wins an Army contract (dronelife.com)"])
+    assert score_budget(p)[0] == 8

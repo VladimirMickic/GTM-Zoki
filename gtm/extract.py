@@ -42,6 +42,12 @@ Only state what the text supports — leave fields empty/null when unsure.
   operating waiver, a named awarded government contract. Do NOT restate NDAA/Blue UAS
   here (that is us_made_ndaa's job) and do not put marketing adjectives here
   ("military-grade", "professional") — only named programs, certs, or awards.
+- own_brand: true if the drones in drone_models are the company's OWN products — it
+  designs or builds them, or sells them under its own brand. false ONLY when the text
+  shows the company merely resells or distributes other manufacturers' airframes and
+  names no aircraft of its own ("authorized DJI dealer", "we distribute Autel drones").
+  null when the text does not make this clear. A company that both manufactures its own
+  airframe and distributes someone else's is true, not false — the own brand decides it.
 - hq_city: the company's headquarters city, only if explicitly stated (e.g. an "About" or
   "Contact" page address). Empty if not stated.
 - hq_country: the company's headquarters country, only if explicitly stated or unambiguously
@@ -61,6 +67,9 @@ class DroneExtraction(BaseModel):
     case_evidence: str = ""
     us_made_ndaa: Optional[bool] = None
     compliance_evidence: str = ""
+    # 2026-08-03: the reseller signal. None = the text didn't say, which is NOT evidence
+    # of reselling — only an explicit False caps the score (gtm/fit.py::evidence_cap).
+    own_brand: Optional[bool] = None
     hq_city: str = ""
     hq_country: str = ""
 

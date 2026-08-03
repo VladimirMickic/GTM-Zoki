@@ -99,26 +99,29 @@ a director never share talking points. Company-level cells repeat per row so eac
 ## Deps (add per slice)
 `pydantic`, `python-dotenv`, `pytest`, `requests`, `crawl4ai`, `openai`, `gspread`, `google-auth`
 
-## Known follow-ups (filed 2026-08-02, after the fit-reweight/signal-quality branch)
-Shipped deliberately, each verified by execution, none blocking:
-- `gtm/enrich.py::_ENTITY_RE` — the `\$[\d.]+[MBK]?` branch is unreachable (leading `\b`
-  distributes over the alternation), so entity dedup has never fired on a shared dollar figure
-  despite its docstring. Fixing it makes dedup strictly more aggressive on the token most likely
-  to be shared by two different stories (a $10M raise and a $10M award) — measure before fixing.
-- `gtm/budget.py::_CAPITAL_RE` — the now-live `$Nm/bn` branch also matches product prices and
-  market-size headlines ("Drone market to hit $12 billion"). Net positive (the branch caught
-  nothing before), but it is a new false-positive class.
-- `gtm/budget.py::_AWARD_RE` — bare `award` also matches industry awards ("Edison Award" → 8
-  procurement points). Narrow fix if it proves noisy: negative lookahead on `Award for|Awards
-  season`, not a retreat to `awarded?`.
-- `gtm/run.py::cmd_enrich` — a prospect whose `enrich()` raised now stays in the funnel (correct)
-  but still gets a signal prompt with empty news/community/LinkedIn. Skip the prompt for a failed
-  company and say why.
-- `company/ICP.md` reseller bullet — the stated mechanism ("no airframe of their own") does not
-  cover a *pure* reseller, whose site names the airframes it resells, so `evidence_cap` never
-  fires. Needs a signal Claude can actually score, or an explicit accept.
-- Community signals (Task B2, unwritten) — `kept` is 1-3 for every company yet `signals.json`
-  comes back empty. The B1 diagnosis is plausible, NOT confirmed: it compared two different
-  candidate pools. B2 must capture its own pool and re-run the signals stage against it. Note
-  `trace["kept"]` is post-cap (`MAX_COMMUNITY_SIGNALS=3`), so it cannot separate "returned 3 of
-  20" from "returned 12, cut to 3" — report `len(parsed.signals)` too.
+## Known follow-ups (filed 2026-08-02, closed 2026-08-03 except where noted)
+The 2026-08-02 list is done. What each turned into, so a future reader doesn't re-derive it:
+- `gtm/enrich.py::_ENTITY_RE` — dead `$` branch revived by splitting the leading `\b` out of
+  the alternation. Safe without measuring after all: `_is_dupe` requires **two** shared
+  entities, so the flagged risk case (a $10M raise vs a $10M award) shares one and survives.
+  Locked by a test both ways.
+- `gtm/budget.py` — both false-positive classes now have a per-item veto, `_MARKET_SIZE_RE`
+  ("Drone market to hit $12 billion" is not a capital event) and `_TROPHY_RE` ("Edison Award"
+  is not procurement). Per **item**, not over the joined `key_news` blob: a vetoed headline
+  could otherwise borrow the words that clear it from its neighbours. The trophy veto applies
+  only to the weak bare-`award` branch — `contract`/`task order`/`BVLOS` still stand alone.
+  Accepted cost: a procurement-flavoured "Innovation Award" scores 0 unless it also says
+  contract or SBIR. See `company/ICP.md` § Budget & procurement.
+- `gtm/run.py::cmd_enrich` — a failed-enrich company keeps its tier but no longer gets a
+  signal prompt; the stage prints who was skipped and why. If every passer failed there is
+  now no checkpoint at all, because there is nothing to answer.
+- Reseller — extraction answers a new `own_brand` field (`gtm/extract.py`, carried on
+  `Prospect`), and `evidence_cap` caps at 48 on `own_brand is False` regardless of how many
+  airframes are listed. `None` (unstated) never caps. `apply_fit` takes a `cap_reason` so the
+  appended line stops telling a reader "no airframe identified" about a row listing four.
+- **Still open — Community signals (Task B2).** The instrumentation half is done: the trace
+  now carries `returned` (gpt-4o-mini's own output size) and `with_problem` alongside the
+  post-cap `kept`, and `gtm.run enrich` prints all five, so "returned 3 of 20" and "returned
+  12, cut to 3" are finally distinguishable. The measurement itself still needs a live run:
+  capture one pool and re-run the signals stage **against that same pool** — the B1 diagnosis
+  compared two different ones and is plausible, not confirmed.

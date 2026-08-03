@@ -656,6 +656,68 @@ def test_cmd_enrich_no_checkpoint_when_no_priority_or_keep(monkeypatch, tmp_path
     cmd_enrich("teal-demo-5")  # must NOT raise — nothing needs a signal prompt
 
 
+# --- 2026-08-03, follow-up 4. A company whose enrich() raised keeps its tier (correct —
+# a transient network error must not demote it) but has empty news, community signals and
+# LinkedIn. It was still handed a signal prompt, so Claude was asked to find buying signals
+# in nothing, and the honest answer to that prompt is indistinguishable from "this company
+# has no signals". Skip the prompt and say which companies were skipped and why. ---
+
+
+def _fail_enrich_for(monkeypatch, *companies):
+    import gtm.contacts as contacts_mod
+    import gtm.enrich as enrich_mod
+
+    def fake_enrich(p, **kw):
+        if p.company in companies:
+            raise RuntimeError("serper timed out")
+        return p
+
+    monkeypatch.setattr(enrich_mod, "enrich", fake_enrich)
+    monkeypatch.setattr(contacts_mod, "find_contacts", lambda company, **kw: [])
+
+
+def test_cmd_enrich_skips_the_signal_prompt_for_a_company_whose_enrich_failed(
+        monkeypatch, tmp_path, capsys):
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    monkeypatch.setattr(run_mod, "ERROR_LOG", tmp_path / "errors.log")
+    _fail_enrich_for(monkeypatch, "Broken Co")
+    prospects = [
+        Prospect(company="Broken Co", website="https://broken.co", fit_score=87, status="priority"),
+        Prospect(company="Teal Drones", website="https://tealdrones.com", fit_score=87, status="priority"),
+    ]
+    save_state(prospects, tmp_path)
+
+    with pytest.raises(CheckpointPending):
+        cmd_enrich("teal-demo-failed-enrich")
+
+    out = capsys.readouterr().out
+    assert "----- Teal Drones -----" in out
+    assert "----- Broken Co -----" not in out
+    assert "no signal prompt" in out
+    assert "Broken Co" in out
+    # The tier survives the failure — this is a skipped prompt, not a demotion.
+    assert load_state(tmp_path)[0].status == "priority"
+
+
+def test_cmd_enrich_raises_no_checkpoint_when_every_passer_failed_enrich(
+        monkeypatch, tmp_path, capsys):
+    # Nothing to answer, so there is no checkpoint to stop at. Without the skip this
+    # raised CheckpointPending and asked for a signals.json of empty prompts.
+    import gtm.run as run_mod
+
+    monkeypatch.setattr(run_mod, "run_dir", lambda run: tmp_path)
+    monkeypatch.setattr(run_mod, "ERROR_LOG", tmp_path / "errors.log")
+    _fail_enrich_for(monkeypatch, "Broken Co")
+    save_state([Prospect(company="Broken Co", website="https://broken.co",
+                         fit_score=87, status="priority")], tmp_path)
+
+    cmd_enrich("teal-demo-all-failed")  # must NOT raise
+
+    assert "no signal prompt" in capsys.readouterr().out
+
+
 def test_cmd_segment_assigns_and_raises_checkpoint_for_draft_prompts(monkeypatch, tmp_path):
     import gtm.run as run_mod
 

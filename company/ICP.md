@@ -60,14 +60,25 @@ inspection · Survey / mapping / GIS · Energy & utilities · Search & rescue.
 the rubric below, because each of them is sometimes wrong:
 - *Non-US company.* Geography is irrelevant to whether a case fits and sells.
 - *Indoor-only / racing.* Racing teams travel constantly; some do need transport.
-- *Software-only, reseller, distributor.* They have no airframe of their own, so they land
-  in the 0-7 "no airframe identified" band of **Airframe physically fits a case line** and
-  pick up the no-airframe cap (`gtm/fit.py::evidence_cap`, 48) — which puts priority tier
-  out of reach and lets the total fall below the keep line on its own. Score it there, on
-  the airframe evidence, not by inferring a budget; Budget & procurement is Python's and
-  has no reseller signal. But a "distributor" that also manufactures under its own brand
-  names an airframe, so it scores that airframe on the ordinary bands and should not be
-  thrown away by a keyword.
+- *Software-only.* No airframe of its own, so it lands in the 0-7 "no airframe identified"
+  band of **Airframe physically fits a case line** and picks up the evidence cap
+  (`gtm/fit.py::evidence_cap`, 48) — which puts priority tier out of reach and lets the
+  total fall below the keep line on its own. Score it there, on the airframe evidence, not
+  by inferring a budget; Budget & procurement is Python's and has no reseller signal.
+- *Reseller, distributor.* Same cap, different trigger — and **not** the one above, which
+  is why this used to be filed with software-only and did not work (fixed 2026-08-03). A
+  pure reseller's site names every airframe it stocks, so `drone_models` is full, the 0-7
+  band never applies and the no-airframe cap never fired. The airframe genuinely does fit
+  our foam; what the reseller is not is the **buyer**, because the OEM commissions the
+  case, not the shop that resells it. So extraction answers a signal of its own —
+  `own_brand` (`gtm/extract.py`) — and `evidence_cap` reads it: `own_brand: false` caps at
+  48 however many airframes are listed. **Claude does not score this** — like the size
+  bounds, it is applied deterministically in Python before and after you.
+  Two things `own_brand: false` deliberately does not cover: a distributor that also
+  manufactures under its own brand is `true` (it names an airframe of its own, and must
+  not be thrown away by a keyword), and silence is `null`, never `false` — a site that
+  simply doesn't say is not evidence of reselling, and it is scored on its airframe like
+  anyone else.
 
 ### Target titles for outreach
 Who we search for and rank (`gtm/contacts.py::_RANK_KEYWORDS`) — ops/product/founders buy
@@ -179,6 +190,18 @@ Scored by `gtm/budget.py::score_budget`, no LLM call, no prose judgment:
 
 Geography is not a component. A national MoD framework, a NATO stock number and a US
 Blue UAS listing all satisfy "procurement evidence" identically.
+
+Two vetoes, applied per news item (2026-08-03) — each kills a headline that matches the
+words above but is not evidence about **this company's** money:
+- A **market-size or forecast** headline is not a capital event. "Drone market to hit $12
+  billion by 2030" is the industry's money, not the prospect's. Keyed on the subject noun
+  and the analyst framing, never on "billion" alone — a real $1.5B Series G keeps its points.
+- An **industry award** is not procurement. "Wins an Edison Award", "award-winning",
+  "finalist for the Innovation Award" — a trophy is not a contract. This vetoes only the
+  bare word `award`; a headline naming a contract, task order, framework or certification
+  keeps its 8 points even if it mentions a trophy in the same breath. Known cost: a
+  procurement-flavoured "Innovation Award" (AFWERX and similar) loses the points here, and
+  is caught instead by the "contract"/"SBIR" wording those items almost always carry.
 
 - **Tier 1 (70–100)** → `status="priority"` — push to sheet, full personalized outreach (drafted).
 - **Tier 2 (40–69)** → `status="keep"` — push to sheet, lower priority, still gets a personalized draft.

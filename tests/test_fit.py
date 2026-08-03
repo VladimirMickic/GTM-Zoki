@@ -280,3 +280,55 @@ def test_prompt_geography_paragraph_does_not_name_a_deleted_criterion():
     lowered = prompt.lower()
     assert "geography" in lowered
     assert "not a scoring factor" in lowered
+
+
+# --- 2026-08-03, follow-up 5. ICP.md claimed a reseller "lands in the 0-7 no-airframe
+# band and picks up the no-airframe cap". False for a PURE reseller: its site names every
+# airframe it resells, so drone_models is full and evidence_cap never fired. The airframe
+# fits our foam either way — what it is not is a buyer, because the OEM commissions the
+# case, not the shop that resells it. That needs a signal of its own, so extraction now
+# answers `own_brand` and the cap reads it. ---
+
+
+def test_a_pure_reseller_is_capped_even_though_it_names_airframes():
+    ex = DroneExtraction(
+        company_description="Authorized distributor of DJI and Autel drones for public safety.",
+        drone_models=["Matrice 350 RTK", "EVO II Dual"],
+        drone_dimensions=["17.3 x 9.8 x 16.9 in folded"],
+        own_brand=False,
+    )
+    assert evidence_cap(ex) == 48
+
+
+def test_a_manufacturer_that_also_distributes_is_not_capped():
+    # The ICP's own carve-out: a "distributor" that manufactures under its own brand
+    # names an airframe of its own and must not be thrown away by a keyword.
+    ex = DroneExtraction(
+        company_description="We build the Falcon 3 and also distribute DJI payloads.",
+        drone_models=["Falcon 3"],
+        own_brand=True,
+    )
+    assert evidence_cap(ex) is None
+
+
+def test_an_unstated_own_brand_does_not_cap_on_its_own():
+    # null means the text did not say. Silence is not evidence of reselling — the cap
+    # falls back to the airframe test alone.
+    ex = DroneExtraction(drone_models=["Ghost-X"], own_brand=None)
+    assert evidence_cap(ex) is None
+
+
+def test_reseller_cap_reason_names_the_reseller_evidence_not_a_missing_airframe():
+    p = Prospect(company="DroneShop", website="https://droneshop.com/")
+    fit = FitResult(fit_score=71, fit_reason="...", best_case_line="AV-Field")
+    apply_fit(p, fit, cap=48, cap_reason="resells third-party airframes; no own brand")
+    assert p.fit_score == 48
+    assert p.status == "keep"
+    assert "resells third-party airframes" in p.fit_reason
+    assert "no airframe identified" not in p.fit_reason
+
+
+def test_extraction_prompt_asks_for_own_brand():
+    from gtm.extract import SYSTEM_PROMPT
+
+    assert "own_brand" in SYSTEM_PROMPT

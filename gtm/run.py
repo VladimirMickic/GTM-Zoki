@@ -45,7 +45,14 @@ from gtm.draft import (
     qa_check,
 )
 from gtm.extract import DroneExtraction, extract
-from gtm.fit import FitResult, apply_fit, build_fit_prompt, check_disqualifiers, evidence_cap
+from gtm.fit import (
+    FitResult,
+    apply_fit,
+    build_fit_prompt,
+    cap_reason,
+    check_disqualifiers,
+    evidence_cap,
+)
 from gtm.schema import DraftSet, Prospect
 from gtm.scrape import scrape, scrape_deep
 from gtm.segment import assign_segment
@@ -251,6 +258,7 @@ def process_company(
     p.case_evidence = ex.case_evidence
     p.us_made_ndaa = ex.us_made_ndaa
     p.compliance_evidence = ex.compliance_evidence
+    p.own_brand = ex.own_brand
     p.hq_city = ex.hq_city
     p.hq_country = ex.hq_country
     if not p.drone_dimensions or not p.case_evidence:
@@ -320,12 +328,10 @@ def apply_budget_scores(prospects: list[Prospect], skip: set[str] | None = None)
 def merge_fit(prospects: list[Prospect], fits: dict[str, FitResult]) -> None:
     for p in prospects:
         if p.company in fits and p.status not in ("drop", "error"):
-            apply_fit(
-                p,
-                fits[p.company],
-                cap=evidence_cap(DroneExtraction(drone_models=p.drone_models,
-                                                  drone_dimensions=p.drone_dimensions)),
-            )
+            ex = DroneExtraction(drone_models=p.drone_models,
+                                 drone_dimensions=p.drone_dimensions,
+                                 own_brand=p.own_brand)
+            apply_fit(p, fits[p.company], cap=evidence_cap(ex), cap_reason=cap_reason(ex))
 
 
 def merge_signals(prospects: list[Prospect], signals: dict[str, dict]) -> None:
@@ -496,7 +502,9 @@ def cmd_enrich(run: str) -> None:
                     t = community_trace
                     print(
                         f"  community candidates {p.company}: "
-                        f"pooled={t['pooled']} third_party={t['third_party']} kept={t['kept']}"
+                        f"pooled={t['pooled']} third_party={t['third_party']} "
+                        f"returned={t['returned']} with_problem={t['with_problem']} "
+                        f"kept={t['kept']}"
                     )
                 contacts = find_contacts(p.company)
                 if contacts:
@@ -523,9 +531,17 @@ def cmd_enrich(run: str) -> None:
                   f"{', '.join(sorted(failed))}")
         save_state(prospects, run_dir(run))
         print("\n=== SIGNAL PROMPTS — Claude: answer each, save {company: {...}} to signals.json ===")
+        # A company in `failed` has empty news, community signals and LinkedIn, so its
+        # signal prompt asks Claude to find buying signals in nothing — and an honest
+        # empty answer to that is indistinguishable from "this company has no signals",
+        # which is what would then be written to state (2026-08-03). Skip the prompt and
+        # name the company; a rerun of `enrich` retries it and prompts properly.
+        if failed:
+            print(f"\nno signal prompt for {', '.join(sorted(failed))} — enrich failed, so "
+                  f"there is no evidence to judge. Rerun `enrich` to retry.")
         needs_signals = False
         for p in prospects:
-            if p.status in ("priority", "keep"):
+            if p.status in ("priority", "keep") and p.company not in failed:
                 needs_signals = True
                 print(f"\n----- {p.company} -----")
                 print(build_signal_prompt(p))
