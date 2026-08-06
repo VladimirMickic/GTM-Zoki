@@ -272,6 +272,29 @@ _CATEGORY_KEYWORDS = (
     ("survey and mapping drone", ("survey", "mapping", "gis")),
     ("industrial inspection drone", ("industrial", "inspection")),
     ("utility inspection drone", ("energy", "utility", "utilities", "powerline")),
+    # Defense LAST, deliberately (added 2026-08-03). Every bucket above names a
+    # narrower job, and defense makers routinely also say "public safety" or
+    # "inspection" — leading with defense would swallow them, the exact failure the
+    # old us_made_ndaa short-circuit caused. Placed here it only catches companies
+    # that would otherwise hit the hobby fallback, which is the observed bug: run
+    # us-drone-29 (Hoverfly, "military and security applications") matched no bucket,
+    # fell to "drone case foam", and pulled 3 r/dji-r/fpv hobbyist quotes that Claude
+    # then correctly dropped — community_signals shipped empty.
+    #
+    # Phrase measured 2026-08-03, 10 raw hits each, same method as the fallback:
+    #   "tactical drone case"  7/10 — r/tacticalgear carry threads ("Gun + Drone Hard
+    #                          Case", "Where yall putting your drones?"), r/dji, r/fpv.
+    #                          3 junk: r/Tau40K, r/AliensDarkDescent, r/menace.
+    #   "military drone case"  2/10 — defence-policy threads (r/LessCredibleDefence)
+    #                          and war news on X. Same collision "defense drone" hit.
+    #   "tethered drone"      10/10 drone but 0/10 pain — product-capability questions,
+    #                          and too narrow to be a segment bucket anyway.
+    # 7/10 beats the control's 10/10 because the control's 10 are all hobbyists: the
+    # metric is whether the poster resembles the prospect's customer, not whether the
+    # thread is about cases. r/tacticalgear is the operator community; r/dji is not.
+    # "security" is deliberately NOT a keyword — it matches camera and guard-service
+    # copy far outside defense.
+    ("tactical drone case", ("military", "defense", "defence", "warfighter", "tactical", "isr")),
 )
 # Fallback when the description names no use case.
 #
@@ -348,10 +371,25 @@ def _infer_category(p: Prospect) -> str:
     return _DEFAULT_CATEGORY
 
 
+def _clean_model(model: str) -> str:
+    """Strip punctuation that breaks a quoted search phrase.
+
+    2026-08-03: run us-drone-29 extracted Hoverfly's airframe as "Spectre (2.0)"
+    and searched it verbatim — `"Spectre (2.0)" drone (case OR ...)`. Parentheses
+    inside a quoted phrase make the whole query match nothing, so the airframe
+    query returned 0 and every pooled result came from the category query alone,
+    silently, at the cost of a Serper credit per company. Extraction writes model
+    names however the site prints them, so this has to be cleaned here rather than
+    assumed away upstream. Returns "" when nothing usable survives, and the caller
+    then skips the query instead of searching an empty phrase."""
+    cleaned = re.sub(r"[^\w.\- ]+", " ", model)
+    return re.sub(r"\s+", " ", cleaned).strip()
+
+
 def _pain_queries(p: Prospect) -> list[str]:
     queries = []
-    if p.drone_models:
-        model = p.drone_models[0]  # flagship/first-listed only — bounds Serper cost
+    model = _clean_model(p.drone_models[0]) if p.drone_models else ""
+    if model:  # flagship/first-listed only — bounds Serper cost
         # "drone" is load-bearing, not decoration: cold run 2026-07-27 searched the
         # bare token "X55" (Arcsky's airframe) and got 10/10 non-drone hits — a
         # PowKiddy handheld console, a 7.5x55 rifle cartridge, a TP-Link router.

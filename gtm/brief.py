@@ -28,6 +28,15 @@ class Brief(BaseModel):
     # run to date has been US; set `region: uk` / `region: ""` (worldwide) to change it.
     # Shapes the discover query only — `urls:` runs and the fit rubric never see it.
     region: str = "us"
+    # 2026-08-03: `known_domains()` (gtm/run.py) bans every domain any earlier run
+    # marked priority/keep, permanently and repo-wide. After ~30 demo runs that starves
+    # discovery, and the workaround being reached for was moving old run directories out
+    # of data/runs — which does un-ban them, but also erases the demo record and re-arms
+    # duplicate rows against the live Sheet and HubSpot with no warning. This flag is the
+    # narrow version: one run may re-admit already-pushed domains, every run directory
+    # stays exactly where it is, and each re-admission prints which earlier run pushed it.
+    # Default False, so no existing brief changes behaviour.
+    allow_known: bool = False
 
     @model_validator(mode="after")
     def _needs_input(self) -> "Brief":

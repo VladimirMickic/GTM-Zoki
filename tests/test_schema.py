@@ -109,14 +109,18 @@ def test_buying_signal_trim_keeps_source_and_recency_marker():
     # ended with ")". Every buying signal ends with a "[stale]"/"[undated]" recency
     # marker instead, so the guard never fired and plain _trim ate the source, the
     # date AND the marker — the three tokens a reader actually decides on.
-    from gtm.schema import _ENTRY_MAX_CHARS, _trim_keep_source
+    from gtm.schema import _trim_keep_source
 
     s = (
         "Awarded a $2.5M contract by the US Army's RCCTO (Rapid Capabilities and Critical "
         "Technologies Office) to deliver prototype Tactical Dronut drones — real defense "
         "procurement, not a proposal (dronelife, 2022-12-14) [stale]"
     )
-    out = _trim_keep_source(s, _ENTRY_MAX_CHARS)
+    # Explicit budget, not _ENTRY_MAX_CHARS: this test is about the source/marker guard,
+    # and it has to keep exercising the trim path when that cap moves. It did move —
+    # 180 -> 400 on 2026-08-03 — which put this 251-char string under the cap and left
+    # the test asserting an ellipsis on a string nothing had trimmed.
+    out = _trim_keep_source(s, 180)
     assert out.endswith("(dronelife, 2022-12-14) [stale]")
     assert "…" in out  # still trimmed, just not through the source
     assert out.startswith("Awarded a $2.5M contract")
@@ -264,17 +268,21 @@ def test_long_sheet_cells_are_trimmed():
     # 2026-07-21 (user): keep the Companies tab scannable — cap long cells.
     # 2026-07-31: cap raised 3 -> 5 (find_news already caps at MAX_NEWS = 5), so
     # this needs more than 5 source entries to still exercise the item cap itself.
+    # 2026-08-03: per-entry cap raised 180 -> 400, so the entries here had to grow
+    # past 400 too — at 280 chars they stopped being trimmed at all and this test
+    # was asserting a cap that no longer bit.
     p = Prospect(
         company="X", website="https://x.com",
         fit_reason="word " * 200,  # ~1000 chars
-        buying_signals=[f"signal {i} " + "detail " * 40 for i in range(7)],
+        buying_signals=[f"signal {i} " + "detail " * 80 for i in range(7)],  # ~560 chars
     )
     row = p.to_sheet_row()
     assert len(row[SHEET_COLUMNS.index("fit_reason")]) <= 401  # 400 + ellipsis
     assert row[SHEET_COLUMNS.index("fit_reason")].endswith("…")
     signals_cell = row[SHEET_COLUMNS.index("buying_signals")]
     assert signals_cell.count("\n") == 4  # only top-5 of 7 entries kept
-    assert all(len(line) <= 181 for line in signals_cell.split("\n"))  # each entry trimmed
+    assert all(len(line) <= 401 for line in signals_cell.split("\n"))  # each entry trimmed
+    assert all(line.endswith("…") for line in signals_cell.split("\n"))
     # full detail is untouched on the model itself (only the sheet render is capped)
     assert len(p.fit_reason) > 400
 

@@ -107,16 +107,22 @@ def _domain(url: str) -> str:
     return urlparse(url).netloc.removeprefix("www.")
 
 
-def known_domains(runs_root: str | Path = DATA / "runs", exclude_run: str = "") -> set[str]:
-    """Domains already pushed to the sheet by earlier runs (status priority/keep)."""
-    known = set()
-    for state in Path(runs_root).glob("*/prospects.json"):
+def known_domain_runs(
+    runs_root: str | Path = DATA / "runs", exclude_run: str = ""
+) -> dict[str, str]:
+    """domain → name of the earlier run that pushed it (status priority/keep).
+
+    Split out of known_domains 2026-08-03 so the skip/re-admit lines can name the
+    run responsible. "[dup] Wingtra — already pushed by an earlier run" gave the
+    reader nothing to go check; naming us-drone-19 lets them look."""
+    seen: dict[str, str] = {}
+    for state in sorted(Path(runs_root).glob("*/prospects.json")):
         if state.parent.name == exclude_run:
             continue
         for p in load_state(state.parent):
             if p.status in ("priority", "keep"):
-                known.add(_domain(p.website))
-    return known
+                seen.setdefault(_domain(p.website), state.parent.name)
+    return seen
 
 
 def filter_known(
@@ -431,9 +437,23 @@ def cmd_start(brief_path: str) -> None:
             ):
                 prospects.append(Prospect(company=c.company, website=c.website, source=f"serper:{brief.query}"))
         prospects = prospects[: brief.max_companies]
-        prospects, skipped = filter_known(prospects, known_domains(exclude_run=brief.run))
-        for p in skipped:
-            print(f"[dup] {p.company} — already pushed by an earlier run, skipping")
+        known = known_domain_runs(exclude_run=brief.run)
+        if brief.allow_known:
+            # Re-admitted, not silently un-banned: these companies already have rows in
+            # the live Sheet and records in HubSpot, so the operator has to be able to
+            # see which ones this run will push a second time. See Brief.allow_known.
+            readmitted = [p for p in prospects if _domain(p.website) in known]
+            for p in readmitted:
+                print(
+                    f"[re-admit] {p.company} — already pushed by {known[_domain(p.website)]}; "
+                    f"allow_known is set in the brief, so this run will push it again"
+                )
+            if not readmitted:
+                print("[re-admit] allow_known is set, but no candidate was pushed by an earlier run")
+        else:
+            prospects, skipped = filter_known(prospects, set(known))
+            for p in skipped:
+                print(f"[dup] {p.company} — already pushed by {known[_domain(p.website)]}, skipping")
 
         ex_by_company: dict[str, DroneExtraction] = {}
         for p in prospects:

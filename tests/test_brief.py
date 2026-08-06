@@ -89,6 +89,15 @@ def test_brief_can_opt_into_us_only(tmp_path):
     assert load_brief(path).require_us is True
 
 
+def test_brief_defaults_to_deduping_against_earlier_runs(tmp_path):
+    """allow_known is opt-in: no existing brief changes behaviour, and a run only
+    re-pushes an already-pushed company when someone wrote it down."""
+    assert Brief(run="r", urls=["https://x.com"]).allow_known is False
+    path = tmp_path / "brief.md"
+    path.write_text("---\nrun: redo\nquery: drone makers\nallow_known: true\n---\nbody\n")
+    assert load_brief(path).allow_known is True
+
+
 def test_brief_defaults_to_the_us_region(tmp_path):
     """A brief with no region is no longer a reason to stop and ask (2026-07-30)."""
     b = tmp_path / "brief.md"

@@ -1240,3 +1240,67 @@ def test_a_shared_dollar_figure_alone_does_not_dedupe():
     out = find_news("Skydio", website="https://skydio.com/",
                     search=lambda q, num=10: results)
     assert len(out) == 2, f"two distinct events collapsed into one: {out}"
+
+
+# ---- 2026-08-03: the two defects behind us-drone-29's empty community_signals ----
+
+
+def test_model_punctuation_is_stripped_before_it_is_quoted():
+    """Live run us-drone-29 extracted Hoverfly's airframe as "Spectre (2.0)" and
+    searched `"Spectre (2.0)" drone ...` verbatim. Parentheses inside a quoted phrase
+    match nothing, so that query returned 0 raw hits and burned a Serper credit in
+    silence; every pooled result came from the category query alone."""
+    from gtm.enrich import _clean_model, _pain_queries
+
+    assert _clean_model("Spectre (2.0)") == "Spectre 2.0"
+    assert _clean_model("eBee X / VISION") == "eBee X VISION"
+    assert _clean_model("PRISM Sky") == "PRISM Sky"  # already clean, unchanged
+
+    p = Prospect(company="Hoverfly", website="https://h.com", drone_models=["Spectre (2.0)"])
+    assert '"Spectre 2.0"' in _pain_queries(p)[0]
+    assert "(2.0)" not in _pain_queries(p)[0]
+
+
+def test_a_model_name_that_is_all_punctuation_costs_no_query():
+    """Nothing usable survives cleaning → skip the query rather than search `""`."""
+    from gtm.enrich import _pain_queries
+
+    p = Prospect(company="X", website="https://x.com", drone_models=["(—)"],
+                 description="drones for surveying")
+    queries = _pain_queries(p)
+    assert len(queries) == 1
+    assert queries[0].startswith("survey and mapping drone")
+
+
+def test_infer_category_buckets_defense_instead_of_the_hobby_fallback():
+    """us-drone-29 (Hoverfly, "military and security applications") matched no bucket
+    and fell to "drone case foam", which returned r/dji and r/fpv hobbyist quotes that
+    Claude then correctly dropped — community_signals shipped empty. Phrase measured
+    2026-08-03 on 10 raw hits: "tactical drone case" 7/10 (r/tacticalgear carry
+    threads), "military drone case" 2/10 (defence-policy threads and war news)."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="Hoverfly Technologies",
+        website="https://hoverflytech.com/",
+        description=(
+            "designs and manufactures advanced tethered drone systems for military and "
+            "security applications, providing surveillance and real-time intelligence."
+        ),
+    )
+    assert _infer_category(p) == "tactical drone case"
+
+
+def test_defense_bucket_never_outranks_a_narrower_use_case():
+    """Placed last on purpose: defense makers routinely also say "public safety" or
+    "inspection", and leading with defense would swallow those buckets — the exact
+    failure the old us_made_ndaa short-circuit caused."""
+    from gtm.enrich import _infer_category
+
+    kw = dict(company="X", website="https://x.com", us_made_ndaa=True)
+    assert _infer_category(Prospect(
+        **kw, description="military-grade drones for crop spraying on large farms",
+    )) == "agricultural spray drone"
+    assert _infer_category(Prospect(
+        **kw, description="defense and public safety UAS for first responder teams",
+    )) == "public safety drone"

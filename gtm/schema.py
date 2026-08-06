@@ -46,14 +46,28 @@ _STATUS_TIER = {"priority": "1", "keep": "2", "drop": "3"}
 _LONG_LIST_COLS = ("key_news", "buying_signals", "community_signals")
 _LIST_MAX_ITEMS = 5  # was 3 — find_news already caps at MAX_NEWS = 5, and dropping
                      # two of five hid whole events rather than trimming prose
-_ENTRY_MAX_CHARS = 180  # per entry, prose only (URLs/markers are budgeted separately)
+_ENTRY_MAX_CHARS = 400  # per entry, prose only (URLs/markers are budgeted separately)
+# 180 → 400 on 2026-08-03 (user, reviewing the live Sheet: "the text in columns is
+# incomplete and vague"). This reverses part of the 2026-07-21 "keep cells scannable"
+# ask above, and deliberately: measured against run us-drone-29, real entries run
+# 154-398 chars, so 180 cut the decisive clause off nearly every one. Hoverfly's lead
+# buying signal stopped at "expansion into a new…" — the reader got the setup and not
+# the point, which is worse than either a long cell or a short one. 400 clears the
+# observed maximum, so an ellipsis now means genuinely runaway prose, not routine
+# prose. Full untrimmed detail still lives in prospects.json.
 # 2026-07-29 (user, reviewing the live Sheet: "fit_reason feels weak and vague"):
 # fit_reason is a 5-line rubric dump and the old whole-string 400-char cap cut from
 # the END — so Displacement, the LAST line and the one the outreach angle is built
 # on, never reached the Sheet at all. Cleo's live cell stopped mid-word at
 # "commercial product line ex…", showing the two weakest dimensions and hiding the
 # two decisive ones. Budget per line instead: every dimension keeps its score.
-_FIT_REASON_LINE_MAX_CHARS = 150
+# 150 → 400 on 2026-08-03, same user complaint and same measurement as
+# _ENTRY_MAX_CHARS: rubric lines in us-drone-29 run 170-294 chars, so 150 cut every
+# one of the four. The 2026-07-29 fix above solved *which* dimensions reach the Sheet;
+# it left each surviving line stopping mid-clause ("...so cannot…"), which reads as a
+# vague score with no stated reason. Per-line budget stays — the point of that fix was
+# that no dimension may be dropped whole — only the number moves.
+_FIT_REASON_LINE_MAX_CHARS = 400
 
 # A trailing recency marker written by gtm/enrich.py's signal-dating logic:
 # "[stale]", "[undated]". Short and bracketed, so it can't collide with prose.

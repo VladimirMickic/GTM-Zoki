@@ -214,9 +214,12 @@ def test_missing_trigger_phrase_ignores_drops_and_companies_with_no_signals():
     assert missing_trigger_phrase(ps) == []
 
 
-def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
-    # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row
-    from gtm.run import known_domains, save_state
+def test_known_domain_runs_scans_prior_runs_excluding_current(tmp_path):
+    # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row.
+    # Names the run that pushed each domain (2026-08-03) so the skip/re-admit lines
+    # point at something readable — "already pushed by an earlier run" pointed at ~50
+    # directories and told the operator nothing.
+    from gtm.run import known_domain_runs, save_state
 
     save_state(
         [Prospect(company="Teal Drones", website="https://tealdrones.com/", status="priority")],
@@ -224,17 +227,24 @@ def test_known_domains_scans_prior_runs_excluding_current(tmp_path):
     )
     save_state(
         [
-            Prospect(company="BRINC", website="https://brincdrones.com/", status="priority"),
+            Prospect(company="BRINC", website="https://brincdrones.com/", status="keep"),
             Prospect(company="Advexure", website="https://advexure.com/x", status="drop"),
             Prospect(company="Red Cat", website="https://redcat.red/", status="error"),
         ],
         tmp_path / "discover-3",
     )
-    known = known_domains(runs_root=tmp_path, exclude_run="discover-3")
     # drops and errors were never pushed to the sheet — only pushed statuses count
-    assert known == {"tealdrones.com"}
+    assert known_domain_runs(runs_root=tmp_path) == {
+        "tealdrones.com": "teal-demo",
+        "brincdrones.com": "discover-3",
+    }
+    assert known_domain_runs(runs_root=tmp_path, exclude_run="discover-3") == {
+        "tealdrones.com": "teal-demo"
+    }
     # excluding the current run lets a brief be safely re-run
-    assert known_domains(runs_root=tmp_path, exclude_run="teal-demo") == {"brincdrones.com"}
+    assert known_domain_runs(runs_root=tmp_path, exclude_run="teal-demo") == {
+        "brincdrones.com": "discover-3"
+    }
 
 
 def test_filter_known_splits_new_from_already_pushed():
@@ -418,7 +428,7 @@ def test_cmd_start_freezes_brief_immune_to_later_edits(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_mod, "DATA", tmp_path)
     monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
-    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+    monkeypatch.setattr(run_mod, "known_domain_runs", lambda **kw: {})
 
     def fake_process_company(p, **kw):
         p.description = "sUAS maker"
@@ -449,7 +459,7 @@ def test_cmd_start_raises_checkpoint_pending_when_fit_needed(tmp_path, monkeypat
 
     monkeypatch.setattr(run_mod, "DATA", tmp_path)
     monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
-    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+    monkeypatch.setattr(run_mod, "known_domain_runs", lambda **kw: {})
 
     def fake_process_company(p, **kw):
         p.description = "sUAS maker"
@@ -478,7 +488,7 @@ def test_cmd_start_no_checkpoint_when_nothing_needs_fit(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_mod, "DATA", tmp_path)
     monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
-    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+    monkeypatch.setattr(run_mod, "known_domain_runs", lambda **kw: {})
 
     def fake_process_company_errors(p, **kw):
         p.status = "error"
@@ -917,7 +927,7 @@ def test_cmd_start_then_cmd_fit_resumes_cleanly(tmp_path, monkeypatch):
 
     monkeypatch.setattr(run_mod, "DATA", tmp_path)
     monkeypatch.setattr(run_mod, "COSTS", tmp_path / "costs.jsonl")
-    monkeypatch.setattr(run_mod, "known_domains", lambda **kw: set())
+    monkeypatch.setattr(run_mod, "known_domain_runs", lambda **kw: {})
 
     def fake_process_company(p, **kw):
         p.description = "sUAS maker"

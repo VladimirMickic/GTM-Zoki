@@ -15,13 +15,23 @@ Fires once at session start only — no real wake-word/background listener in Cl
 **Assume, state, proceed — don't interrogate** (2026-07-30, user: "I do not want to answer
 that many questions"). This replaces the old "challenge vague asks / ask before writing the
 brief" rule, which cost two round-trips on every run. A missing detail now takes the default
-and gets stated in one line, e.g. "Assuming US, mixed segment — say otherwise and I rerun":
-- **region** — defaults to `us` (`Brief.region`), so a missing region is no longer a reason
-  to stop. It was one only because `gtm/discover.py` had nothing to fall back on.
-- **segment** — default is mixed; the fit rubric scores both anyway.
-Only two questions are still worth stopping for, because a wrong guess costs more than a
-rerun: **company count** when unspecified, and **final approval before any Sheet/HubSpot
-push**. Everything else: pick the default, say what you picked, keep going.
+and gets stated in one line, e.g. "Assuming US, mixed segment — say otherwise and I rerun" —
+**except at discovery kickoff**, where three fields are always asked up front, never defaulted
+silently (2026-08-03, user: asked for a 2-company discovery run and got one back with no
+questions asked; wanted region/segment/count confirmed first). This narrows, not repeals, the
+2026-07-30 rule — it applies only to the one prompt that kicks off a NEW discovery run
+(`gtm.run start` / "find me N companies…"); every other stage still assumes-and-states:
+- **region** — if not stated, ask with exactly these three choices: **US, EU, Global**
+  (`Brief.region`); no more silent `us` default at kickoff (2026-08-03, user: "if there is
+  no region you ask us, eu global" — locked to these three, not an open-ended prompt).
+- **industries/segment** — asked second, after region (military / commercial / agriculture /
+  mixed / etc.); no more silent "mixed" default at kickoff.
+- **company count** — ask if unspecified (unchanged from the 2026-07-30 rule — was already
+  one of the two things always worth stopping for).
+**Final approval before any Sheet/HubSpot push** stays the other always-ask, per 2026-07-30.
+Everything else mid-pipeline (fit/enrich/output judgment calls): still pick the default, say
+what you picked, keep going — don't re-litigate this into asking more than these three at
+kickoff plus the push approval.
 
 ## Shell rules (these cause most permission prompts, not the pipeline)
 Audit of a real session, 2026-07-30: 8 of 10 interruptions were permission prompts triggered
@@ -51,6 +61,10 @@ First prospect: **Teal Drones** (tealdrones.com).
 
 ## Pipeline (demo = stages 1–6 → Sheet; see docs/PLAN.md)
 1. **Input** — URLs, or Serper NL search → auto-filter to real makers (no approval step).
+   Domains any earlier run marked priority/keep are skipped (`known_domain_runs`, which
+   names the run that pushed each). Set `allow_known: true` in the brief to re-admit them
+   for one run — never move run directories out of `data/runs` to get the same effect: the
+   demo record dies with them and duplicate Sheet/HubSpot pushes re-arm silently.
 2. **Scrape** — crawl4ai → markdown; named in prompt; auto-fallback (Firecrawl→ScrapeGraphAI→Apify;
    social hosts go straight to Apify). Scrapling dropped — see `docs/tools/scrapers.md`.
 3. **Extract** — `gpt-4o-mini`: markdown → structured drone fields (one place, scraper-agnostic).
