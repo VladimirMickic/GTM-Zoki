@@ -109,3 +109,31 @@ def test_brief_region_is_overridable(tmp_path):
     b = tmp_path / "brief.md"
     b.write_text('---\nrun: r1\nquery: drone maker\nregion: ""\n---\nbody\n')
     assert load_brief(b).region == ""
+
+
+# 2026-08-10, Strix run gtm-helper_eea7 (CWE-23): `run` is the name of the directory every
+# stage writes into, so it is validated here too — the brief is where an unsafe value gets
+# in, and failing at load time beats failing at the first write.
+
+BRIEF_TRAVERSAL = """---
+run: ../../../tmp/pwn
+urls:
+  - https://tealdrones.com
+---
+"""
+
+
+def test_brief_rejects_a_traversal_run_name(tmp_path):
+    f = tmp_path / "brief.md"
+    f.write_text(BRIEF_TRAVERSAL)
+    with pytest.raises(ValueError, match="run name"):
+        load_brief(f)
+
+
+def test_brief_rejects_a_run_name_with_a_path_separator():
+    with pytest.raises(ValueError, match="run name"):
+        Brief(run="runs/other", urls=["https://tealdrones.com"])
+
+
+def test_brief_keeps_accepting_ordinary_run_names():
+    assert Brief(run="us-drone_20.v2", urls=["https://tealdrones.com"]).run == "us-drone_20.v2"

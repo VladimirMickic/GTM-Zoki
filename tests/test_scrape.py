@@ -4,7 +4,15 @@ import subprocess
 
 import pytest
 
-from gtm.scrape import ScrapeError, scrape, scrape_apify, scrape_firecrawl, scrape_scrapegraphai
+from gtm.scrape import (
+    ScrapeError,
+    scrape,
+    scrape_apify,
+    scrape_deep,
+    scrape_firecrawl,
+    scrape_scrapegraphai,
+    sitemap_urls,
+)
 
 
 def good(url):
@@ -697,3 +705,36 @@ def test_scrape_apify_raises_scrape_error_on_non_dict_dataset_items(monkeypatch)
 
     with pytest.raises(ScrapeError):
         scrape_apify("https://tealdrones.com")
+
+
+# 2026-08-10, Strix run gtm-helper_eea7 (CWE-918): scrape targets come from the brief and
+# from discovery, so the scrapers themselves refuse a non-public destination — the fetch
+# must not happen at all, not merely be discarded afterwards.
+
+
+def test_scrape_refuses_a_loopback_target_before_calling_any_scraper():
+    registry = {"crawl4ai": lambda u: pytest.fail("must not fetch a blocked target")}
+    with pytest.raises(ScrapeError, match="blocked target"):
+        scrape("http://127.0.0.1:8080/admin", registry=registry, lookup=lambda h: "127.0.0.1")
+
+
+def test_scrape_deep_refuses_a_private_target_before_fetching():
+    def fetch(url):
+        pytest.fail("must not fetch a blocked target")
+
+    with pytest.raises(ScrapeError, match="blocked target"):
+        scrape_deep("https://intranet.example/", fetch=fetch, lookup=lambda h: "10.0.0.5")
+
+
+def test_sitemap_urls_returns_nothing_for_a_blocked_target(monkeypatch):
+    def boom(*a, **kw):
+        pytest.fail("must not request a blocked target")
+
+    monkeypatch.setattr("gtm.scrape.requests.get", boom)
+    assert sitemap_urls("http://169.254.169.254/", lookup=lambda h: "169.254.169.254") == []
+
+
+def test_scrape_still_runs_for_a_public_target():
+    registry = {"crawl4ai": good}
+    md = scrape("https://tealdrones.com", registry=registry, lookup=lambda h: "93.184.216.34")
+    assert "Rugged UAS" in md

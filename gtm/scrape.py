@@ -16,6 +16,8 @@ from urllib.parse import urlparse
 
 import requests
 
+from gtm.net import BlockedTarget, assert_public_url, is_public_url
+
 log = logging.getLogger(__name__)
 
 MIN_MARKDOWN_CHARS = 200  # anything shorter is a block page / error page, not content
@@ -38,6 +40,20 @@ def _is_social_host(url: str) -> bool:
 
 class ScrapeError(Exception):
     pass
+
+
+def _guard(url: str, lookup=None) -> None:
+    """Refuse a target that is not a public http(s) destination, as a ScrapeError so the
+    caller's existing log-and-skip path handles it like any other unusable URL.
+
+    2026-08-10, Strix run gtm-helper_eea7 (CWE-918). run.py's `resolves` preflight covers
+    the pipeline's own prospects; this covers everything else that reaches a scraper —
+    `gtm.run smoke <url>`, a sitemap entry, a deep-scrape subpage.
+    """
+    try:
+        assert_public_url(url, lookup=lookup)
+    except BlockedTarget as e:
+        raise ScrapeError(str(e)) from e
 
 
 def _crawl4ai_markdown(result) -> str:
@@ -110,14 +126,18 @@ BOILERPLATE_PATH = re.compile(
 )
 
 
-def sitemap_urls(base_url: str, *, timeout: int = 10) -> list[str]:
+def sitemap_urls(base_url: str, *, timeout: int = 10, lookup=None) -> list[str]:
     """`/sitemap.xml` <loc> entries, or [] if the site has none (neros.tech doesn't).
 
     This is the free version of a Firecrawl `/map` call — one unauthenticated GET, no
-    credits. Never fatal: a missing sitemap just means we fall back to homepage links.
+    credits. Never fatal: a missing sitemap just means we fall back to homepage links —
+    and a blocked target is just another sitemap we don't get, not a run-ending error.
     """
     parsed = urlparse(base_url)
     url = f"{parsed.scheme or 'https'}://{parsed.netloc}/sitemap.xml"
+    if not is_public_url(url, lookup=lookup):
+        log.warning("skipping sitemap for blocked target %s", base_url)
+        return []
     try:
         response = requests.get(url, timeout=timeout, headers={"User-Agent": "Mozilla/5.0"})
     except requests.RequestException as e:
@@ -183,6 +203,7 @@ def scrape_deep(
     fetch=scrape_with_links,
     fallback=None,
     sitemap_fn=sitemap_urls,
+    lookup=None,
 ) -> str:
     """Homepage + up to 2 product pages, concatenated. Falls back to plain scrape().
 
@@ -193,6 +214,7 @@ def scrape_deep(
     homepage is scraped alone, no wasted crawls.
     """
     fallback = fallback if fallback is not None else scrape
+    _guard(url, lookup)
     try:
         md, hrefs = fetch(url)
     except ScrapeError:
@@ -200,7 +222,11 @@ def scrape_deep(
     links = pick_product_links(sitemap_fn(url), url, keyword_only=True) or pick_product_links(hrefs, url)
     parts = [md]
     for link in links:
+        # Same-host by construction (pick_product_links), but a subpage is still a URL
+        # from the page's own markup — cheap to re-check, and a redirect chain to an
+        # internal address is exactly the case the host filter would miss.
         try:
+            _guard(link, lookup)
             parts.append(fetch(link)[0])
         except ScrapeError as e:
             log.warning("deep scrape of %s failed: %s", link, e)
@@ -412,13 +438,16 @@ SCRAPERS = {
 }
 
 
-def scrape(url: str, preferred: str = "crawl4ai", registry: dict | None = None) -> str:
+def scrape(url: str, preferred: str = "crawl4ai", registry: dict | None = None, *, lookup=None) -> str:
     """Try `preferred` first, then the rest of FALLBACK_ORDER. Log & skip failures.
 
     Social hosts (LinkedIn, Twitter/X, Instagram, Facebook) always route to Apify
     first — the only scraper of the four that can render/authenticate those sites.
     This override applies regardless of `preferred` or a custom `registry`.
+
+    Refuses a non-public destination before the first scraper runs (see gtm/net.py).
     """
+    _guard(url, lookup)
     registry = registry if registry is not None else SCRAPERS
     if _is_social_host(url):
         preferred = "apify"

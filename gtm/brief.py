@@ -11,6 +11,25 @@ from pydantic import BaseModel, model_validator
 
 _FRONTMATTER = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.S)
 
+# `run` names a directory under data/runs that every stage writes into, so it is a
+# filename, not free text. 2026-08-10, Strix run gtm-helper_eea7 (CWE-23): nothing checked
+# it, so `run: ../../../tmp/pwn` in a brief made freeze_brief, save_state and the output
+# CSVs all write outside data/runs. Allowlist beats blocklist here — the set of names a
+# run legitimately wants (us-drone-20, teal-demo, hyl_v2.1) is small and boring.
+_SAFE_RUN_NAME = re.compile(r"\A[A-Za-z0-9][A-Za-z0-9._-]*\Z")
+
+
+def safe_run_name(run: str) -> str:
+    """The run name, or ValueError. Rejects separators, traversal, leading dots and
+    anything else that would not stay a single directory under data/runs."""
+    name = str(run)
+    if ".." in name or not _SAFE_RUN_NAME.match(name):
+        raise ValueError(
+            f"unsafe run name {run!r} — use letters, digits, '.', '-' or '_' only, "
+            "starting with a letter or digit"
+        )
+    return name
+
 
 class Brief(BaseModel):
     run: str
@@ -37,6 +56,13 @@ class Brief(BaseModel):
     # stays exactly where it is, and each re-admission prints which earlier run pushed it.
     # Default False, so no existing brief changes behaviour.
     allow_known: bool = False
+
+    @model_validator(mode="after")
+    def _safe_run(self) -> "Brief":
+        # Validated at load time as well as in run_dir(): the brief is where an unsafe
+        # value gets in, and failing here means no stage ever sees it.
+        safe_run_name(self.run)
+        return self
 
     @model_validator(mode="after")
     def _needs_input(self) -> "Brief":

@@ -1,5 +1,6 @@
 """S7b — orchestrator: state, per-company log&skip, fit/signal merges."""
 import json
+from pathlib import Path
 
 import pytest
 
@@ -1715,3 +1716,51 @@ def test_cmd_start_prints_lessons_file_when_present(tmp_path, monkeypatch, capsy
     except SystemExit:
         pass
     assert "watch for dead domains" in capsys.readouterr().out
+
+
+# 2026-08-10, Strix run gtm-helper_eea7 (CWE-23): the run name is operator input that
+# reached run_dir() unvalidated, so a brief with `run: ../../../tmp/pwn` made every
+# stage that writes state (freeze_brief, save_state, the CSVs) write outside data/runs.
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "../../etc/pwn",
+        "..",
+        "a/../../b",
+        "sub/dir",
+        "back\\slash",
+        "/absolute",
+        "",
+        ".hidden",
+        "trailing space ",
+    ],
+)
+def test_run_dir_rejects_unsafe_run_names(name):
+    with pytest.raises(ValueError, match="run name"):
+        run_dir(name)
+
+
+def test_run_dir_keeps_a_normal_run_name_under_data_runs():
+    assert run_dir("teal-demo") == Path("data") / "runs" / "teal-demo"
+
+
+def test_run_dir_allows_dots_and_underscores_inside_the_name():
+    assert run_dir("us-drone_20.v2").name == "us-drone_20.v2"
+
+
+# 2026-08-10, same run (CWE-918): the preflight only asked "does this name resolve",
+# so a URL resolving to loopback/RFC1918 was scraped and its body returned.
+
+
+def test_resolves_is_false_for_loopback():
+    assert resolves("http://localhost:8080/admin", lookup=lambda host: "127.0.0.1") is False
+
+
+def test_resolves_is_false_for_a_private_address():
+    assert resolves("https://intranet.example/", lookup=lambda host: "10.0.0.5") is False
+
+
+def test_resolves_is_false_for_the_cloud_metadata_address():
+    assert resolves("http://169.254.169.254/latest/meta-data/", lookup=lambda host: "169.254.169.254") is False

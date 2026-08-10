@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 import gtm.github_state as github_state
-from gtm.brief import freeze_brief, load_brief
+from gtm.brief import freeze_brief, load_brief, safe_run_name
 from gtm.control import CheckpointPending, ExitCode, writes_enabled
 from gtm.costlog import CostLog
 from gtm.discover import _domain, _name_matches_domain
@@ -53,6 +53,7 @@ from gtm.fit import (
     check_disqualifiers,
     evidence_cap,
 )
+from gtm.net import is_public_url
 from gtm.schema import DraftSet, Prospect
 from gtm.scrape import scrape, scrape_deep
 from gtm.segment import assign_segment
@@ -139,7 +140,19 @@ def company_from_url(url: str) -> str:
 
 
 def run_dir(run: str) -> Path:
-    return DATA / "runs" / run
+    """data/runs/<run>, for a run name that is really a single directory name.
+
+    2026-08-10, Strix run gtm-helper_eea7 (CWE-23): this is the chokepoint every stage
+    goes through to reach the filesystem, so the guard belongs here as well as in Brief —
+    `--resume`, `gtm.run fit <run> ...` and the rest take the run name straight from argv
+    and never touch a Brief at all. The containment check is belt-and-braces behind
+    safe_run_name: it also catches a data/runs symlink pointing somewhere else.
+    """
+    root = DATA / "runs"
+    rdir = root / safe_run_name(run)
+    if root.resolve() not in rdir.resolve().parents:
+        raise ValueError(f"unsafe run name {run!r} — resolves outside {root}")
+    return rdir
 
 
 def save_state(prospects: list[Prospect], rdir: str | Path) -> None:
@@ -202,20 +215,21 @@ def _track_stage(run: str, stage: str):
 
 
 def resolves(url: str, *, lookup=socket.gethostbyname) -> bool:
-    """DNS-only preflight: does this host exist at all? Free, no API credit, ~ms.
+    """DNS preflight: does this host exist, and is it a public destination? Free, ~ms.
 
     2026-07-30: run us-drone-20 spent scrapes on `pdw.aero` and `firestormlabs.io`,
     neither of which resolves — both were domains guessed from a company name. A
     guessed domain is cheap to propose and expensive to scrape, so check first.
+
+    2026-08-10, Strix run gtm-helper_eea7 (CWE-918): "exists" was the whole test, so a
+    target resolving to loopback/RFC1918/link-local passed the preflight and got scraped.
+    The address check now happens here, before the first crawl slot is spent.
     """
     host = _domain(url)
     if not host:
         return False
-    try:
-        lookup(host)
-    except OSError:
-        return False
-    return True
+    scheme = urlparse(url).scheme or "https"
+    return is_public_url(f"{scheme}://{host}", lookup=lookup)
 
 
 def process_company(

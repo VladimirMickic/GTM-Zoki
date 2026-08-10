@@ -1,6 +1,7 @@
 import gtm.emails as emails_mod
 import gtm.github_state as github_state_mod
 import gtm.hubspot as hubspot_mod
+import gtm.net as net_mod
 import gtm.run as run_mod
 import pytest
 
@@ -32,7 +33,9 @@ def _isolate_error_log(tmp_path, monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _no_real_dns(monkeypatch):
-    """process_company's DNS preflight would otherwise resolve example.com & co. for
-    real, making a fixture suite depend on the network. Tests that mean to exercise
-    the preflight pass their own `resolves_fn`/`lookup`."""
+    """process_company's DNS preflight and the scrapers' SSRF guard would otherwise
+    resolve example.com & co. for real, making a fixture suite depend on the network.
+    The stand-in answer is a public address, so the guard allows fixture URLs; tests that
+    mean to exercise either check pass their own `resolves_fn`/`lookup`."""
     monkeypatch.setitem(run_mod.process_company.__kwdefaults__, "resolves_fn", lambda url: True)
+    monkeypatch.setattr(net_mod, "LOOKUP", lambda host: "93.184.216.34")
