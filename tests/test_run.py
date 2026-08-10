@@ -214,6 +214,39 @@ def test_missing_trigger_phrase_ignores_drops_and_companies_with_no_signals():
     assert missing_trigger_phrase(ps) == []
 
 
+# 2026-08-05 (user, reviewing the live Sheet: "I do not see them in the sheet").
+# Every community_signals cell on the tab was empty and no stage had ever said so.
+# Empty is a legitimate outcome — Claude drops candidates that describe a setup that
+# works — but it silently costs the draft its whole pain block (gtm/draft.py::
+# has_researched_pain), so it has to be visible while it is still cheap to fix.
+
+
+def test_missing_community_signals_reports_passers_with_none():
+    from gtm.run import missing_community_signals
+
+    ps = [
+        Prospect(company="Hoverfly", website="https://h.com", status="priority",
+                 community_signals=[]),
+        Prospect(company="Anduril", website="https://a.com", status="keep",
+                 community_signals=['"the foam gave out" (reddit.com)']),
+    ]
+    assert missing_community_signals(ps) == ["Hoverfly"]
+
+
+def test_missing_community_signals_ignores_drops_and_errors():
+    from gtm.run import missing_community_signals
+
+    ps = [
+        # never drafted, never pushed as a prospect row worth pain research
+        Prospect(company="Dropped", website="https://d.com", status="drop",
+                 community_signals=[]),
+        # enrich raised for this one; its empty signals are already reported as an error
+        Prospect(company="Errored", website="https://e.com", status="error",
+                 community_signals=[]),
+    ]
+    assert missing_community_signals(ps) == []
+
+
 def test_known_domain_runs_scans_prior_runs_excluding_current(tmp_path):
     # discover-3 2026-07-18: Teal rediscovered -> would duplicate its sheet row.
     # Names the run that pushed each domain (2026-08-03) so the skip/re-admit lines

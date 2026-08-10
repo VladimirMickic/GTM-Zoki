@@ -362,12 +362,33 @@ def _infer_category(p: Prospect) -> str:
     lands on the fallback, check for a missing bucket before assuming the text
     was thin.
 
+    fit_reason joined the scan on 2026-08-05, for the same failure one field over:
+    run us-drone-20 shipped American Robotics and Firestorm Labs to the live Sheet
+    with an empty `description` (the scrape produced case_evidence and nothing else),
+    so neither matched a bucket, both queried the hobbyist fallback, and both landed
+    on the Sheet with an empty community_signals cell. Their segment was stated all
+    along in fit_reason — "tactical/defense use ... USAF contract", "enterprise
+    industrial buyer" — which the fit stage writes BEFORE enrich runs, so it is
+    readable here (unlike headcount/key_news/segment, which are not). It is a SECOND
+    pass, not extra text in the first one: buckets are ordered narrow-to-broad and
+    the first match wins, so folding rubric prose into the same blob would let a
+    passing phrase in fit_reason ("enterprise industrial buyer") outrank the
+    company's own copy ("military"). Scraped copy decides the bucket whenever it
+    names one at all; fit_reason only rescues the companies where it names none.
+
+    Keywords match at a word start, not anywhere: "gis" is a bucket keyword and
+    "logistics" contains it, which was harmless in marketing copy but not in
+    fit_reason's fielding-and-logistics prose. Prefix keywords ("agricultur",
+    "utilit") still work — only mid-word matches are excluded.
+
     p.segment is NOT consulted: assign_segment runs in a later pipeline stage
     (cmd_segment, after cmd_enrich) and is always "" here."""
-    text = " ".join((p.description, p.case_evidence, " ".join(p.drone_models))).lower()
-    for category, keywords in _CATEGORY_KEYWORDS:
-        if any(kw in text for kw in keywords):
-            return category
+    scraped = " ".join((p.description, p.case_evidence, " ".join(p.drone_models)))
+    for text in (scraped, p.fit_reason or ""):
+        text = text.lower()
+        for category, keywords in _CATEGORY_KEYWORDS:
+            if any(re.search(rf"\b{re.escape(kw)}", text) for kw in keywords):
+                return category
     return _DEFAULT_CATEGORY
 
 

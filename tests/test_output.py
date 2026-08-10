@@ -3,6 +3,7 @@ import csv
 
 from gtm.output import (
     CONTACT_COLUMNS,
+    SheetPush,
     _open_worksheet,
     build_contact_rows,
     by_fit_score,
@@ -124,10 +125,16 @@ def test_write_csv_orders_rows_by_fit_score_descending(tmp_path):
 
 
 class FakeWorksheet:
-    def __init__(self):
+    # row_count/col_count/resize mirror the real gspread Worksheet: a tab has a
+    # fixed grid, and values.batchUpdate refuses to write outside it. Defaults are
+    # Google's own for a new tab, so a test only sets them to exercise the growth.
+    def __init__(self, rows=1000, cols=26):
         self.appended = []
         self.values = []
         self.batched = []
+        self.resized = []
+        self.row_count = rows
+        self.col_count = cols
 
     def get_all_values(self):
         return self.values
@@ -135,21 +142,121 @@ class FakeWorksheet:
     def append_rows(self, rows, value_input_option="RAW"):
         self.appended.extend(rows)
 
+    def resize(self, rows=None, cols=None):
+        grow = {k: v for k, v in (("rows", rows), ("cols", cols)) if v is not None}
+        self.resized.append(grow)
+        self.row_count = rows if rows is not None else self.row_count
+        self.col_count = cols if cols is not None else self.col_count
+
     def batch_update(self, data, value_input_option="RAW"):
+        for item in data:
+            top = int(item["range"].lstrip("A") or 1)
+            last = top + len(item["values"]) - 1
+            widest = max(len(r) for r in item["values"])
+            if last > self.row_count or widest > self.col_count:
+                raise AssertionError(
+                    f"range A{top}:{last}x{widest} exceeds grid "
+                    f"{self.row_count}x{self.col_count}"
+                )
         self.batched.extend(data)
+
+
+def written_rows(ws) -> list[list[str]]:
+    """The tab's data rows after a push, header excluded. push_to_sheet rewrites the
+    whole block in one batch_update (see its docstring), so the written block IS the
+    tab — no need to replay updates against ws.values."""
+    assert len(ws.batched) == 1, ws.batched
+    block = ws.batched[0]["values"]
+    return block[1:] if ws.batched[0]["range"] == "A1" else block
+
+
+def companies_written(ws) -> list[str]:
+    return [r[SHEET_COLUMNS.index("company")] for r in written_rows(ws)]
 
 
 def test_push_to_sheet_writes_header_once_then_rows():
     ws = FakeWorksheet()
     res = push_to_sheet([TEAL], worksheet=ws)
     assert res.added == 1
-    assert ws.appended[0] == SHEET_COLUMNS
-    assert ws.appended[1][0] == "Teal Drones"
+    assert ws.batched[0]["range"] == "A1"
+    assert ws.batched[0]["values"][0] == SHEET_COLUMNS
+    assert companies_written(ws) == ["Teal Drones"]
 
     ws2 = FakeWorksheet()
     ws2.values = [SHEET_COLUMNS]  # header already present
     push_to_sheet([TEAL], worksheet=ws2)
-    assert ws2.appended[0][0] == "Teal Drones"  # no duplicate header
+    # Header goes out on every push (stale-header fix), but only ever as row 1 —
+    # it must never be duplicated into the data block.
+    assert ws2.batched[0]["range"] == "A1"
+    assert ws2.batched[0]["values"][0] == SHEET_COLUMNS
+    assert companies_written(ws2) == ["Teal Drones"]
+
+
+def test_push_to_sheet_repairs_a_stale_short_header():
+    """A tab written before a column was added keeps its old header forever unless
+    every push rewrites it — the labels then sit over the wrong data."""
+    ws = FakeWorksheet()
+    ws.values = [SHEET_COLUMNS[:-2], TEAL.to_sheet_row()]  # header two columns short
+    push_to_sheet([], worksheet=ws)
+    assert ws.batched[0]["range"] == "A1"
+    assert ws.batched[0]["values"][0] == SHEET_COLUMNS
+
+
+def test_push_to_sheet_keeps_manual_columns_right_of_ours():
+    ws = FakeWorksheet()
+    ws.values = [SHEET_COLUMNS + ["owner", "notes"], TEAL.to_sheet_row() + ["ana", "call back"]]
+    other = TEAL.model_copy(update={"company": "NewCo", "website": "new.com", "fit_score": 10})
+    push_to_sheet([other], worksheet=ws)
+    assert ws.batched[0]["values"][0] == SHEET_COLUMNS + ["owner", "notes"]
+    teal_row = next(r for r in written_rows(ws) if r[SHEET_COLUMNS.index("company")] == "Teal Drones")
+    assert teal_row[-2:] == ["ana", "call back"]
+
+
+def test_push_to_sheet_resorts_a_tab_it_adds_nothing_to():
+    """The rows that are out of order are the OLD ones — a re-sort is worth a write
+    even when this run changes no row, or the one command that fixes the tab no-ops."""
+    ws = FakeWorksheet()
+    low = TEAL.model_copy(update={"company": "LowCo", "website": "low.com", "fit_score": 40})
+    high = TEAL.model_copy(update={"company": "HighCo", "website": "high.com", "fit_score": 90})
+    ws.values = [SHEET_COLUMNS, low.to_sheet_row(), high.to_sheet_row()]
+    res = push_to_sheet([], worksheet=ws)
+    assert (res.added, res.updated) == (0, 0)
+    assert companies_written(ws) == ["HighCo", "LowCo"]
+
+
+def test_push_to_sheet_skips_the_write_when_nothing_changed():
+    ws = FakeWorksheet()
+    high = TEAL.model_copy(update={"company": "HighCo", "website": "high.com", "fit_score": 90})
+    ws.values = [SHEET_COLUMNS, high.to_sheet_row()]
+    assert push_to_sheet([], worksheet=ws) == SheetPush(added=0, updated=0)
+    assert ws.batched == []
+
+
+def test_push_to_sheet_grows_the_grid_before_rewriting():
+    """values.batchUpdate cannot grow the sheet the way append_rows did — without a
+    resize the whole write fails with "exceeds grid limits" once the tab fills up."""
+    ws = FakeWorksheet(rows=2, cols=len(SHEET_COLUMNS))
+    rows = [
+        TEAL.model_copy(update={"company": f"Co{i}", "website": f"co{i}.com"})
+        for i in range(5)
+    ]
+    push_to_sheet(rows, worksheet=ws)
+    assert ws.resized == [{"rows": 6}]  # 5 data rows + header
+    assert len(companies_written(ws)) == 5
+
+
+def test_push_to_sheet_grows_columns_for_a_wider_manual_tab():
+    ws = FakeWorksheet(rows=100, cols=len(SHEET_COLUMNS))
+    ws.values = [SHEET_COLUMNS + ["notes"], TEAL.to_sheet_row() + ["call back"]]
+    other = TEAL.model_copy(update={"company": "NewCo", "website": "new.com", "fit_score": 10})
+    push_to_sheet([other], worksheet=ws)
+    assert ws.resized == [{"cols": len(SHEET_COLUMNS) + 1}]
+
+
+def test_push_to_sheet_leaves_a_roomy_grid_alone():
+    ws = FakeWorksheet(rows=1000, cols=26)
+    push_to_sheet([TEAL], worksheet=ws)
+    assert ws.resized == []
 
 
 def test_push_to_sheet_includes_dropped_tier3_rows():
@@ -157,8 +264,7 @@ def test_push_to_sheet_includes_dropped_tier3_rows():
     dropped = TEAL.model_copy(update={"company": "BadCo", "status": "drop", "fit_score": 12})
     res = push_to_sheet([TEAL, dropped], worksheet=ws)
     assert res.added == 2
-    pushed = [r[SHEET_COLUMNS.index("company")] for r in ws.appended[1:]]
-    assert "BadCo" in pushed
+    assert "BadCo" in companies_written(ws)
 
 
 def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
@@ -167,8 +273,8 @@ def test_push_to_sheet_writes_header_on_blank_but_nonempty_values():
     ws = FakeWorksheet()
     ws.values = [[""]]
     push_to_sheet([TEAL], worksheet=ws)
-    assert ws.appended[0] == SHEET_COLUMNS
-    assert ws.appended[1][0] == "Teal Drones"
+    assert ws.batched[0]["values"][0] == SHEET_COLUMNS
+    assert companies_written(ws) == ["Teal Drones"]
 
 
 def test_push_to_sheet_updates_row_whose_domain_already_present():
@@ -180,8 +286,7 @@ def test_push_to_sheet_updates_row_whose_domain_already_present():
     ws.values = [SHEET_COLUMNS, stale]
     res = push_to_sheet([TEAL], worksheet=ws)
     assert (res.added, res.updated) == (0, 1)
-    assert ws.appended == []
-    assert ws.batched == [{"range": "A2", "values": [TEAL.to_sheet_row()]}]
+    assert written_rows(ws) == [TEAL.to_sheet_row()]
 
 
 def test_push_to_sheet_domain_dedupe_ignores_scheme_www_and_trailing_slash():
@@ -192,15 +297,16 @@ def test_push_to_sheet_domain_dedupe_ignores_scheme_www_and_trailing_slash():
 
 
 def test_push_to_sheet_update_targets_the_matching_row_not_the_first():
-    # off-by-one guard: data_rows is 0-based and the header occupies row 1, so the
-    # nth data row is sheet row n+2. Updating the wrong row would silently
-    # overwrite a different company.
+    # Guard against refreshing the wrong company: OtherCo's row must survive the
+    # push untouched, whatever position the re-sort gives it.
     ws = FakeWorksheet()
     other = ["OtherCo", "https://otherco.com"] + [""] * (len(SHEET_COLUMNS) - 2)
     stale = ["Teal Drones", "https://tealdrones.com"] + [""] * (len(SHEET_COLUMNS) - 2)
     ws.values = [SHEET_COLUMNS, other, stale]
     push_to_sheet([TEAL], worksheet=ws)
-    assert ws.batched == [{"range": "A3", "values": [TEAL.to_sheet_row()]}]
+    rows = written_rows(ws)
+    assert TEAL.to_sheet_row() in rows
+    assert other in rows
 
 
 def test_push_to_sheet_appends_new_domains_and_updates_existing_ones():
@@ -209,8 +315,7 @@ def test_push_to_sheet_appends_new_domains_and_updates_existing_ones():
     fresh = TEAL.model_copy(update={"company": "NewCo", "website": "https://newco.com"})
     res = push_to_sheet([TEAL, fresh], worksheet=ws)
     assert (res.added, res.updated) == (1, 1)
-    assert ws.appended[0][SHEET_COLUMNS.index("company")] == "NewCo"
-    assert ws.batched[0]["range"] == "A2"
+    assert sorted(companies_written(ws)) == ["NewCo", "Teal Drones"]
 
 
 def test_push_to_sheet_no_write_calls_when_nothing_to_push():
@@ -219,6 +324,76 @@ def test_push_to_sheet_no_write_calls_when_nothing_to_push():
     res = push_to_sheet([], worksheet=ws)
     assert (res.added, res.updated) == (0, 0)
     assert ws.appended == [] and ws.batched == []
+
+
+# --- fit_score ordering on the tab itself (2026-08-05, user: "make sure that the
+# scores are descending"). by_fit_score only ordered rows WITHIN one push; every
+# push then appended below whatever was already there, so the live tab read
+# 83, 68, 52, 65, 38, 78, 70, 42 — run order, not score order.
+
+def test_push_to_sheet_sorts_new_rows_by_fit_score_descending():
+    ws = FakeWorksheet()
+    low = TEAL.model_copy(update={"company": "LowCo", "website": "https://low.com", "fit_score": 40})
+    high = TEAL.model_copy(update={"company": "HighCo", "website": "https://high.com", "fit_score": 90})
+    push_to_sheet([low, high], worksheet=ws)
+    assert companies_written(ws) == ["HighCo", "LowCo"]
+
+
+def test_push_to_sheet_resorts_rows_already_on_the_tab():
+    # The rows that need re-ordering are mostly OLD ones from earlier runs — a push
+    # that only sorts its own payload leaves the tab exactly as unsorted as it found it.
+    ws = FakeWorksheet()
+    def row(company, domain, score):
+        r = [""] * len(SHEET_COLUMNS)
+        r[SHEET_COLUMNS.index("company")] = company
+        r[SHEET_COLUMNS.index("website")] = domain
+        r[SHEET_COLUMNS.index("fit_score")] = score
+        return r
+    ws.values = [SHEET_COLUMNS, row("MidCo", "https://mid.com", "65/100"),
+                 row("TopCo", "https://top.com", "88/100")]
+    fresh = TEAL.model_copy(update={"company": "NewCo", "website": "https://newco.com",
+                                    "fit_score": 75})
+    push_to_sheet([fresh], worksheet=ws)
+    assert companies_written(ws) == ["TopCo", "NewCo", "MidCo"]
+
+
+def test_push_to_sheet_sorts_the_80_scale_by_the_number_a_reader_sees():
+    # Mixed denominators live on the same tab: a pre-budget row renders "42/80",
+    # an assembled one "38/100". Sort on the numerator, the same value
+    # by_fit_score sorts on — anything else contradicts the column as read.
+    ws = FakeWorksheet()
+    provisional = TEAL.model_copy(update={"company": "EightyCo", "website": "https://eighty.com",
+                                          "fit_score": 42, "fit_reason": "Physical fit 8/35."})
+    assembled = TEAL.model_copy(update={"company": "HundredCo", "website": "https://hundred.com",
+                                        "fit_score": 38})
+    push_to_sheet([assembled, provisional], worksheet=ws)
+    assert companies_written(ws) == ["EightyCo", "HundredCo"]
+
+
+def test_push_to_sheet_sorts_unscored_rows_last():
+    ws = FakeWorksheet()
+    blank = [""] * len(SHEET_COLUMNS)
+    blank[SHEET_COLUMNS.index("company")] = "ErrCo"
+    blank[SHEET_COLUMNS.index("website")] = "https://err.com"
+    short = ["StubCo"]  # a row that never reached the fit_score column at all
+    ws.values = [SHEET_COLUMNS, blank, short]
+    push_to_sheet([TEAL], worksheet=ws)
+    assert companies_written(ws)[0] == "Teal Drones"
+    assert [r[0] for r in written_rows(ws)[1:]] == ["ErrCo", "StubCo"]
+
+
+def test_push_to_sheet_keeps_every_existing_row_when_it_resorts():
+    # The re-sort rewrites the whole block, so a row this run knows nothing about
+    # must come back byte-identical — only its position may change.
+    ws = FakeWorksheet()
+    foreign = [""] * len(SHEET_COLUMNS)
+    foreign[SHEET_COLUMNS.index("company")] = "ForeignCo"
+    foreign[SHEET_COLUMNS.index("website")] = "https://foreign.com"
+    foreign[SHEET_COLUMNS.index("fit_score")] = "50/100"
+    foreign[SHEET_COLUMNS.index("community_signals")] = "hand-typed note"
+    ws.values = [SHEET_COLUMNS, foreign]
+    push_to_sheet([TEAL], worksheet=ws)
+    assert written_rows(ws) == [TEAL.to_sheet_row(), foreign]
 
 
 def test_push_contacts_to_sheet_updates_rows_with_existing_email():

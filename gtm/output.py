@@ -401,6 +401,46 @@ def _flush(
     return SheetPush(added=added, updated=len(updates))
 
 
+_FIT_SCORE_IDX = SHEET_COLUMNS.index("fit_score")
+
+
+def _row_fit_key(row: list[str]) -> tuple[bool, int]:
+    """Sort key for one rendered sheet row: highest fit_score first, unscored last.
+
+    Reads the rendered cell ("87/100", "42/80"), not a Prospect — rows already on
+    the tab from earlier runs are strings and nothing else. Sorts on the NUMERATOR,
+    the same number by_fit_score sorts on and the first thing a reader's eye lands
+    on in the column; comparing 42/80 against 38/100 as percentages would order the
+    column against how it reads. A blank, malformed, or missing cell sorts last —
+    same rule by_fit_score applies to fit_score=None."""
+    cell = row[_FIT_SCORE_IDX].strip() if len(row) > _FIT_SCORE_IDX else ""
+    head = cell.split("/")[0].strip()
+    try:
+        return (False, -int(head))
+    except ValueError:
+        return (True, 0)
+
+
+def _ensure_grid(ws, *, rows: int, cols: int) -> None:
+    """Grow the tab's grid to hold a `rows` x `cols` rewrite, if it doesn't already.
+
+    `append_rows` grew the sheet on its own; `values.batchUpdate` does NOT — it
+    fails the whole write with "Range ... exceeds grid limits" the moment the
+    merged block passes the tab's row or column count (1000 x 26 on a default
+    tab). push_to_sheet stopped appending on 2026-08-05, so that ceiling became
+    reachable for the first time. One resize call, only when short, and only for
+    the dimension that's short — a tab with room costs nothing.
+    """
+    have_rows, have_cols = getattr(ws, "row_count", None), getattr(ws, "col_count", None)
+    grow: dict[str, int] = {}
+    if isinstance(have_rows, int) and have_rows < rows:
+        grow["rows"] = rows
+    if isinstance(have_cols, int) and have_cols < cols:
+        grow["cols"] = cols
+    if grow:
+        ws.resize(**grow)
+
+
 def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:
     # main sheet = full funnel: every tier, drops included (tagged tier "3").
     #
@@ -410,30 +450,79 @@ def push_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:
     # pushed before a bugfix (Arcsky, live with 0 contacts) could never be
     # corrected by re-running. Refreshing keeps both properties — no clear
     # ritual, and a re-run is the fix.
+    #
+    # 2026-08-05 (user: "make sure that the scores are descending"): the whole tab
+    # is re-sorted by fit_score on every push, not just this run's own rows.
+    # by_fit_score ordered each payload correctly and then append_rows put it below
+    # everything already there, so the live tab read 83, 68, 52, 65, 38, 78, 70, 42 —
+    # eight runs each sorted internally, concatenated. Sorting only what we push
+    # cannot fix that; the rows that are out of order are the OLD ones. So the merged
+    # block (existing rows + this run's, refreshed) is sorted and rewritten whole, in
+    # one batch_update. Rows this run knows nothing about are copied through
+    # unchanged — a re-sort moves rows, it never edits or drops one — and the row
+    # count only ever grows, so no stale tail is left behind by the rewrite.
     ws = worksheet if worksheet is not None else _open_worksheet()
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)
     website_idx = SHEET_COLUMNS.index("website")
-    data_rows = existing[1:] if has_content else []
+    data_rows = [list(r) for r in existing[1:]] if has_content else []
+    # The header is rewritten on every push, not just onto an empty tab. A tab
+    # first written before a column was added to SHEET_COLUMNS keeps that stale
+    # header forever otherwise, while its data rows go out at the current width —
+    # every label past the added column then sits over the wrong data, and no
+    # re-run can correct it. Cells the header has beyond SHEET_COLUMNS are kept:
+    # they name manual columns someone added to the right of ours, which the
+    # rows-padding below already preserves.
+    old_header = list(existing[0]) if has_content and existing else []
+    header = list(SHEET_COLUMNS) + old_header[len(SHEET_COLUMNS):]
 
-    # +2: get_all_values is 0-based and row 1 is the header. First occurrence
-    # wins if the sheet somehow already holds a domain twice.
+    # First occurrence wins if the sheet somehow already holds a domain twice.
     row_by_domain: dict[str, int] = {}
     for i, row in enumerate(data_rows):
         if len(row) > website_idx:
-            row_by_domain.setdefault(_normalize_domain(row[website_idx]), i + 2)
+            row_by_domain.setdefault(_normalize_domain(row[website_idx]), i)
 
-    updates: list[tuple[int, list]] = []
-    appends: list[list] = []
+    added = updated = 0
     for p in prospects:
         row = p.to_sheet_row()
-        row_no = row_by_domain.get(_normalize_domain(p.website))
-        if row_no is None:
-            appends.append(row)
+        # Deliberately NOT registering the appended row's domain here: two prospects
+        # in one push that share a website (a holding company and its brand) each get
+        # their own row, exactly as before this function learned to sort. Merging them
+        # would silently drop one company from the tab.
+        i = row_by_domain.get(_normalize_domain(p.website))
+        if i is None:
+            data_rows.append(row)
+            added += 1
         else:
-            updates.append((row_no, row))
+            data_rows[i] = row
+            updated += 1
 
-    return _flush(ws, updates, appends, header=None if has_content else SHEET_COLUMNS)
+    ordered = sorted(data_rows, key=_row_fit_key)  # stable: ties keep their tab order
+    # A push that changes no row can still owe the tab a rewrite: the re-sort and the
+    # header refresh above apply to rows this run never touched. Returning early on
+    # `not added and not updated` meant the one command that fixes a mis-ordered tab
+    # did nothing whenever the fix was all that was left to do. Skip the write only
+    # when there is genuinely nothing to say — order already right, header already
+    # right, or an empty tab with no prospects to put on it.
+    if (
+        not added
+        and not updated
+        and ordered == data_rows
+        and (header == old_header or not has_content)
+    ):
+        return SheetPush(added=0, updated=0)
+    if not ordered and not has_content:
+        return SheetPush(added=0, updated=0)
+
+    # Every row goes out the same width, or the rewrite leaves a tail of the row that
+    # used to sit at that position: a short legacy row landing where a full one was
+    # would blank nothing to its right, and the old cells would read as its own.
+    width = max([len(header)] + [len(r) for r in ordered])
+    body = [header] + ordered
+    body = [r + [""] * (width - len(r)) for r in body]
+    _ensure_grid(ws, rows=len(body), cols=width)
+    ws.batch_update([{"range": "A1", "values": body}], value_input_option="RAW")
+    return SheetPush(added=added, updated=updated)
 
 
 def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> SheetPush:

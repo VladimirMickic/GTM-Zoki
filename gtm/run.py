@@ -391,6 +391,28 @@ def missing_trigger_phrase(prospects: list[Prospect]) -> list[str]:
     ]
 
 
+def missing_community_signals(prospects: list[Prospect]) -> list[str]:
+    """Passers whose community_signals is empty, in run order.
+
+    2026-08-05 (user, on the live Sheet: "make sure there are community signals ...
+    I do not see them in the sheet"): every community_signals cell on the tab was
+    blank, across eight runs, and no stage ever said a word. Empty is a legitimate
+    verdict — the gpt-4o-mini pass returns candidates, not a decision, and Claude is
+    supposed to drop the ones that describe a setup that works — but the cost is not
+    visible at the point it happens: gtm/draft.py::has_researched_pain then has
+    nothing to build a pain block from, and the sheet column reads as if nobody
+    looked. Reported at signals (still free to fix by re-running enrich or doing the
+    research by hand) and again at output (last chance before it ships).
+
+    Drops and errors are excluded: a drop is never drafted, and an errored company's
+    empty enrichment is already reported as the error it is."""
+    return [
+        p.company
+        for p in prospects
+        if p.status in ("priority", "keep") and not p.community_signals
+    ]
+
+
 def merge_drafts(prospects: list[Prospect], raw: dict) -> None:
     for p in prospects:
         tiers = raw.get(p.company)
@@ -604,6 +626,16 @@ def cmd_signals(run: str, signals_json: str) -> None:
                 "blanked at output. Add a short noun phrase per company to the signals "
                 "JSON and re-run this stage."
             )
+        no_pain = missing_community_signals(prospects)
+        if no_pain:
+            print(
+                f"warning: no community_signals for {', '.join(no_pain)} — the draft's "
+                "pain block has no researched operator complaint to stand on and the "
+                "sheet column ships blank. Either re-run `enrich` (the candidate funnel "
+                "prints pooled/returned/kept counts per company, so it says which stage "
+                "emptied) or research the pain by hand (reddit-find) and add "
+                "community_signals to the signals JSON, then re-run this stage."
+            )
         _print_cost_summary(run)
 
 
@@ -780,6 +812,13 @@ def cmd_output(run: str, dry_run: bool = False) -> None:
                 f"{undrafted} contact row{'s have' if undrafted > 1 else ' has'} no email copy — "
                 "their persona tier was added after the draft stage ran; re-run "
                 f"`python -m gtm.run segment {run}` and redraft to cover them"
+            )
+        no_pain = missing_community_signals(prospects)
+        if no_pain:
+            print(
+                f"{len(no_pain)} row{'s' if len(no_pain) > 1 else ''} will ship with an "
+                f"empty community_signals cell: {', '.join(no_pain)} — no researched "
+                "operator pain behind the draft. Re-run `enrich`/`signals` to fill it."
             )
         blocked = unrendered_summary(prospects)
         if blocked:

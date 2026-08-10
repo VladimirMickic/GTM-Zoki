@@ -84,11 +84,24 @@ First prospect: **Teal Drones** (tealdrones.com).
    by this stage — don't assume the pipeline runs it. News is deduped by event and video
    hosts are dropped (5 slots used to hold 2 stories), and a datable result is stamped
    `[date: YYYY-MM]` from its URL/prose — so a dated source can't be written up `[undated]`.
+   Community signals are candidates, never a verdict — Claude re-judges them at `signals`.
+   A passer that ends up with none is named by both `signals` and `output`
+   (`missing_community_signals`): the draft loses its whole pain block, so fill it by
+   re-running `enrich` or researching by hand (reddit-find), don't ship the blank cell.
    The recency marker must be EXACTLY `[stale]`/`[undated]`; `gtm.run signals` rejects the
    file otherwise (`gtm/draft.py::bad_markers`). Dead/guessed domains are dropped by a free
    DNS preflight before any scrape is spent (`gtm/run.py::resolves`).
 6. **Output** — CSV → Google Sheet (service account) + HubSpot (company/contact upsert,
-   `gtm/hubspot.py`, gated on `HUBSPOT_SERVICE_KEY`).
+   `gtm/hubspot.py`, gated on `HUBSPOT_SERVICE_KEY`). Every push re-sorts the WHOLE
+   Companies tab by fit_score descending, existing rows included — `by_fit_score` only
+   ever ordered one payload, so eight appended runs read as run order (2026-08-05, user).
+   That rewrite replaced `append_rows`, which silently did two other jobs: it grew the
+   tab's grid (`_ensure_grid` now does, or a full tab fails the whole write with "exceeds
+   grid limits") and it wrote the header (now rewritten on EVERY push, so a tab older than
+   a `SHEET_COLUMNS` addition stops labelling the wrong data; header cells past our columns
+   are kept, they name someone's manual columns). A push that adds and updates nothing
+   still writes when the sort or the header is stale — the one command that repairs the tab
+   used to no-op precisely when repair was all that was left to do.
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.

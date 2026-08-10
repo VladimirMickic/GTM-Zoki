@@ -99,6 +99,48 @@ def test_why_fit_renders_slash_100_once_budget_has_been_folded_in():
     assert p.to_sheet_row()[SHEET_COLUMNS.index("fit_score")] == "70/100"
 
 
+def test_fit_denominator_reads_the_rubric_lines_before_the_marker():
+    # 2026-08-05: re-pushing run us-drone-20, scored on the pre-two-phase rubric
+    # (Physical 30 / Field-deployed 25 / Volume-price 15 / Procurement 15 /
+    # Displacement 15), rendered Anduril as "83/80" — a score bigger than its own
+    # denominator — because that generation writes no "Budget & procurement" line.
+    p = Prospect(
+        company="Anduril", website="https://anduril.com", status="priority", fit_score=83,
+        fit_reason=(
+            "Physical fit 22/30 — inferred: airframe ~12-15 lbs, backpack-portable.\n"
+            "Field-deployed 25/25 — description confirms military field use.\n"
+            "Volume/price 13/15 — $87M task order.\n"
+            "Procurement & compliance 13/15 — us_made_ndaa confirmed.\n"
+            "Displacement opportunity 10/15 — carbon fibre storage box, no named incumbent."
+        ),
+    )
+    assert p.fit_denominator == 100
+    assert p.to_sheet_row()[SHEET_COLUMNS.index("fit_score")] == "83/100"
+    assert p.why_fit.startswith("Strong fit (83/100)")
+
+
+def test_fit_denominator_sums_the_current_rubrics_pre_and_post_budget():
+    scrape_phase = (
+        "Physical fit 30/35 — published dims.\n"
+        "Field-deployed 20/25 — mixed evidence.\n"
+        "Displacement 12/20 — generic case."
+    )
+    p = Prospect(company="X", website="https://x.com", fit_score=62, fit_reason=scrape_phase)
+    assert p.fit_denominator == 80  # 35 + 25 + 20, the pre-enrich scale
+    assembled = scrape_phase + "\nBudget & procurement 15/20 — [field: headcount] 51-200."
+    assert p.model_copy(update={"fit_reason": assembled}).fit_denominator == 100
+
+
+def test_fit_denominator_ignores_scores_quoted_inside_the_reasoning():
+    # Only the dimension header counts. A rubric line that quotes another score in its
+    # prose ("...against the 22/30 physical band...") must not inflate the total.
+    p = Prospect(
+        company="X", website="https://x.com", fit_score=48,
+        fit_reason="Physical fit 8/35 — weaker than the 22/30 seen on comparable airframes.",
+    )
+    assert p.fit_denominator == 80
+
+
 # --- 2026-07-29 (user, live-Sheet review): "why_fit / fit_reason / buying_signals /
 # key_news feel weak and vague". Root cause was not the analysis — it was this file
 # trimming the decisive part out of every one of those cells on the way to the Sheet.

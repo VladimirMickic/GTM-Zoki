@@ -74,6 +74,11 @@ _FIT_REASON_LINE_MAX_CHARS = 400
 # Trailing sentence punctuation is tolerated after it: Claude routinely writes
 # "... (source) [undated]." and an anchored-to-$ match silently fell through to
 # the plain trimmer, deleting source, date and marker together (us-drone-20).
+# One scored rubric line: "<Dimension name> <points>/<out-of> — <reasoning>". Anchored
+# at line start and allowed no digits before the score, so only the dimension header
+# matches — a "22/30" quoted later inside the reasoning prose cannot add to the total.
+_RUBRIC_LINE_RE = re.compile(r"^[^\d\n]+?\d+\s*/\s*(\d+)\b", re.MULTILINE)
+
 _RECENCY_MARKER_RE = re.compile(r"\s*(\[[^\[\]]{1,20}\])\s*[.;,]?\s*$")
 _SOURCE_TAIL_RE = re.compile(r"\s\(([^()]{1,120})\)\s*[.;,]?\s*$")
 
@@ -280,7 +285,19 @@ class Prospect(BaseModel):
         One helper, two renderers. `why_fit` and `to_sheet_row` both write the score into
         the SAME sheet row, two columns apart; when each carried its own copy of this test
         they disagreed, and a drop row read "30/100" next to "Dropped (30/80)". Any future
-        third renderer must call this rather than re-derive it."""
+        third renderer must call this rather than re-derive it.
+
+        2026-08-05: the rubric's own line totals are read first, and the marker is the
+        fallback. Re-pushing run us-drone-20 (scored before the two-phase rewrite, on a
+        Physical 30 / Field-deployed 25 / Volume-price 15 / Procurement 15 / Displacement
+        15 rubric) rendered Anduril as "83/80" — a score larger than its denominator —
+        because that generation has no "Budget & procurement" line to find. Summing what
+        each line was actually scored out of dates nothing and survives the next rubric
+        change too; the marker still decides when the lines are absent or don't total a
+        scale we recognise (a single-line fit_reason, an error row, a hand-edit)."""
+        total = sum(int(m.group(1)) for m in _RUBRIC_LINE_RE.finditer(self.fit_reason or ""))
+        if total in (80, 100):
+            return total
         return 100 if "Budget & procurement" in (self.fit_reason or "") else 80
 
     @property

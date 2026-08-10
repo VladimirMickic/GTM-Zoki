@@ -273,6 +273,58 @@ def test_infer_category_falls_back_to_gear_level_not_mission_level():
     assert _infer_category(p) == "drone case foam"
 
 
+def test_infer_category_also_scans_fit_reason():
+    """2026-08-05: run us-drone-20 pushed American Robotics and Firestorm Labs to the
+    live Sheet with an EMPTY description — the scrape yielded case_evidence and
+    nothing else — so neither matched a bucket and both queried the hobbyist
+    fallback, returning r/dji foam chatter that Claude then correctly dropped. Their
+    segment was never missing, it was one field over: fit_reason (written by the fit
+    stage, which runs before enrich) says "tactical/defense use ... USAF contract"
+    for Firestorm and "enterprise industrial buyer" for American Robotics."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="Firestorm Labs",
+        website="https://f.com",
+        description="",
+        case_evidence="The Tempest 50 breaks down into a hard case.",
+        fit_reason="Field-deployed 24/25 — explicitly single-operator field deployment, "
+        "tactical/defense use, reinforced by a USAF contract.",
+    )
+    assert _infer_category(p) == "tactical drone case"
+
+
+def test_infer_category_scraped_copy_outranks_fit_reason():
+    """fit_reason is a rescue pass, not extra text in the first one. Buckets are
+    ordered narrow-to-broad and first match wins, so a passing phrase in the rubric
+    ("enterprise industrial buyer", earlier in the list) must not beat the company's
+    own copy — a defense maker stays in the defense bucket."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="Hoverfly",
+        website="https://h.com",
+        description="Tethered drones for military and security applications.",
+        fit_reason="Volume/price 10/15 — implies an enterprise industrial buyer.",
+    )
+    assert _infer_category(p) == "tactical drone case"
+
+
+def test_infer_category_keyword_must_start_a_word():
+    """"gis" is a real bucket keyword and "logistics" contains it. Harmless while only
+    marketing copy was scanned; fit_reason (added 2026-08-05) is rubric prose about
+    fielding and logistics, so a mid-word match would route defense companies to the
+    survey/mapping bucket."""
+    from gtm.enrich import _infer_category
+
+    p = Prospect(
+        company="X",
+        website="https://x.com",
+        description="Drones for contested logistics resupply.",
+    )
+    assert _infer_category(p) == "drone case foam"
+
+
 def test_infer_category_ignores_the_ndaa_flag_entirely():
     """NDAA compliance must not steer the query at all — same description, both
     flag values, same category."""
