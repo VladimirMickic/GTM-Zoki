@@ -4,6 +4,10 @@ Free-tier **demo** of a LeadGrow-style GTM orchestrator, built in Claude Code (r
 Goal: find drone manufacturers → check if their drones fit our cases → enrich → find the
 right contact → push top prospects to a Google Sheet. Full plan: `docs/PLAN.md`.
 
+`AGENTS.md` mirrors this file. Same rules, same facts; only the name of the orchestrating
+agent differs. Change one, change the other in the same commit — the two have drifted
+before, and a stale mirror is worse than no mirror.
+
 ## Persona
 When a session starts in this repo, greet as **Zoki**. The greeting MUST contain both
 of these (even under caveman/terse mode — compress wording, never drop a fact):
@@ -101,7 +105,18 @@ First prospect: **Teal Drones** (tealdrones.com).
    a `SHEET_COLUMNS` addition stops labelling the wrong data; header cells past our columns
    are kept, they name someone's manual columns). A push that adds and updates nothing
    still writes when the sort or the header is stale — the one command that repairs the tab
-   used to no-op precisely when repair was all that was left to do.
+   used to no-op precisely when repair was all that was left to do. The Contacts tab
+   rewrites its header on every push too (2026-08-10) — it kept the write-once behaviour
+   when the Companies tab lost it, and `CONTACT_COLUMNS` has gained a column since, so a
+   tab older than that addition labelled every column past `company` wrongly with no way
+   to correct it. It is still appended, not re-sorted; rows written under the old layout
+   keep their old cell order, only the labels are repaired. The HubSpot push applies the
+   Contacts tab's two contact ship gates as well (2026-08-10) — they were written for the
+   sheet and never reached the CRM, so a contact whose draft the sheet blanked still landed
+   in HubSpot as a real record with a jobtitle and a primary-company association. Now
+   `contact_verified == "no"` is skipped and logged (a CRM row has no `qa_flag` to warn in,
+   and anyone can sequence off it), and a shared inbox keeps its address but loses
+   name/title/LinkedIn (team@ is deliverable, but it is not that person's mailbox).
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.

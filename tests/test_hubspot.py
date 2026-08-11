@@ -348,6 +348,156 @@ def test_push_to_hubspot_stamps_company_name_on_every_contact(monkeypatch, tmp_p
         assert entry["properties"]["company"] == "Teal Drones"
 
 
+# ---------- ship gates: the Sheet's two contact gates apply to the CRM too ----------
+
+
+def test_split_contacts_skips_unverified_contact():
+    """contact_verified="no" means the SERP never tied that person to that company.
+
+    gtm/output.py blanks their draft and flags the row; nothing stopped the same
+    person reaching HubSpot as a real contact record, with a jobtitle and a primary-
+    company association (the us-drone-19 case: a Darley employee filed under Harris
+    Aerial). The CRM has no qa_flag column to warn in, so the row is skipped.
+    """
+    prospect = _prospect(
+        contact_name="Jane Doe; John Smith",
+        contact_title="VP Engineering; CTO",
+        contact_emails="jane@tealdrones.com (verified); john@tealdrones.com (verified)",
+        contact_verified="no; yes",
+    )
+
+    contacts = hs._split_contacts(prospect)
+
+    assert [c["email"] for c in contacts] == ["john@tealdrones.com"]
+
+
+def test_split_contacts_pushes_when_verification_is_unknown():
+    """An empty or short contact_verified means the run predates the check — no
+    data, so no block. Same rule gtm/output.py applies to the same field."""
+    no_data = _prospect(
+        contact_name="Jane Doe; John Smith",
+        contact_emails="jane@tealdrones.com (verified); john@tealdrones.com (verified)",
+        contact_verified="",
+    )
+    short = _prospect(
+        contact_name="Jane Doe; John Smith",
+        contact_emails="jane@tealdrones.com (verified); john@tealdrones.com (verified)",
+        contact_verified="yes",  # only covers index 0
+    )
+
+    assert len(hs._split_contacts(no_data)) == 2
+    assert len(hs._split_contacts(short)) == 2
+
+
+def test_split_contacts_keeps_index_alignment_past_a_skipped_contact():
+    """The parallel fields are index-matched, so a skip must not shift the rest —
+    John's title/linkedin must still be John's after Jane is dropped."""
+    prospect = _prospect(
+        contact_name="Jane Doe; John Smith",
+        contact_title="VP Engineering; CTO",
+        contact_linkedin="https://linkedin.com/in/janedoe; https://linkedin.com/in/johnsmith",
+        contact_emails="jane@tealdrones.com (verified); john@tealdrones.com (verified)",
+        contact_verified="no; yes",
+    )
+
+    (john,) = hs._split_contacts(prospect)
+
+    assert john["jobtitle"] == "CTO"
+    assert john["linkedin"] == "https://linkedin.com/in/johnsmith"
+
+
+def test_split_contacts_strips_person_fields_from_a_shared_inbox():
+    """A role address is deliverable and sometimes the only way in, so it is kept —
+    but it is not that person's mailbox. Writing "Maxwell Wang" onto team@ asserts
+    something false in the CRM and makes a "Hi Maxwell" sequence look addressed."""
+    prospect = _prospect(
+        contact_name="Maxwell Wang",
+        contact_title="Head of Procurement",
+        contact_linkedin="https://linkedin.com/in/maxwellwang",
+        contact_emails="team@paladindrones.io (verified)",
+    )
+
+    (contact,) = hs._split_contacts(prospect)
+
+    assert contact["email"] == "team@paladindrones.io"
+    assert contact["company"] == "Teal Drones"
+    assert contact["firstname"] == ""
+    assert contact["lastname"] == ""
+    assert contact["jobtitle"] == ""
+    assert contact["linkedin"] == ""
+
+
+def test_push_to_hubspot_never_upserts_an_unverified_contact(monkeypatch, tmp_path):
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "svc-key")
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append((url, json))
+        if url.endswith("/companies/search"):
+            return FakeResponse(200, {"results": []})
+        if url.endswith("/companies"):
+            return FakeResponse(201, {"id": "company-1"})
+        if url.endswith("/contacts/batch/upsert"):
+            return FakeResponse(200, {"results": [{"id": "contact-2"}]})
+        if url.endswith("/associations/contact/company/batch/create"):
+            return FakeResponse(201, {})
+        raise AssertionError(f"unexpected POST {url}")
+
+    monkeypatch.setattr(hs.requests, "post", fake_post)
+
+    prospect = _prospect(
+        contact_name="Jane Doe; John Smith",
+        contact_emails="jane@tealdrones.com (verified); john@tealdrones.com (verified)",
+        contact_verified="no; yes",
+    )
+    count = hs.push_to_hubspot([prospect], error_log=tmp_path / "errors.log")
+
+    assert count == 1
+    contact_call = next(c for c in calls if c[0].endswith("/contacts/batch/upsert"))
+    inputs = contact_call[1]["inputs"]
+    assert [i["id"] for i in inputs] == ["john@tealdrones.com"]
+    # and the skipped person is not associated with the company either
+    assoc_call = next(
+        c for c in calls if c[0].endswith("/associations/contact/company/batch/create")
+    )
+    assert [i["from"]["id"] for i in assoc_call[1]["inputs"]] == ["contact-2"]
+
+
+def test_push_to_hubspot_all_contacts_unverified_still_pushes_the_company(
+    monkeypatch, tmp_path
+):
+    """The company is our own research and stays. Only the people are in doubt, so
+    the contact + association calls are skipped entirely — same shape as the
+    every-email-is-a-miss case."""
+    monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "svc-key")
+    calls = []
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        calls.append(url)
+        if url.endswith("/companies/search"):
+            return FakeResponse(200, {"results": []})
+        if url.endswith("/companies"):
+            return FakeResponse(201, {"id": "company-1"})
+        raise AssertionError(f"unexpected POST {url} — no contact/association expected")
+
+    monkeypatch.setattr(hs.requests, "post", fake_post)
+    error_log = tmp_path / "errors.log"
+
+    count = hs.push_to_hubspot(
+        [_prospect(contact_verified="no")], error_log=error_log
+    )
+
+    assert count == 1
+    assert calls == [
+        "https://api.hubapi.com/crm/v3/objects/companies/search",
+        "https://api.hubapi.com/crm/v3/objects/companies",
+    ]
+    # a silent skip is how the sheet gate's absence went unnoticed here in the
+    # first place — say what was dropped and why
+    log = error_log.read_text()
+    assert "Jane Doe" in log and "unverified" in log
+
+
 def test_push_to_hubspot_sends_city_country_only_when_present(monkeypatch, tmp_path):
     monkeypatch.setenv("HUBSPOT_SERVICE_KEY", "svc-key")
     calls = []

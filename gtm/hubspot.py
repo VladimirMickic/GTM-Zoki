@@ -75,7 +75,7 @@ def _parse_email(entry: str) -> str | None:
     return email
 
 
-def _split_contacts(prospect: Prospect) -> list[dict]:
+def _split_contacts(prospect: Prospect, error_log: Path | None = None) -> list[dict]:
     """Reconstructs one contact per index from the CONTACT_FIELD_SEP-joined
     parallel strings (contact_name/contact_title/contact_linkedin/contact_emails).
     Skips any index whose email entry is a miss — never push a contact to
@@ -84,13 +84,35 @@ def _split_contacts(prospect: Prospect) -> list[dict]:
     Carries the company name onto every contact: the association call sets the
     contact-to-company *relationship*, but HubSpot's built-in `company`
     ("Company Name") contact property is separate and stays blank unless written
-    explicitly, which is why pushed contacts read as company-less in list views."""
+    explicitly, which is why pushed contacts read as company-less in list views.
+
+    Applies the same two contact ship gates gtm/output.py applies to the Contacts
+    tab (2026-08-10) — they were written for the sheet and never reached here, so
+    a person the sheet refused to draft for still landed in the CRM as a real
+    record with a jobtitle and a primary-company association:
+
+    - `contact_verified == "no"` (nothing in the SERP ties that person to that
+      company — run us-drone-19 put a Darley employee on Harris Aerial): SKIPPED.
+      The sheet can blank the copy and warn in `qa_flag`; a CRM record has no
+      such column, and anyone can sequence off it. Empty or short
+      contact_verified means the run predates the check — no data, no block,
+      same rule as the sheet.
+    - a shared inbox (`gtm/output.py::role_local_part`): KEPT but stripped of
+      name/title/LinkedIn. It is deliverable and sometimes the only way in, so
+      dropping it loses a real route — but team@ is not Maxwell Wang's mailbox,
+      and writing his name on it makes a "Hi Maxwell" send look addressed.
+    """
+    from gtm.output import role_local_part  # single source of truth for the role list
+
     names = prospect.contact_name.split(CONTACT_FIELD_SEP) if prospect.contact_name else []
     titles = prospect.contact_title.split(CONTACT_FIELD_SEP) if prospect.contact_title else []
     linkedins = (
         prospect.contact_linkedin.split(CONTACT_FIELD_SEP) if prospect.contact_linkedin else []
     )
     emails = prospect.contact_emails.split(CONTACT_FIELD_SEP) if prospect.contact_emails else []
+    verifieds = (
+        prospect.contact_verified.split(CONTACT_FIELD_SEP) if prospect.contact_verified else []
+    )
 
     contacts = []
     for i, name in enumerate(names):
@@ -98,14 +120,25 @@ def _split_contacts(prospect: Prospect) -> list[dict]:
         email = _parse_email(email_entry)
         if not email:
             continue
-        first, _, last = name.strip().partition(" ")
+        name = name.strip()
+        if i < len(verifieds) and verifieds[i].strip().lower() == "no":
+            if error_log is not None:
+                _log_error(
+                    error_log,
+                    "split_contacts",
+                    f"skipped unverified contact {name or email} at "
+                    f"{prospect.company} — nothing ties them to that company",
+                )
+            continue
+        first, _, last = name.partition(" ")
+        role = role_local_part(email)
         contacts.append(
             {
                 "email": email,
-                "firstname": first,
-                "lastname": last,
-                "jobtitle": titles[i].strip() if i < len(titles) else "",
-                "linkedin": linkedins[i].strip() if i < len(linkedins) else "",
+                "firstname": "" if role else first,
+                "lastname": "" if role else last,
+                "jobtitle": "" if role else (titles[i].strip() if i < len(titles) else ""),
+                "linkedin": "" if role else (linkedins[i].strip() if i < len(linkedins) else ""),
                 "company": prospect.company.strip(),
             }
         )
@@ -272,6 +305,8 @@ def push_to_hubspot(prospects: list[Prospect], *, error_log: Path = ERROR_LOG) -
 
     Does NOT filter by `status` — the caller decides which prospects to pass
     (mirrors gtm/output.py's push_to_sheet receiving an already-relevant list).
+    It DOES filter contacts: an unverified person is skipped and a shared inbox
+    loses its person fields, per _split_contacts' ship gates.
 
     Missing `HUBSPOT_SERVICE_KEY` makes the whole call a no-op returning 0. Any
     HTTP failure for one prospect is logged to error_log and that prospect is
@@ -295,7 +330,7 @@ def push_to_hubspot(prospects: list[Prospect], *, error_log: Path = ERROR_LOG) -
         if company_id is None:
             continue
 
-        contacts = _split_contacts(prospect)
+        contacts = _split_contacts(prospect, error_log)
         contact_ids = _upsert_contacts(headers, contacts, error_log)
         _associate_contacts(headers, contact_ids, company_id, error_log)
 
