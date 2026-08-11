@@ -382,21 +382,39 @@ def _open_worksheet(name: str = "Companies"):
 
 
 def _flush(
-    ws, updates: list[tuple[int, list]], appends: list[list], header: list[str] | None = None
+    ws,
+    updates: list[tuple[int, list]],
+    appends: list[list],
+    header: list[str] | None = None,
+    *,
+    rewrite_header: bool = False,
 ) -> SheetPush:
     """One batch_update for every in-place row refresh, one append_rows for the
     new ones — two API calls per tab regardless of row count (the Sheets free
-    quota is per-request, see docs/tools/gspread.md). `header` is prepended to
-    the append batch when the tab is still empty, and is not counted as added."""
-    if updates:
-        ws.batch_update(
-            [{"range": f"A{row_no}", "values": [row]} for row_no, row in updates],
-            value_input_option="RAW",
-        )
+    quota is per-request, see docs/tools/gspread.md).
+
+    `header` goes onto an empty tab by being prepended to the append batch. On a
+    tab that already has content, `rewrite_header` sends it as row 1 of the same
+    batch_update instead — a rewrite, so a header written before a column was
+    added to the column list stops labelling the wrong data (2026-08-10; the
+    Companies tab's fix, see push_to_sheet). Either way the header is never
+    counted in `added` or `updated`: it is not a contact.
+    """
+    batch = [{"range": f"A{row_no}", "values": [row]} for row_no, row in updates]
+    if rewrite_header and header:
+        batch.insert(0, {"range": "A1", "values": [list(header)]})
+    if batch:
+        # Only the column count can be short here: append_rows still grows the row
+        # count on its own, but neither it nor batch_update grows columns, and the
+        # header rewrite is the first write on this tab that can be wider than the
+        # grid it lands in.
+        _ensure_grid(ws, rows=1, cols=max(len(row) for item in batch for row in item["values"]))
+        ws.batch_update(batch, value_input_option="RAW")
     added = len(appends)
     if appends:
+        prepend = header and not rewrite_header
         ws.append_rows(
-            ([list(header)] + appends) if header else appends, value_input_option="RAW"
+            ([list(header)] + appends) if prepend else appends, value_input_option="RAW"
         )
     return SheetPush(added=added, updated=len(updates))
 
@@ -538,6 +556,16 @@ def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> Shee
     existing = ws.get_all_values()
     has_content = any(cell.strip() for row in existing for cell in row)
     data_rows = existing[1:] if has_content else []
+    # The header is rewritten on every push, not just onto an empty tab — the same
+    # fix the Companies tab got on 2026-08-10, which this tab did not. CONTACT_COLUMNS
+    # has gained columns since a live tab was first written (2a70b3d inserted `website`
+    # at index 1), and a tab that keeps its original header labels every column past
+    # that point wrongly while its rows go out at the current width. No re-run could
+    # correct it, because the header was only ever written onto an empty tab. Cells the
+    # header has beyond CONTACT_COLUMNS are manual columns someone added to the right
+    # of ours — kept, exactly as push_to_sheet keeps them.
+    old_header = list(existing[0]) if has_content and existing else []
+    header = list(CONTACT_COLUMNS) + old_header[len(CONTACT_COLUMNS):]
     email_idx = CONTACT_COLUMNS.index("contact_email")
     linkedin_idx = CONTACT_COLUMNS.index("contact_linkedin")
     company_idx = CONTACT_COLUMNS.index("company")
@@ -574,4 +602,4 @@ def push_contacts_to_sheet(prospects: list[Prospect], *, worksheet=None) -> Shee
         else:
             updates.append((row_no, values))
 
-    return _flush(ws, updates, appends, header=None if has_content else CONTACT_COLUMNS)
+    return _flush(ws, updates, appends, header=header, rewrite_header=has_content)

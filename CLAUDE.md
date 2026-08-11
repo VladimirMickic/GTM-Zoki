@@ -101,7 +101,12 @@ First prospect: **Teal Drones** (tealdrones.com).
    a `SHEET_COLUMNS` addition stops labelling the wrong data; header cells past our columns
    are kept, they name someone's manual columns). A push that adds and updates nothing
    still writes when the sort or the header is stale — the one command that repairs the tab
-   used to no-op precisely when repair was all that was left to do.
+   used to no-op precisely when repair was all that was left to do. The Contacts tab
+   rewrites its header on every push too (2026-08-10) — it kept the write-once behaviour
+   when the Companies tab lost it, and `CONTACT_COLUMNS` has gained a column since, so a
+   tab older than that addition labelled every column past `company` wrongly with no way
+   to correct it. It is still appended, not re-sorted; rows written under the old layout
+   keep their old cell order, only the labels are repaired.
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.

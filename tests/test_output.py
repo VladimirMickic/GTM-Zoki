@@ -170,6 +170,22 @@ def written_rows(ws) -> list[list[str]]:
     return block[1:] if ws.batched[0]["range"] == "A1" else block
 
 
+def contacts_header_written(ws) -> list[str] | None:
+    """The header this push sent to row 1 via batch_update, or None if it sent none.
+    push_contacts_to_sheet rewrites the header on every push to a tab that already
+    has content (2026-08-10), so it rides in the same batch as the row refreshes."""
+    for item in ws.batched:
+        if item["range"] == "A1":
+            return item["values"][0]
+    return None
+
+
+def contacts_updated_rows(ws) -> list[list[str]]:
+    """Just the in-place contact-row refreshes — the header rewrite at A1 excluded,
+    since it is not a contact and is not counted in SheetPush.updated either."""
+    return [row for item in ws.batched if item["range"] != "A1" for row in item["values"]]
+
+
 def companies_written(ws) -> list[str]:
     return [r[SHEET_COLUMNS.index("company")] for r in written_rows(ws)]
 
@@ -410,8 +426,8 @@ def test_push_contacts_to_sheet_updates_rows_with_existing_email():
     pushed_names = [r[CONTACT_COLUMNS.index("contact_name")] for r in ws.appended]
     assert "Blake Resnick" not in pushed_names
     assert "Manoj Mohan" in pushed_names
-    assert ws.batched[0]["range"] == "A2"
-    assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
+    assert [i["range"] for i in ws.batched if i["range"] != "A1"] == ["A2"]
+    assert contacts_updated_rows(ws)[0][CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
 
 
 def test_push_contacts_to_sheet_matches_on_linkedin_when_email_is_a_miss():
@@ -424,7 +440,7 @@ def test_push_contacts_to_sheet_matches_on_linkedin_when_email_is_a_miss():
     ws.values = [CONTACT_COLUMNS, existing_row]
     res = push_contacts_to_sheet([MULTI], worksheet=ws)
     assert (res.added, res.updated) == (2, 1)
-    assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Steven Butler"
+    assert contacts_updated_rows(ws)[0][CONTACT_COLUMNS.index("contact_name")] == "Steven Butler"
 
 
 def test_push_contacts_to_sheet_matches_a_row_that_gained_an_email_later():
@@ -440,7 +456,7 @@ def test_push_contacts_to_sheet_matches_a_row_that_gained_an_email_later():
     ws.values = [CONTACT_COLUMNS, existing_row]
     res = push_contacts_to_sheet([MULTI], worksheet=ws)
     assert (res.added, res.updated) == (2, 1)
-    updated = ws.batched[0]["values"][0]
+    updated = contacts_updated_rows(ws)[0]
     assert updated[CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
     assert updated[CONTACT_COLUMNS.index("contact_email")] == "blake@tealdrones.com"
 
@@ -455,7 +471,7 @@ def test_push_contacts_to_sheet_matches_on_name_when_a_row_has_neither_id():
     ws.values = [CONTACT_COLUMNS, existing_row]
     res = push_contacts_to_sheet([MULTI], worksheet=ws)
     assert (res.added, res.updated) == (2, 1)
-    assert ws.batched[0]["values"][0][CONTACT_COLUMNS.index("contact_name")] == "Manoj Mohan"
+    assert contacts_updated_rows(ws)[0][CONTACT_COLUMNS.index("contact_name")] == "Manoj Mohan"
 
 
 def test_contact_columns_locked_order():
@@ -754,7 +770,7 @@ def test_write_contacts_csv_drops_are_excluded(tmp_path):
     assert "BadCo" not in body
 
 
-def test_push_contacts_to_sheet_writes_header_once_then_rows():
+def test_push_contacts_to_sheet_prepends_the_header_only_to_an_empty_tab():
     ws = FakeWorksheet()
     res = push_contacts_to_sheet([MULTI], worksheet=ws)
     assert res.added == 3
@@ -773,6 +789,43 @@ def test_push_contacts_to_sheet_writes_header_on_blank_but_nonempty_values():
     push_contacts_to_sheet([MULTI], worksheet=ws)
     assert ws.appended[0] == CONTACT_COLUMNS
     assert ws.appended[1][CONTACT_COLUMNS.index("contact_name")] == "Blake Resnick"
+
+
+# --- 2026-08-10: the Companies tab's stale-header fix, ported to the Contacts tab.
+# CONTACT_COLUMNS has gained columns since this tab was first written (2a70b3d
+# inserted `website` at index 1), and the header was only ever written onto an empty
+# tab — so a tab older than that commit labels every column past `company` wrongly,
+# forever, while its rows go out at the current width.
+
+
+def test_push_contacts_to_sheet_rewrites_a_stale_header():
+    ws = FakeWorksheet()
+    stale = [c for c in CONTACT_COLUMNS if c != "website"]  # the pre-2a70b3d header
+    ws.values = [stale, ["OtherCo"] + [""] * (len(stale) - 1)]
+    push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert contacts_header_written(ws) == CONTACT_COLUMNS
+
+
+def test_push_contacts_to_sheet_keeps_manual_columns_past_our_header():
+    ws = FakeWorksheet()
+    ws.values = [CONTACT_COLUMNS + ["owner", "notes"], ["OtherCo"]]
+    push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert contacts_header_written(ws) == CONTACT_COLUMNS + ["owner", "notes"]
+
+
+def test_push_contacts_to_sheet_does_not_count_the_header_rewrite_as_an_update():
+    ws = FakeWorksheet()
+    ws.values = [CONTACT_COLUMNS]  # header only, no contacts on the tab yet
+    res = push_contacts_to_sheet([MULTI], worksheet=ws)
+    assert contacts_header_written(ws) == CONTACT_COLUMNS
+    assert (res.added, res.updated) == (3, 0)
+
+
+def test_push_contacts_to_sheet_grows_the_grid_for_a_wider_header():
+    ws = FakeWorksheet(rows=1000, cols=len(CONTACT_COLUMNS) - 2)
+    ws.values = [CONTACT_COLUMNS[:-2], ["OtherCo"]]
+    push_contacts_to_sheet([MULTI], worksheet=ws)  # batch_update would raise if not grown
+    assert ws.col_count >= len(CONTACT_COLUMNS)
 
 
 # --- 2026-07-28: ship gate. Run test-batch-1 pushed literal {{tokens}} to the live
