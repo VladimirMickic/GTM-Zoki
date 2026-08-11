@@ -123,8 +123,11 @@ ROLE_LOCAL_PARTS = frozenset(
 )
 
 
-def _role_local_part(email: str) -> str:
-    """The shared-inbox local part of `email`, or "" if it looks personal."""
+def role_local_part(email: str) -> str:
+    """The shared-inbox local part of `email`, or "" if it looks personal.
+
+    Public because gtm/hubspot.py gates on it too — this repo's recurring bug is
+    the same rule living in two places and only one of them getting fixed."""
     local = email.split("@", 1)[0].strip().lower()
     return local if local in ROLE_LOCAL_PARTS else ""
 
@@ -240,7 +243,7 @@ def build_contact_rows(prospect: Prospect, *, config=None, run_mates=()) -> list
         # A shared inbox is deliverable and sometimes the only way in, so this warns
         # rather than blanking the copy — whether to send a first-name email to a
         # staffed inbox is a human call, and the flag is how they get to make it.
-        role = _role_local_part(email) if email else ""
+        role = role_local_part(email) if email else ""
         if role:
             flags.append(f"role-address: {role}@ is a shared inbox, not {first or name}")
         if flags:

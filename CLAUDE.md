@@ -110,7 +110,13 @@ First prospect: **Teal Drones** (tealdrones.com).
    when the Companies tab lost it, and `CONTACT_COLUMNS` has gained a column since, so a
    tab older than that addition labelled every column past `company` wrongly with no way
    to correct it. It is still appended, not re-sorted; rows written under the old layout
-   keep their old cell order, only the labels are repaired.
+   keep their old cell order, only the labels are repaired. The HubSpot push applies the
+   Contacts tab's two contact ship gates as well (2026-08-10) — they were written for the
+   sheet and never reached the CRM, so a contact whose draft the sheet blanked still landed
+   in HubSpot as a real record with a jobtitle and a primary-company association. Now
+   `contact_verified == "no"` is skipped and logged (a CRM row has no `qa_flag` to warn in,
+   and anyone can sequence off it), and a shared inbox keeps its address but loses
+   name/title/LinkedIn (team@ is deliverable, but it is not that person's mailbox).
 - **Learn** — read `data/feedback.jsonl` → Claude proposes ICP/denylist edits, but only from
   entries the user actually gave (`Feedback.origin == "user"`, `gtm/learn.py`); Claude's own
   session/smoke-test notes are context, never grounds for an edit on their own.
