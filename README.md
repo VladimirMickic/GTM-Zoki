@@ -158,5 +158,9 @@ Two rules that are easy to break and expensive to break:
   `gtm/draft.py` and `gtm/enrich.py` silently drifted from them and were deleted. If you
   need a manual one-off, run the CLI stage on a one-company run.
 
+New here? [`docs/OVERVIEW.md`](docs/OVERVIEW.md) is the plain-language tour — what this is,
+every module explained, why each design decision went the way it did, and how scoring works.
+Read it before the two below, which assume you already know the shape of the thing.
+
 Full working agreement for the LLM orchestrator: [`CLAUDE.md`](CLAUDE.md). Build plan and
 slice order: [`docs/PLAN.md`](docs/PLAN.md).
