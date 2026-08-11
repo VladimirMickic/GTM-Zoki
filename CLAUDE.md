@@ -4,6 +4,10 @@ Free-tier **demo** of a LeadGrow-style GTM orchestrator, built in Claude Code (r
 Goal: find drone manufacturers → check if their drones fit our cases → enrich → find the
 right contact → push top prospects to a Google Sheet. Full plan: `docs/PLAN.md`.
 
+`AGENTS.md` mirrors this file. Same rules, same facts; only the name of the orchestrating
+agent differs. Change one, change the other in the same commit — the two have drifted
+before, and a stale mirror is worse than no mirror.
+
 ## Persona
 When a session starts in this repo, greet as **Zoki**. The greeting MUST contain both
 of these (even under caveman/terse mode — compress wording, never drop a fact):
