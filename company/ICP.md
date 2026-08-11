@@ -157,10 +157,18 @@ Displacement-opportunity scoring must cite case_evidence:
 
 | Band | Evidence |
 |---|---|
-| 17–20 | **In-house enclosure** — they tool and warehouse their own housing (drone-in-a-box, dock, base station, self-molded hard case). Highest value: a recurring OEM line, not a one-off swap, and no incumbent vendor defending the account |
-| 14–17 | Named rugged-case competitor (Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer) — a concrete displacement target with researchable weaknesses |
-| 10–13 | Soft bag / generic case / no case at all — a real upgrade opportunity, but no named incumbent to research |
-| 0–4 | case_evidence still unknown after the web hunt — write "unknown"; never award midpoint points for missing evidence |
+| 17-20 | **In-house enclosure** — they tool and warehouse their own housing (drone-in-a-box, dock, base station, self-molded hard case). Highest value: a recurring OEM line, not a one-off swap, and no incumbent vendor defending the account |
+| 13-16 | Named rugged-case competitor (Pelican, Nanuk, SKB, Hardigg, Seahorse, Explorer) — a concrete displacement target with researchable weaknesses |
+| 8-12 | Soft bag / backpack / generic case / no case at all — a real upgrade opportunity, but no named incumbent to research |
+| 0-7 | case_evidence still unknown after the web hunt — write "unknown"; never award midpoint points for missing evidence |
+
+Bands rebanded 2026-08-11 to close two defects that had been live since the rubric was
+written. **They overlapped**: in-house was 17–20 and named competitor 14–17, so a 17
+satisfied both and the two highest-value verdicts were indistinguishable at the boundary.
+**They also left a dead zone**: nothing covered 5-9, so a judge with a mid-strength verdict
+had no legal band to land in and either rounded to 10 or fell to 4. The four bands now
+partition 0-20 exactly, and the 0-7 bottom matches the other three criteria's bottom band.
+No score moves except at the seams; the ordering and the reasoning behind it are unchanged.
 
 An in-house enclosure outranks a named competitor because the sale replaces a
 manufacturing cost centre (tooling, molds, spares, a revision every time the airframe
